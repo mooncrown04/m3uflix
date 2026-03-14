@@ -301,6 +301,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
+
+
 // Bu kısmı App.tsx içinde güncelle
 const [savedUrl, setSavedUrl] = useState<string | null>(() => {
   try {
@@ -810,29 +812,46 @@ useEffect(() => {
   }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, landingFocus, settingsFocus, playlistUrl]);
 
 const handleUrlSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!playlistUrl) return;
+    if (e) e.preventDefault();
+    
+    // Güvenlik Kilidi: Eğer zaten yükleniyorsa veya URL boşsa durdur
+    if (isLoading) return;
+    const targetUrl = playlistUrl || savedUrl; // playlistUrl yoksa hafızadakini kullan
+    if (!targetUrl) return;
 
     setIsLoading(true);
     setError(null);
+
     try {
-      // --- ESKİ FETCH YERİNE NATIVE HTTP ---
+      // --- NATIVE HTTP İSTEĞİ ---
       const options = {
-        url: playlistUrl,
-        connectTimeout: 10000,
-        readTimeout: 10000
+        url: targetUrl,
+        connectTimeout: 15000, // TV Box yavaş olabilir, 15 saniye verelim
+        readTimeout: 15000
       };
 
       const response = await CapacitorHttp.get(options);
       
-      // CapacitorHttp'de 'ok' yerine 'status' kontrol edilir
       if (response.status !== 200) {
         throw new Error(`Hata: ${response.status} - Liste indirilemedi.`);
       }
 
-      const content = response.data; // Veri zaten text/string olarak gelir
+      const content = response.data; 
       const parsed = parseM3U(content);
+      
+      // Kanalları set et ve hafızaya kaydet
       setChannels(parsed);
+      localStorage.setItem('m3u_url', targetUrl);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+
+    } catch (err: any) {
+      console.error("Yükleme Hatası:", err);
+      setError(err.message || "Liste yüklenirken bir hata oluştu.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
       // --- EPG İÇİN DE AYNI DÜZENLEME (OPSİYONEL) ---
       if (epgUrl) {
