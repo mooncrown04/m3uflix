@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw } from 'lucide-react';
+import { CapacitorHttp } from '@capacitor/core';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -771,50 +772,55 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, landingFocus, settingsFocus, playlistUrl]);
 
-  const handleUrlSubmit = async (e?: React.FormEvent) => {
+const handleUrlSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!playlistUrl) return;
 
     setIsLoading(true);
     setError(null);
     try {
-      // Load Playlist
-      const response = await fetch(playlistUrl).catch(err => {
-        if (err.message === 'Failed to fetch') {
-          throw new Error('CORS Hatası: Bu URL\'ye erişim tarayıcı tarafından engellendi. Lütfen CORS destekleyen bir URL kullanın veya proxy deneyin.');
-        }
-        throw err;
-      });
-      if (!response.ok) throw new Error(`Hata: ${response.status} ${response.statusText}`);
-      const content = await response.text();
+      // --- ESKİ FETCH YERİNE NATIVE HTTP ---
+      const options = {
+        url: playlistUrl,
+        connectTimeout: 10000,
+        readTimeout: 10000
+      };
+
+      const response = await CapacitorHttp.get(options);
+      
+      // CapacitorHttp'de 'ok' yerine 'status' kontrol edilir
+      if (response.status !== 200) {
+        throw new Error(`Hata: ${response.status} - Liste indirilemedi.`);
+      }
+
+      const content = response.data; // Veri zaten text/string olarak gelir
       const parsed = parseM3U(content);
       setChannels(parsed);
 
-      // Load EPG if URL provided
+      // --- EPG İÇİN DE AYNI DÜZENLEME (OPSİYONEL) ---
       if (epgUrl) {
         try {
-          const epg = await fetchAndParseEPG(epgUrl);
-          setEpgData(epg);
-          localStorage.setItem('epg_url', epgUrl);
+          const epgRes = await CapacitorHttp.get({ url: epgUrl });
+          if (epgRes.status === 200) {
+            // EPG parser'ın nasıl çalıştığına bağlı olarak epgRes.data kullanın
+            setEpgData(epgRes.data);
+            localStorage.setItem('epg_url', epgUrl);
+          }
         } catch (epgErr) {
-          console.error('EPG load failed:', epgErr);
+          console.error('EPG yükleme hatası:', epgErr);
         }
       }
 
       if (parsed.length > 0) {
-        // Save to localStorage
         localStorage.setItem('m3u_url', playlistUrl);
         localStorage.removeItem('m3u_deleted');
         setSavedUrl(playlistUrl);
-        
-        setShowSuccess(true);
-        setNavContext('browse');
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else {
-        setError('Bu oynatma listesinde kanal bulunamadı.');
+        setNavContext('browse'); // Başarılıysa browse moduna geç
       }
-    } catch (err) {
-      setError('Oynatma listesi yüklenirken hata oluştu. URL\'yi veya CORS ayarlarını kontrol edin.');
+      
+    } catch (err: any) {
+      console.error('Liste yüklenirken hata:', err);
+      setError(err.message || 'Bir hata oluştu.');
     } finally {
       setIsLoading(false);
     }
