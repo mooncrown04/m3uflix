@@ -1,0 +1,38 @@
+name: Android Debug APK Build
+
+on:
+  push:
+    branches: [ main ] # Kod main branchine gelince çalışır
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Java Kurulumu
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Flutter Kurulumu
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x' # En güncel sürümü kullanır
+          channel: 'stable'
+
+      - name: Paketleri Getir
+        run: flutter pub get
+
+      - name: Debug APK Üret
+        run: flutter build apk --debug
+
+      - name: APK'yı Yükle (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
