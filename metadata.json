@@ -1,0 +1,5 @@
+{
+  "name": "M3U Stream Player",
+  "description": "A modern, high-performance web-based M3U playlist player for IPTV and live streams.",
+  "requestFramePermissions": []
+}
