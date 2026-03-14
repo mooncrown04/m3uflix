@@ -301,13 +301,38 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
-  const [savedUrl, setSavedUrl] = useState<string | null>(() => {
+// Bu kısmı App.tsx içinde güncelle
+const [savedUrl, setSavedUrl] = useState<string | null>(() => {
+  try {
     const saved = localStorage.getItem('m3u_url');
-    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
-    if (saved) return saved;
-    if (isDeleted) return null;
+    // Eğer daha önce kaydedilmiş bir link varsa onu kullan
+    if (saved && saved.startsWith('http')) return saved;
+    
+    // Eğer silinmişse ama biz yine de varsayılanla başlasın istiyorsak:
+    return DEFAULT_M3U_URL; 
+  } catch (e) {
     return DEFAULT_M3U_URL;
-  });
+  }
+});
+
+useEffect(() => {
+  // Uygulama açıldığında eğer kayıtlı URL varsa ve liste henüz boşsa
+  if (savedUrl && channels.length === 0 && !isLoading && !error) {
+    setPlaylistUrl(savedUrl);
+    
+    // Küçük bir gecikme (1 saniye) TV Box'ın kendine gelmesini sağlar
+    const timer = setTimeout(() => {
+       // Eğer handleUrlSubmit parametre almıyorsa direkt çağır
+       // Eğer e.preventDefault() bekliyorsa içini boş geçebiliriz
+       handleUrlSubmit(); 
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }
+}, [savedUrl, channels.length, isLoading, error]); 
+// Bağımlılık dizisine bunları eklemek daha güvenlidir
+
+
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
     const saved = localStorage.getItem('recently_watched');
@@ -333,7 +358,7 @@ export default function App() {
 
   useEffect(() => {
     if (settingsContentRef.current) {
-      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      settingsContentRef.current.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [activeSettingsTab]);
 
@@ -342,9 +367,14 @@ export default function App() {
   const epgInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+   if (!themeColor) return;
+
     document.documentElement.style.setProperty('--theme-color', themeColor);
-    localStorage.setItem('theme_color', themeColor);
     
+    // LocalStorage yazmadan önce kontrol: Değer zaten aynıysa boşuna yazma
+    if (localStorage.getItem('theme_color') !== themeColor) {
+      localStorage.setItem('theme_color', themeColor);
+    }
     // Update theme-color meta tag
     let metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (!metaThemeColor) {
@@ -355,14 +385,21 @@ export default function App() {
     (metaThemeColor as HTMLMetaElement).content = themeColor;
   }, [themeColor]);
 
+ // 3. Şehir bilgisini kaydet (Sadece değişirse)
   useEffect(() => {
-    localStorage.setItem('weather_city', weatherCity);
+    if (weatherCity && localStorage.getItem('weather_city') !== weatherCity) {
+      localStorage.setItem('weather_city', weatherCity);
+    }
   }, [weatherCity]);
 
+// 4. Son izlenenleri kaydet (Sadece liste güncellenirse)
   useEffect(() => {
-    localStorage.setItem('recently_watched', JSON.stringify(recentlyWatched));
+    // Boş liste için boşuna yazma yapma
+    if (recentlyWatched.length > 0) {
+      localStorage.setItem('recently_watched', JSON.stringify(recentlyWatched));
+    }
   }, [recentlyWatched]);
-
+  
   // Group channels by category
   const groupedChannels = useMemo(() => {
     const filtered = channels.filter(channel => 
