@@ -1,9 +1,7 @@
-name: Android Debug APK Build
+name: React to Android APK
 
 on:
   push:
-    branches: [ main ] # Kod main branchine gelince çalışır
-  pull_request:
     branches: [ main ]
 
 jobs:
@@ -13,26 +11,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Java Kurulumu
+      - name: Node.js Kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bağımlılıkları Yükle
+        run: npm install
+
+      - name: Web Build Al
+        run: npm run build
+
+      - name: Capacitor ile Android'e Çevir
+        run: |
+          npm install @capacitor/cli @capacitor/core @capacitor/android
+          npx cap init M3UFLIX com.mooncrown.m3uflix --web-dir dist
+          npx cap add android
+          npx cap copy android
+
+      - name: Java ve Android SDK Kurulumu
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Flutter Kurulumu
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.x' # En güncel sürümü kullanır
-          channel: 'stable'
+      - name: APK Derle (Gradle)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-      - name: Paketleri Getir
-        run: flutter pub get
-
-      - name: Debug APK Üret
-        run: flutter build apk --debug
-
-      - name: APK'yı Yükle (Artifact)
+      - name: APK Dosyasını Kaydet
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: m3uflix-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
