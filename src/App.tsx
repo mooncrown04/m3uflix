@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw } from 'lucide-react';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -192,6 +192,57 @@ const Logo = () => {
   );
 };
 
+const WeatherWidget = ({ city, themeColor }: { city: string, themeColor: string }) => {
+  const [weather, setWeather] = useState<{ temp: number, code: number } | null>(null);
+
+  useEffect(() => {
+    const fetchWeather = async () => {
+      try {
+        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
+        const geoData = await geoRes.json();
+        if (geoData.results && geoData.results.length > 0) {
+          const { latitude, longitude } = geoData.results[0];
+          const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
+          const weatherData = await weatherRes.json();
+          setWeather({
+            temp: Math.round(weatherData.current_weather.temperature),
+            code: weatherData.current_weather.weathercode
+          });
+        }
+      } catch (err) {
+        console.error('Weather fetch failed:', err);
+      }
+    };
+
+    fetchWeather();
+    const interval = setInterval(fetchWeather, 1800000);
+    return () => clearInterval(interval);
+  }, [city]);
+
+  const getEmoji = (code: number) => {
+    if (code === 0) return '☀️';
+    if (code >= 1 && code <= 3) return '🌤️';
+    if (code >= 45 && code <= 48) return '🌫️';
+    if (code >= 51 && code <= 67) return '🌧️';
+    if (code >= 71 && code <= 77) return '❄️';
+    if (code >= 80 && code <= 82) return '🌦️';
+    if (code >= 95 && code <= 99) return '⛈️';
+    return '🌡️';
+  };
+
+  if (!weather) return null;
+
+  return (
+    <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md mr-4">
+      <span className="text-xl">{getEmoji(weather.code)}</span>
+      <div className="flex flex-col leading-none">
+        <span style={{ color: themeColor }} className="text-sm font-black italic">{weather.temp}°C</span>
+        <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-wider">{city}</span>
+      </div>
+    </div>
+  );
+};
+
 const DigitalClock = ({ themeColor }: { themeColor: string }) => {
   const [time, setTime] = useState(new Date());
 
@@ -208,8 +259,11 @@ const DigitalClock = ({ themeColor }: { themeColor: string }) => {
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const year = date.getFullYear();
-    const dayName = date.toLocaleDateString('tr-TR', { weekday: 'long' });
-    return `${day}.${month}.${year} ${dayName}`;
+    return `${day}.${month}.${year}`;
+  };
+
+  const getDayName = (date: Date) => {
+    return date.toLocaleDateString('tr-TR', { weekday: 'long' });
   };
 
   return (
@@ -223,9 +277,14 @@ const DigitalClock = ({ themeColor }: { themeColor: string }) => {
       <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-[0.2em] mt-0.5 opacity-80">
         {formatDate(time)}
       </div>
+      <div className="text-[10px] font-black text-white uppercase tracking-widest mt-1 drop-shadow-lg">
+        {getDayName(time)}
+      </div>
     </div>
   );
 };
+
+const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
 
 export default function App() {
   const [channels, setChannels] = useState<M3UChannel[]>([]);
@@ -241,13 +300,20 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
-  const [savedUrl, setSavedUrl] = useState<string | null>(() => localStorage.getItem('m3u_url'));
+  const [savedUrl, setSavedUrl] = useState<string | null>(() => {
+    const saved = localStorage.getItem('m3u_url');
+    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
+    if (saved) return saved;
+    if (isDeleted) return null;
+    return DEFAULT_M3U_URL;
+  });
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
+  const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
 
   const featuredChannel = useMemo(() => {
     if (channels.length === 0) return null;
@@ -259,7 +325,16 @@ export default function App() {
   const [activeCol, setActiveCol] = useState(0);
   const [navContext, setNavContext] = useState<'landing' | 'browse' | 'player' | 'settings'>('landing');
   const [landingFocus, setLandingFocus] = useState(0); // 0: input, 1: submit, 2: upload
-  const [settingsFocus, setSettingsFocus] = useState(0); // 0: landscape, 1: portrait, 2: clear memory, 3: clear playlist, 4: close, 5-9: colors
+  const [settingsFocus, setSettingsFocus] = useState(0); 
+  const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
+  const [settingsArea, setSettingsArea] = useState<'tabs' | 'content'>('tabs');
+  const settingsContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (settingsContentRef.current) {
+      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [activeSettingsTab]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -268,7 +343,20 @@ export default function App() {
   useEffect(() => {
     document.documentElement.style.setProperty('--theme-color', themeColor);
     localStorage.setItem('theme_color', themeColor);
+    
+    // Update theme-color meta tag
+    let metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (!metaThemeColor) {
+      metaThemeColor = document.createElement('meta');
+      (metaThemeColor as HTMLMetaElement).name = "theme-color";
+      document.head.appendChild(metaThemeColor);
+    }
+    (metaThemeColor as HTMLMetaElement).content = themeColor;
   }, [themeColor]);
+
+  useEffect(() => {
+    localStorage.setItem('weather_city', weatherCity);
+  }, [weatherCity]);
 
   useEffect(() => {
     localStorage.setItem('recently_watched', JSON.stringify(recentlyWatched));
@@ -419,19 +507,26 @@ export default function App() {
         switch (e.key) {
           case 'ArrowDown':
             e.preventDefault();
-            setLandingFocus(prev => Math.min(3, prev + 1));
+            if (landingFocus === 0 || landingFocus === 4) setLandingFocus(1);
+            else if (landingFocus === 1) setLandingFocus(3);
+            else if (landingFocus === 2) setLandingFocus(3);
             break;
           case 'ArrowUp':
             e.preventDefault();
-            setLandingFocus(prev => Math.max(0, prev - 1));
+            if (landingFocus === 3) setLandingFocus(1);
+            else if (landingFocus === 1) setLandingFocus(0);
+            else if (landingFocus === 2) setLandingFocus(0);
             break;
           case 'ArrowRight':
             e.preventDefault();
-            if (landingFocus === 0 || landingFocus === 1) setLandingFocus(2);
+            if (landingFocus === 0) setLandingFocus(4);
+            else if (landingFocus === 4) setLandingFocus(2);
+            else if (landingFocus === 1) setLandingFocus(2);
             break;
           case 'ArrowLeft':
             e.preventDefault();
-            if (landingFocus === 2) setLandingFocus(0);
+            if (landingFocus === 2) setLandingFocus(4);
+            else if (landingFocus === 4) setLandingFocus(0);
             break;
           case 'Enter':
             if (landingFocus === 0) {
@@ -442,6 +537,10 @@ export default function App() {
               handleUrlSubmit();
             } else if (landingFocus === 3) {
               fileInputRef.current?.click();
+            } else if (landingFocus === 4) {
+              setPlaylistUrl('');
+              setEpgUrl('');
+              setError(null);
             }
             break;
         }
@@ -449,65 +548,143 @@ export default function App() {
       }
 
       if (navContext === 'settings') {
+        const isMobile = window.innerWidth < 768;
+        
         switch (e.key) {
           case 'ArrowRight':
             e.preventDefault();
-            if (settingsFocus === 0) setSettingsFocus(1);
-            else if (settingsFocus >= 5 && settingsFocus < 9) setSettingsFocus(prev => prev + 1);
+            if (settingsArea === 'tabs') {
+              if (isMobile) {
+                setActiveSettingsTab(prev => (prev + 1) % 3);
+              } else {
+                setSettingsArea('content');
+                setSettingsFocus(0);
+              }
+            } else {
+              // Internal navigation for colors in Görünüm tab
+              if (activeSettingsTab === 0 && settingsFocus >= 0 && settingsFocus < 4) {
+                setSettingsFocus(prev => prev + 1);
+              } else if (activeSettingsTab === 0 && settingsFocus === 5) {
+                setSettingsFocus(6);
+              }
+            }
             break;
           case 'ArrowLeft':
             e.preventDefault();
-            if (settingsFocus === 1) setSettingsFocus(0);
-            else if (settingsFocus > 5) setSettingsFocus(prev => prev - 1);
+            if (settingsArea === 'tabs') {
+              if (isMobile) {
+                setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
+              }
+            } else {
+              // Internal navigation for colors
+              if (activeSettingsTab === 0 && settingsFocus > 0 && settingsFocus <= 4) {
+                setSettingsFocus(prev => prev - 1);
+              } else if (activeSettingsTab === 0 && settingsFocus === 6) {
+                setSettingsFocus(5);
+              } else {
+                setSettingsArea('tabs');
+              }
+            }
             break;
           case 'ArrowDown':
             e.preventDefault();
-            if (settingsFocus === 4) setSettingsFocus(5);
-            else if (settingsFocus >= 5 && settingsFocus <= 9) setSettingsFocus(0);
-            else if (settingsFocus === 0 || settingsFocus === 1) {
-              setSettingsFocus(savedUrl ? 2 : 3);
-            } else if (settingsFocus === 2) {
-              setSettingsFocus(3);
+            if (settingsArea === 'tabs') {
+              if (isMobile) {
+                setSettingsArea('content');
+                setSettingsFocus(0);
+              } else {
+                setActiveSettingsTab(prev => (prev + 1) % 3);
+              }
+            } else {
+              if (activeSettingsTab === 0) {
+                if (settingsFocus <= 4) setSettingsFocus(5);
+                else if (settingsFocus === 5 || settingsFocus === 6) setSettingsFocus(7); // Close button
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(2); // Close button
+              } else if (activeSettingsTab === 2) {
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(2); // Close button
+              }
             }
             break;
           case 'ArrowUp':
             e.preventDefault();
-            if (settingsFocus === 0 || settingsFocus === 1) setSettingsFocus(5);
-            else if (settingsFocus >= 5 && settingsFocus <= 9) setSettingsFocus(4);
-            else if (settingsFocus === 3) {
-              setSettingsFocus(savedUrl ? 2 : 0);
-            } else if (settingsFocus === 2) {
-              setSettingsFocus(0);
+            if (settingsArea === 'tabs') {
+              if (!isMobile) {
+                setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
+              }
+            } else {
+              if (activeSettingsTab === 0) {
+                if (settingsFocus === 7) setSettingsFocus(5);
+                else if (settingsFocus === 5 || settingsFocus === 6) setSettingsFocus(0);
+                else if (settingsFocus >= 0 && settingsFocus <= 4) setSettingsArea('tabs');
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 2) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 0) setSettingsArea('tabs');
+              } else if (activeSettingsTab === 2) {
+                if (settingsFocus === 2) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 0) setSettingsArea('tabs');
+              }
             }
             break;
           case 'Enter':
-            if (settingsFocus === 0) setPosterOrientation('landscape');
-            else if (settingsFocus === 1) setPosterOrientation('portrait');
-            else if (settingsFocus >= 5 && settingsFocus <= 9) {
-              const colors = ['#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
-              setThemeColor(colors[settingsFocus - 5]);
+            if (settingsArea === 'tabs') {
+              setSettingsArea('content');
+              setSettingsFocus(0);
+            } else {
+              if (activeSettingsTab === 0) {
+                if (settingsFocus >= 0 && settingsFocus <= 4) {
+                  const colors = ['#dc2626', '#2563eb', '#16a34a', '#9333ea', '#ea580c'];
+                  setThemeColor(colors[settingsFocus]);
+                } else if (settingsFocus === 5) setPosterOrientation('landscape');
+                else if (settingsFocus === 6) setPosterOrientation('portrait');
+                else if (settingsFocus === 7) {
+                  setShowSettings(false);
+                  setNavContext('browse');
+                }
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 0) {
+                  localStorage.removeItem('m3u_deleted');
+                  localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+                  setSavedUrl(DEFAULT_M3U_URL);
+                  setPlaylistUrl(DEFAULT_M3U_URL);
+                  setShowSettings(false);
+                  setChannels([]);
+                } else if (settingsFocus === 1) {
+                  localStorage.removeItem('m3u_url');
+                  localStorage.removeItem('epg_url');
+                  localStorage.setItem('m3u_deleted', 'true');
+                  setSavedUrl(null);
+                  setEpgUrl('');
+                  setEpgData(null);
+                  setChannels([]);
+                  setPlaylistUrl('');
+                  setShowSettings(false);
+                  setNavContext('landing');
+                } else if (settingsFocus === 2) {
+                  setShowSettings(false);
+                  setNavContext('browse');
+                }
+              } else if (activeSettingsTab === 2) {
+                if (settingsFocus === 0) {
+                  // Weather input focus handled by input itself or we can just let it be
+                } else if (settingsFocus === 1) {
+                  localStorage.clear();
+                  window.location.reload();
+                } else if (settingsFocus === 2) {
+                  setShowSettings(false);
+                  setNavContext('browse');
+                }
+              }
             }
-            else if (settingsFocus === 2 && savedUrl) {
-              localStorage.removeItem('m3u_url');
-              localStorage.removeItem('epg_url');
-              setSavedUrl(null);
-              setEpgUrl('');
-              setEpgData(null);
-              setChannels([]);
-              setPlaylistUrl('');
-              setShowSettings(false);
-              setNavContext('landing');
-            } else if (settingsFocus === 3) {
-              localStorage.removeItem('m3u_url');
-              localStorage.removeItem('epg_url');
-              setSavedUrl(null);
-              setEpgUrl('');
-              setEpgData(null);
-              setChannels([]);
-              setPlaylistUrl('');
-              setShowSettings(false);
-              setNavContext('landing');
-            } else if (settingsFocus === 4) {
+            break;
+          case 'Escape':
+          case 'Backspace':
+            if (settingsArea === 'content') setSettingsArea('tabs');
+            else {
               setShowSettings(false);
               setNavContext('browse');
             }
@@ -518,6 +695,27 @@ export default function App() {
 
       if (navContext === 'browse') {
         switch (e.key) {
+          case 'PageDown':
+            e.preventDefault();
+            setActiveRow(prev => Math.min(groupedChannels.length - 1, prev + 3));
+            break;
+          case 'PageUp':
+            e.preventDefault();
+            setActiveRow(prev => Math.max(-1, prev - 3));
+            break;
+          case 'Home':
+            e.preventDefault();
+            setActiveCol(0);
+            break;
+          case 'End':
+            e.preventDefault();
+            if (activeRow === -1) {
+              setActiveCol(1);
+            } else {
+              const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
+              setActiveCol(currentRowLength - 1);
+            }
+            break;
           case 'ArrowUp':
             e.preventDefault();
             if (activeRow === 0) {
@@ -581,8 +779,13 @@ export default function App() {
     setError(null);
     try {
       // Load Playlist
-      const response = await fetch(playlistUrl);
-      if (!response.ok) throw new Error('Oynatma listesi alınamadı');
+      const response = await fetch(playlistUrl).catch(err => {
+        if (err.message === 'Failed to fetch') {
+          throw new Error('CORS Hatası: Bu URL\'ye erişim tarayıcı tarafından engellendi. Lütfen CORS destekleyen bir URL kullanın veya proxy deneyin.');
+        }
+        throw err;
+      });
+      if (!response.ok) throw new Error(`Hata: ${response.status} ${response.statusText}`);
       const content = await response.text();
       const parsed = parseM3U(content);
       setChannels(parsed);
@@ -601,6 +804,7 @@ export default function App() {
       if (parsed.length > 0) {
         // Save to localStorage
         localStorage.setItem('m3u_url', playlistUrl);
+        localStorage.removeItem('m3u_deleted');
         setSavedUrl(playlistUrl);
         
         setShowSuccess(true);
@@ -721,6 +925,7 @@ export default function App() {
               />
             </div>
           )}
+          <WeatherWidget city={weatherCity} themeColor={themeColor} />
           <DigitalClock themeColor={themeColor} />
           <button 
             onClick={() => {
@@ -750,16 +955,16 @@ export default function App() {
               <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/60 to-black/80" />
             </div>
 
-            <div className="relative z-10 pt-40 md:pt-56 px-4 max-w-4xl mx-auto text-center">
+            <div className="relative z-10 pt-24 sm:pt-40 md:pt-56 px-4 max-w-4xl mx-auto text-center">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8 }}
               >
-                <h1 className="text-5xl md:text-7xl font-black mb-6 tracking-tight leading-tight">
+                <h1 className="text-3xl sm:text-5xl md:text-7xl font-black mb-6 tracking-tight leading-tight">
                   Sınırsız yayın, TV şovları ve daha fazlası.
                 </h1>
-                <p className="text-xl md:text-2xl mb-8 text-zinc-200 font-medium">
+                <p className="text-lg sm:text-xl md:text-2xl mb-8 text-zinc-200 font-medium">
                   Her yerde izleyin. İstediğiniz zaman iptal edin. İzlemeye hazır mısınız?
                 </p>
                 
@@ -768,22 +973,40 @@ export default function App() {
                   <form onSubmit={handleUrlSubmit} className="flex flex-col gap-4">
                     <div className="flex flex-col md:flex-row gap-2">
                       <div className="flex-1 flex flex-col gap-2">
-                        <input
-                          ref={urlInputRef}
-                          type="url"
-                          placeholder="M3U Oynatma Listesi URL'si"
-                          className={cn(
-                            "w-full bg-black/60 border rounded-md px-4 py-4 outline-none transition-all text-lg",
-                            landingFocus === 0 ? "ring-2" : "border-white/30"
-                          )}
-                          style={{ 
-                            borderColor: landingFocus === 0 ? themeColor : undefined,
-                            boxShadow: landingFocus === 0 ? `0 0 0 2px ${themeColor}` : undefined
-                          }}
-                          value={playlistUrl}
-                          onChange={(e) => setPlaylistUrl(e.target.value)}
-                          onFocus={() => setLandingFocus(0)}
-                        />
+                        <div className="relative flex items-center">
+                          <input
+                            ref={urlInputRef}
+                            type="url"
+                            placeholder="M3U Oynatma Listesi URL'si"
+                            className={cn(
+                              "w-full bg-black/60 border rounded-md px-4 py-4 outline-none transition-all text-lg pr-12",
+                              landingFocus === 0 ? "ring-2" : "border-white/30"
+                            )}
+                            style={{ 
+                              borderColor: landingFocus === 0 ? themeColor : undefined,
+                              boxShadow: landingFocus === 0 ? `0 0 0 2px ${themeColor}` : undefined
+                            }}
+                            value={playlistUrl}
+                            onChange={(e) => setPlaylistUrl(e.target.value)}
+                            onFocus={() => setLandingFocus(0)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlaylistUrl('');
+                              setEpgUrl('');
+                              setError(null);
+                            }}
+                            onMouseEnter={() => setLandingFocus(4)}
+                            className={cn(
+                              "absolute right-2 p-2 rounded-full transition-all",
+                              landingFocus === 4 ? "bg-white text-black scale-110" : "text-zinc-500 hover:text-white"
+                            )}
+                            title="Sıfırla"
+                          >
+                            <RefreshCw className="w-6 h-6" />
+                          </button>
+                        </div>
                         <input
                           ref={epgInputRef}
                           type="url"
@@ -864,25 +1087,25 @@ export default function App() {
                   <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent" />
                 </div>
 
-                <div className="absolute bottom-[35%] left-4 md:left-12 max-w-2xl space-y-6">
-                  <div className="flex items-center gap-2 text-red-600 font-bold tracking-widest text-sm">
-                    <Tv className="w-5 h-5 fill-current" />
+                <div className="absolute bottom-[20%] sm:bottom-[35%] left-4 md:left-12 max-w-2xl space-y-4 sm:space-y-6">
+                  <div className="flex items-center gap-2 text-red-600 font-bold tracking-widest text-xs sm:text-sm">
+                    <Tv className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
                     <span>ÖNE ÇIKAN CANLI YAYIN</span>
                   </div>
-                  <h1 className="text-5xl md:text-7xl font-black tracking-tighter uppercase italic">{featuredChannel.name}</h1>
-                  <p className="text-lg text-zinc-300 line-clamp-3 font-medium">
+                  <h1 className="text-3xl sm:text-5xl md:text-7xl font-black tracking-tighter uppercase italic line-clamp-2">{featuredChannel.name}</h1>
+                  <p className="text-sm sm:text-lg text-zinc-300 line-clamp-2 sm:line-clamp-3 font-medium">
                     {featuredChannel.group || 'Genel'} kategorisinden canlı yayın. M3UFLIX'te yüksek kaliteli yayın şu an yayında.
                   </p>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     <button 
                       onClick={() => handleChannelSelect(featuredChannel)}
                       style={{ backgroundColor: themeColor, color: 'white' }}
-                      className="hover:opacity-90 px-8 py-3 rounded-md font-bold flex items-center gap-2 transition-all text-lg active:scale-95"
+                      className="hover:opacity-90 px-6 sm:px-8 py-2 sm:py-3 rounded-md font-bold flex items-center gap-2 transition-all text-base sm:text-lg active:scale-95"
                     >
-                      <Play className="w-6 h-6 fill-current" /> Oynat
+                      <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" /> Oynat
                     </button>
-                    <button className="bg-zinc-500/50 hover:bg-zinc-500/70 text-white px-8 py-3 rounded-md font-bold flex items-center gap-2 transition-colors text-lg backdrop-blur-md">
-                      <Info className="w-6 h-6" /> Daha Fazla Bilgi
+                    <button className="bg-zinc-500/50 hover:bg-zinc-500/70 text-white px-6 sm:px-8 py-2 sm:py-3 rounded-md font-bold flex items-center gap-2 transition-colors text-base sm:text-lg backdrop-blur-md">
+                      <Info className="w-5 h-5 sm:w-6 sm:h-6" /> Detaylar
                     </button>
                   </div>
 
@@ -1001,150 +1224,289 @@ export default function App() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-0 sm:p-4"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-zinc-900 border border-white/10 p-8 rounded-2xl max-w-md w-full shadow-2xl"
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 50, opacity: 0 }}
+              className="bg-zinc-900 border-0 sm:border border-white/10 w-full h-full sm:h-auto sm:max-w-4xl sm:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden"
             >
-              <div className="flex justify-between items-center mb-8">
-                <h2 className="text-3xl font-black italic tracking-tighter uppercase">Ayarlar</h2>
-                <button 
-                  onClick={() => {
-                    setShowSettings(false);
-                    setNavContext('browse');
-                  }}
-                  onMouseEnter={() => setSettingsFocus(4)}
-                  className={cn(
-                    "p-2 rounded-full transition-colors",
-                    settingsFocus === 4 ? "bg-white text-black scale-110" : "hover:bg-white/10"
-                  )}
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              <div className="space-y-8">
-                <div className="space-y-4">
-                  <label className="text-zinc-400 text-sm font-bold uppercase tracking-widest">Tema Rengi</label>
-                  <div className="flex gap-3">
-                    {[
-                      { name: 'Kırmızı', color: '#dc2626' },
-                      { name: 'Mavi', color: '#2563eb' },
-                      { name: 'Yeşil', color: '#16a34a' },
-                      { name: 'Mor', color: '#9333ea' },
-                      { name: 'Turuncu', color: '#ea580c' }
-                    ].map((c, i) => (
-                      <button
-                        key={c.color}
-                        onClick={() => setThemeColor(c.color)}
-                        onMouseEnter={() => setSettingsFocus(5 + i)}
-                        style={{ backgroundColor: c.color }}
-                        className={cn(
-                          "w-10 h-10 rounded-full transition-all border-2",
-                          themeColor === c.color ? "border-white scale-110" : "border-transparent opacity-60 hover:opacity-100",
-                          settingsFocus === 5 + i && "ring-4 ring-white scale-125 z-10 opacity-100"
-                        )}
-                        title={c.name}
-                      />
-                    ))}
-                  </div>
+              {/* Sidebar Tabs */}
+              <div className="w-full md:w-64 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 p-4 md:p-6 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-x-visible no-scrollbar">
+                <div className="hidden md:block mb-8">
+                  <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Ayarlar</h2>
                 </div>
-
-                <div className="space-y-4">
-                  <label className="text-zinc-400 text-sm font-bold uppercase tracking-widest">Poster Görünümü</label>
-                  <div className="space-y-4">
-                  <div className="p-4 bg-zinc-800 rounded-lg border border-zinc-700">
-                    <h4 className="text-sm font-medium text-zinc-300 mb-2">Kayıtlı Liste</h4>
-                    {savedUrl ? (
-                      <div className="space-y-3">
-                        <p className="text-xs text-zinc-500 break-all bg-black/30 p-2 rounded">{savedUrl}</p>
-                        <button
-                          onClick={() => {
-                            localStorage.removeItem('m3u_url');
-                            localStorage.removeItem('epg_url');
-                            setSavedUrl(null);
-                            setEpgUrl('');
-                            setEpgData(null);
-                            setChannels([]);
-                            setPlaylistUrl('');
-                            setShowSettings(false);
-                            setNavContext('landing');
-                          }}
-                          onMouseEnter={() => setSettingsFocus(2)}
-                          className={cn(
-                            "w-full py-2 text-xs font-bold rounded transition-colors flex items-center justify-center gap-2",
-                            settingsFocus === 2 
-                              ? "bg-red-600 text-white scale-105 ring-4 ring-white" 
-                              : "bg-red-600/20 text-red-500 hover:bg-red-600/40"
-                          )}
-                        >
-                          <X className="w-3 h-3" />
-                          LİSTEYİ HAFIZADAN SİL
-                        </button>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-zinc-500 italic">Henüz kayıtlı bir URL yok.</p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <button
-                      onClick={() => setPosterOrientation('landscape')}
-                      onMouseEnter={() => setSettingsFocus(0)}
-                      className={cn(
-                        "p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3",
-                        posterOrientation === 'landscape' 
-                          ? "border-red-600 bg-red-600/10" 
-                          : "border-white/10 hover:border-white/30 bg-white/5",
-                        settingsFocus === 0 && "ring-4 ring-white scale-105 z-10"
-                      )}
-                    >
-                      <div className="w-16 h-10 bg-zinc-700 rounded border border-white/20" />
-                      <span className="font-bold">Yatay</span>
-                    </button>
-                    <button
-                      onClick={() => setPosterOrientation('portrait')}
-                      onMouseEnter={() => setSettingsFocus(1)}
-                      className={cn(
-                        "p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-3",
-                        posterOrientation === 'portrait' 
-                          ? "border-red-600 bg-red-600/10" 
-                          : "border-white/10 hover:border-white/30 bg-white/5",
-                        settingsFocus === 1 && "ring-4 ring-white scale-105 z-10"
-                      )}
-                    >
-                      <div className="w-10 h-14 bg-zinc-700 rounded border border-white/20" />
-                      <span className="font-bold">Dikey</span>
-                    </button>
-                  </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-white/10">
+                {[
+                  { id: 0, label: 'Görünüm', icon: Sun },
+                  { id: 1, label: 'Liste', icon: List },
+                  { id: 2, label: 'Genel', icon: Settings }
+                ].map((tab) => (
                   <button
+                    key={tab.id}
                     onClick={() => {
-                      localStorage.removeItem('m3u_url');
-                      localStorage.removeItem('epg_url');
-                      setSavedUrl(null);
-                      setEpgUrl('');
-                      setEpgData(null);
-                      setChannels([]);
-                      setPlaylistUrl('');
-                      setShowSettings(false);
-                      setNavContext('landing');
+                      setActiveSettingsTab(tab.id);
+                      setSettingsArea('tabs');
+                    }}
+                    onMouseEnter={() => {
+                      setActiveSettingsTab(tab.id);
+                      setSettingsArea('tabs');
                     }}
                     className={cn(
-                      "w-full py-4 rounded-xl transition-all font-bold flex items-center justify-center gap-2",
-                      settingsFocus === 3 
-                        ? "bg-red-600 text-white scale-105 ring-4 ring-white" 
-                        : "bg-white/5 hover:bg-red-600/20 hover:text-red-500"
+                      "flex-1 md:flex-none flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all whitespace-nowrap",
+                      activeSettingsTab === tab.id 
+                        ? "bg-white text-black scale-105 shadow-lg" 
+                        : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
+                      settingsArea === 'tabs' && activeSettingsTab === tab.id && "ring-2 ring-white"
                     )}
                   >
-                    <X className="w-5 h-5" /> Oynatma Listesini Temizle
+                    <tab.icon className="w-5 h-5" />
+                    <span className="text-sm md:text-base">{tab.label}</span>
                   </button>
+                ))}
+                
+                <div className="hidden md:block mt-auto pt-4">
+                  <button
+                    onClick={() => {
+                      setShowSettings(false);
+                      setNavContext('browse');
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-zinc-500 hover:bg-white/5 hover:text-white transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                    <span>Kapat</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Content Area */}
+              <div className="flex-1 flex flex-col h-full overflow-hidden">
+                <div className="md:hidden p-4 border-b border-white/5 flex justify-between items-center">
+                  <h2 className="text-xl font-black italic uppercase text-white">
+                    {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : 'Genel'}
+                  </h2>
+                  <button onClick={() => setShowSettings(false)} className="p-2 bg-white/5 rounded-full"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-10 custom-scrollbar scroll-smooth" ref={settingsContentRef}>
+                  <AnimatePresence mode="wait">
+                    {activeSettingsTab === 0 && (
+                      <motion.div 
+                        key="tab-0"
+                        initial={{ opacity: 0, y: 10 }} 
+                        animate={{ opacity: 1, y: 0 }} 
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-10"
+                      >
+                      <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                          Tema Rengi
+                        </label>
+                        <div className="flex flex-wrap gap-4">
+                          {[
+                            { name: 'Kırmızı', color: '#dc2626' },
+                            { name: 'Mavi', color: '#2563eb' },
+                            { name: 'Yeşil', color: '#16a34a' },
+                            { name: 'Mor', color: '#9333ea' },
+                            { name: 'Turuncu', color: '#ea580c' }
+                          ].map((c, i) => (
+                            <button
+                              key={c.color}
+                              onClick={() => setThemeColor(c.color)}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(i); }}
+                              style={{ backgroundColor: c.color }}
+                              className={cn(
+                                "w-12 h-12 rounded-full transition-all border-4",
+                                themeColor === c.color ? "border-white scale-110 shadow-xl" : "border-transparent opacity-40 hover:opacity-100",
+                                settingsArea === 'content' && settingsFocus === i && "ring-4 ring-white scale-125 z-10 opacity-100"
+                              )}
+                              title={c.name}
+                            />
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                          Poster Görünümü
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <button
+                            onClick={() => setPosterOrientation('landscape')}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(5); }}
+                            className={cn(
+                              "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4",
+                              posterOrientation === 'landscape' 
+                                ? "border-white bg-white/10" 
+                                : "border-white/5 hover:border-white/20 bg-white/5",
+                              settingsArea === 'content' && settingsFocus === 5 && "ring-4 ring-white scale-105 z-10"
+                            )}
+                          >
+                            <div className="w-24 h-16 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
+                            <span className="font-bold text-lg">Yatay</span>
+                          </button>
+                          <button
+                            onClick={() => setPosterOrientation('portrait')}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
+                            className={cn(
+                              "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4",
+                              posterOrientation === 'portrait' 
+                                ? "border-white bg-white/10" 
+                                : "border-white/5 hover:border-white/20 bg-white/5",
+                              settingsArea === 'content' && settingsFocus === 6 && "ring-4 ring-white scale-105 z-10"
+                            )}
+                          >
+                            <div className="w-16 h-24 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
+                            <span className="font-bold text-lg">Dikey</span>
+                          </button>
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 1 && (
+                    <motion.div 
+                      key="tab-1"
+                      initial={{ opacity: 0, y: 10 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-6"
+                    >
+                      <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Listesi Yönetimi</label>
+                        <div className="space-y-4">
+                          <button
+                            onClick={() => {
+                              localStorage.removeItem('m3u_deleted');
+                              localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+                              setSavedUrl(DEFAULT_M3U_URL);
+                              setPlaylistUrl(DEFAULT_M3U_URL);
+                              setShowSettings(false);
+                              setChannels([]);
+                            }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
+                            className={cn(
+                              "w-full text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                              settingsArea === 'content' && settingsFocus === 0 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
+                                <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 0 && "animate-spin")} />
+                              </div>
+                              <div>
+                                <div className="text-lg">Ana Linki Yükle</div>
+                                <div className="text-xs opacity-50 font-medium">Varsayılan M3U listesini geri yükler</div>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-6 h-6 opacity-30" />
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              localStorage.removeItem('m3u_url');
+                              localStorage.removeItem('epg_url');
+                              localStorage.setItem('m3u_deleted', 'true');
+                              setSavedUrl(null);
+                              setEpgUrl('');
+                              setEpgData(null);
+                              setChannels([]);
+                              setPlaylistUrl('');
+                              setShowSettings(false);
+                              setNavContext('landing');
+                            }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                            className={cn(
+                              "w-full text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                              settingsArea === 'content' && settingsFocus === 1 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
+                                <Plus className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <div className="text-lg">Yeni Link Ekle</div>
+                                <div className="text-xs opacity-50 font-medium">Mevcut listeyi siler ve kurulum ekranına döner</div>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-6 h-6 opacity-30" />
+                          </button>
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 2 && (
+                    <motion.div 
+                      key="tab-2"
+                      initial={{ opacity: 0, y: 10 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-10"
+                    >
+                      <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Hava Durumu Ayarları</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={weatherCity}
+                            onChange={(e) => setWeatherCity(e.target.value)}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
+                            className={cn(
+                              "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold",
+                              settingsArea === 'content' && settingsFocus === 0 ? "border-white ring-4 ring-white/20" : "border-white/5"
+                            )}
+                            placeholder="Şehir adı girin..."
+                          />
+                          <Cloud className="absolute right-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
+                        </div>
+                      </section>
+
+                      <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Sistem</label>
+                        <button 
+                          onClick={() => {
+                            localStorage.clear();
+                            window.location.reload();
+                          }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                          className={cn(
+                            "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
+                            settingsArea === 'content' && settingsFocus === 1 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
+                          )}
+                        >
+                          <RefreshCw className="w-6 h-6" />
+                          Tüm Belleği Temizle
+                        </button>
+                      </section>
+                    </motion.div>
+                  )}
+                  </AnimatePresence>
+
+                  {/* Universal Close Button for Mobile/Touch */}
+                  <div className="pt-10">
+                    <button 
+                      onClick={() => {
+                        setShowSettings(false);
+                        setNavContext('browse');
+                      }}
+                      onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
+                      style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : 2)) ? themeColor : undefined }}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
+                        (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : 2)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                      )}
+                    >
+                      <X className="w-6 h-6" />
+                      Ayarları Kapat
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>

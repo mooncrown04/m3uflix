@@ -113,6 +113,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, channel, epgData,
       }
 
       switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          setIsPlaying(prev => !prev);
+          break;
+        case 'f':
+        case 'F':
+          e.preventDefault();
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+              console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+            });
+          } else {
+            document.exitFullscreen();
+          }
+          break;
         case 'Escape':
         case 'Backspace':
           if (activeMenu !== 'none') {
