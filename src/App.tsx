@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw } from 'lucide-react';
-import { CapacitorHttp } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
+import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart } from 'lucide-react';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -18,6 +18,10 @@ interface ChannelRowProps {
   channels: M3UChannel[];
   onSelect: (channel: M3UChannel) => void;
   onFocus: (row: number, col: number) => void;
+  onToggleFavorite: (channelId: string) => void;
+  onDeleteChannel: (channelId: string) => void;
+  onLongPress: (channelId: string) => void;
+  favorites: string[];
   rowIndex: number;
   activeRow: number;
   activeCol: number;
@@ -26,9 +30,26 @@ interface ChannelRowProps {
   themeColor: string;
 }
 
-const ChannelRow: React.FC<ChannelRowProps> = ({ title, channels, onSelect, onFocus, rowIndex, activeRow, activeCol, orientation, previewChannelId, themeColor }) => {
+const ChannelRow: React.FC<ChannelRowProps> = ({ 
+  title, 
+  channels, 
+  onSelect, 
+  onFocus, 
+  onToggleFavorite, 
+  onDeleteChannel,
+  onLongPress,
+  favorites = [], 
+  rowIndex, 
+  activeRow, 
+  activeCol, 
+  orientation, 
+  previewChannelId, 
+  themeColor 
+}) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isActiveRow = rowIndex === activeRow;
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const [pressingId, setPressingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isActiveRow && scrollRef.current) {
@@ -42,6 +63,22 @@ const ChannelRow: React.FC<ChannelRowProps> = ({ title, channels, onSelect, onFo
       }
     }
   }, [isActiveRow, activeCol]);
+
+  const handlePressStart = (channelId: string) => {
+    setPressingId(channelId);
+    longPressTimer.current = setTimeout(() => {
+      onLongPress?.(channelId);
+      setPressingId(null);
+    }, 800);
+  };
+
+  const handlePressEnd = () => {
+    setPressingId(null);
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
 
   return (
     <div className="space-y-3 group/row relative">
@@ -63,12 +100,23 @@ const ChannelRow: React.FC<ChannelRowProps> = ({ title, channels, onSelect, onFo
           {channels.map((channel, colIndex) => {
             const isFocused = isActiveRow && colIndex === activeCol;
             const isPreviewing = isFocused && previewChannelId === channel.id;
+            const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
+            const isPressing = pressingId === channel.id;
+
+            const getCategoryBadge = () => {
+              const group = (channel.group || '').toLowerCase();
+              if (group.includes('live') || group.includes('canlı') || group.includes('tv')) return 'C';
+              if (group.includes('movie') || group.includes('film') || group.includes('sinema')) return 'F';
+              if (group.includes('series') || group.includes('dizi') || group.includes('show')) return 'D';
+              return null;
+            };
+            const badge = getCategoryBadge();
 
             return (
               <div key={channel.id} className="flex flex-col gap-2 snap-start">
                 <motion.button
                   animate={{ 
-                    scale: isFocused ? 1.15 : 1,
+                    scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
                     zIndex: isFocused ? 30 : 10,
                     y: isFocused ? -10 : 0
                   }}
@@ -77,6 +125,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({ title, channels, onSelect, onFo
                     onFocus(rowIndex, colIndex);
                     onSelect(channel);
                   }}
+                  onMouseDown={() => handlePressStart(channel.id)}
+                  onMouseUp={handlePressEnd}
+                  onMouseLeave={handlePressEnd}
+                  onTouchStart={() => handlePressStart(channel.id)}
+                  onTouchEnd={handlePressEnd}
                   onMouseEnter={() => onFocus(rowIndex, colIndex)}
                   style={{ 
                     boxShadow: isFocused ? `0 0 30px ${themeColor}4d` : undefined,
@@ -87,6 +140,45 @@ const ChannelRow: React.FC<ChannelRowProps> = ({ title, channels, onSelect, onFo
                     orientation === 'landscape' ? "w-40 md:w-56 aspect-video" : "w-32 md:w-44 aspect-[2/3]"
                   )}
                 >
+                  {isPressing && (
+                    <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: '100%' }}
+                      transition={{ duration: 0.8, ease: "linear" }}
+                      className="absolute bottom-0 left-0 h-1.5 bg-white z-50"
+                    />
+                  )}
+                  {isFavorite && (
+                    <div 
+                      style={{ borderColor: themeColor }}
+                      className="absolute top-2 left-2 z-40 w-5 h-5 rounded-full shadow-lg flex items-center justify-center border-2 bg-black/40"
+                    >
+                      <div style={{ backgroundColor: themeColor }} className="w-1.5 h-1.5 rounded-full" />
+                    </div>
+                  )}
+                  {badge && (
+                    <div 
+                      className={cn(
+                        "absolute top-2 z-40 w-5 h-5 rounded-full shadow-lg flex items-center justify-center border border-white/20 text-[10px] font-black text-white",
+                        isFavorite ? "left-8" : "left-2",
+                        badge === 'C' ? "bg-emerald-600" : badge === 'F' ? "bg-blue-600" : "bg-purple-600"
+                      )}
+                    >
+                      {badge}
+                    </div>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteChannel(channel.id);
+                    }}
+                    className={cn(
+                      "absolute top-2 right-2 z-40 w-5 h-5 rounded-full bg-black/60 border border-white/20 flex items-center justify-center transition-all hover:bg-red-600",
+                      isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50"
+                    )}
+                  >
+                    <X className="w-3 h-3 text-white" />
+                  </button>
                   {isPreviewing ? (
                     <div className="w-full h-full bg-black">
                       <PreviewPlayer url={channel.url} />
@@ -299,49 +391,32 @@ export default function App() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>('landscape');
+  const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>(() => 
+    (localStorage.getItem('poster_orientation') as 'landscape' | 'portrait') || 'landscape'
+  );
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
-
-
-// Bu kısmı App.tsx içinde güncelle
-const [savedUrl, setSavedUrl] = useState<string | null>(() => {
-  try {
+  const [savedUrl, setSavedUrl] = useState<string | null>(() => {
     const saved = localStorage.getItem('m3u_url');
-    // Eğer daha önce kaydedilmiş bir link varsa onu kullan
-    if (saved && saved.startsWith('http')) return saved;
-    
-    // Eğer silinmişse ama biz yine de varsayılanla başlasın istiyorsak:
-    return DEFAULT_M3U_URL; 
-  } catch (e) {
+    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
+    if (saved) return saved;
+    if (isDeleted) return null;
     return DEFAULT_M3U_URL;
-  }
-});
-
-useEffect(() => {
-  // Uygulama açıldığında eğer kayıtlı URL varsa ve liste henüz boşsa
-  if (savedUrl && channels.length === 0 && !isLoading && !error) {
-    setPlaylistUrl(savedUrl);
-    
-    // Küçük bir gecikme (1 saniye) TV Box'ın kendine gelmesini sağlar
-    const timer = setTimeout(() => {
-       // Eğer handleUrlSubmit parametre almıyorsa direkt çağır
-       // Eğer e.preventDefault() bekliyorsa içini boş geçebiliriz
-       handleUrlSubmit(); 
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }
-}, [savedUrl, channels.length, isLoading, error]); 
-// Bağımlılık dizisine bunları eklemek daha güvenlidir
-
-
+  });
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    const saved = localStorage.getItem('favorites');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
   const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
+  const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('auto_preview_enabled');
+    return saved === null ? true : saved === 'true';
+  });
 
   const featuredChannel = useMemo(() => {
     if (channels.length === 0) return null;
@@ -351,16 +426,21 @@ useEffect(() => {
   // TV Navigation State
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
-  const [navContext, setNavContext] = useState<'landing' | 'browse' | 'player' | 'settings'>('landing');
-  const [landingFocus, setLandingFocus] = useState(0); // 0: input, 1: submit, 2: upload
+  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'category-menu' | 'exit-confirm'>('browse');
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'content'>('tabs');
+  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
+  const [categoryMenuFocus, setCategoryMenuFocus] = useState(0);
+  const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
+  const [channelMenuFocus, setChannelMenuFocus] = useState(0);
   const settingsContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (settingsContentRef.current) {
-      settingsContentRef.current.scrollTo({ top: 0, behavior: 'auto' });
+      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [activeSettingsTab]);
 
@@ -369,14 +449,9 @@ useEffect(() => {
   const epgInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-   if (!themeColor) return;
-
     document.documentElement.style.setProperty('--theme-color', themeColor);
+    localStorage.setItem('theme_color', themeColor);
     
-    // LocalStorage yazmadan önce kontrol: Değer zaten aynıysa boşuna yazma
-    if (localStorage.getItem('theme_color') !== themeColor) {
-      localStorage.setItem('theme_color', themeColor);
-    }
     // Update theme-color meta tag
     let metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (!metaThemeColor) {
@@ -387,21 +462,41 @@ useEffect(() => {
     (metaThemeColor as HTMLMetaElement).content = themeColor;
   }, [themeColor]);
 
- // 3. Şehir bilgisini kaydet (Sadece değişirse)
   useEffect(() => {
-    if (weatherCity && localStorage.getItem('weather_city') !== weatherCity) {
-      localStorage.setItem('weather_city', weatherCity);
-    }
+    localStorage.setItem('weather_city', weatherCity);
   }, [weatherCity]);
 
-// 4. Son izlenenleri kaydet (Sadece liste güncellenirse)
   useEffect(() => {
-    // Boş liste için boşuna yazma yapma
-    if (recentlyWatched.length > 0) {
-      localStorage.setItem('recently_watched', JSON.stringify(recentlyWatched));
-    }
+    localStorage.setItem('recently_watched', JSON.stringify(recentlyWatched));
   }, [recentlyWatched]);
-  
+
+  useEffect(() => {
+    localStorage.setItem('favorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem('auto_preview_enabled', String(autoPreviewEnabled));
+  }, [autoPreviewEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('poster_orientation', posterOrientation);
+  }, [posterOrientation]);
+
+  const toggleFavorite = (channelId: string) => {
+    setFavorites(prev => {
+      const current = Array.isArray(prev) ? prev : [];
+      return current.includes(channelId) 
+        ? current.filter(id => id !== channelId)
+        : [...current, channelId];
+    });
+  };
+
+  const handleDeleteChannel = (channelId: string) => {
+    setChannels(prev => prev.filter(ch => ch.id !== channelId));
+    setFavorites(prev => prev.filter(id => id !== channelId));
+    setRecentlyWatched(prev => prev.filter(ch => ch.id !== channelId));
+  };
+
   // Group channels by category
   const groupedChannels = useMemo(() => {
     const filtered = channels.filter(channel => 
@@ -411,7 +506,15 @@ useEffect(() => {
 
     const groups: Record<string, M3UChannel[]> = {};
     
-    // Add Recently Watched as the first group if it has items
+    // Add Favorites as the first group if it has items
+    if (Array.isArray(favorites) && favorites.length > 0) {
+      const favoriteChannels = channels.filter(ch => favorites.includes(ch.id));
+      if (favoriteChannels.length > 0) {
+        groups['Favorilerim'] = favoriteChannels;
+      }
+    }
+
+    // Add Recently Watched as the second group if it has items
     if (recentlyWatched.length > 0) {
       groups['İzlemeye Devam Et'] = recentlyWatched;
     }
@@ -425,11 +528,13 @@ useEffect(() => {
     return Object.entries(groups)
       .filter(([group]) => !collapsedCategories.includes(group))
       .sort((a, b) => {
+        if (a[0] === 'Favorilerim') return -1;
+        if (b[0] === 'Favorilerim') return 1;
         if (a[0] === 'İzlemeye Devam Et') return -1;
         if (b[0] === 'İzlemeye Devam Et') return 1;
         return b[1].length - a[1].length;
       });
-  }, [channels, searchQuery, recentlyWatched, collapsedCategories]);
+  }, [channels, searchQuery, recentlyWatched, collapsedCategories, favorites]);
 
   const categories = useMemo(() => {
     const cats = {
@@ -457,7 +562,15 @@ useEffect(() => {
     return cats;
   }, [channels]);
 
-  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent') => {
+  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites') => {
+    if (type === 'favorites') {
+      setCollapsedCategories(prev => 
+        prev.includes('Favorilerim') 
+          ? prev.filter(c => c !== 'Favorilerim')
+          : [...prev, 'Favorilerim']
+      );
+      return;
+    }
     if (type === 'recent') {
       setCollapsedCategories(prev => 
         prev.includes('İzlemeye Devam Et') 
@@ -499,7 +612,7 @@ useEffect(() => {
   // Auto-preview logic
   useEffect(() => {
     setPreviewChannelId(null);
-    if (navContext !== 'browse' || activeRow === -1) return;
+    if (navContext !== 'browse' || activeRow === -1 || !autoPreviewEnabled) return;
 
     const timer = setTimeout(() => {
       const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
@@ -511,10 +624,114 @@ useEffect(() => {
     return () => clearTimeout(timer);
   }, [activeRow, activeCol, navContext, groupedChannels]);
 
+  const fetchWithProxy = async (url: string) => {
+    const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+    return fetch(proxyUrl);
+  };
+
+  const primaryHeroButtons = useMemo(() => {
+    if (!featuredChannel) return [];
+    return [
+      { id: 'play', label: 'Oynat', icon: Play, action: () => handleChannelSelect(featuredChannel) },
+      { id: 'details', label: 'Detaylar', icon: Info, action: () => {} } // Details action can be added later
+    ];
+  }, [featuredChannel]);
+
+  const filterHeroButtons = useMemo(() => {
+    if (!featuredChannel) return [];
+    
+    const isCollapsed = (name: string) => collapsedCategories.includes(name);
+    
+    const getCategoryGroups = (type: string) => {
+      const groupNames = Array.from(new Set(channels.map(ch => String(ch.group || 'General'))));
+      return groupNames.filter((g: string) => {
+        const gl = g.toLowerCase();
+        if (type === 'live') return gl.includes('live') || gl.includes('canlı') || gl.includes('tv');
+        if (type === 'movies') return gl.includes('movie') || gl.includes('film') || gl.includes('sinema');
+        if (type === 'series') return gl.includes('series') || gl.includes('dizi') || gl.includes('show');
+        if (type === 'mixed') return !gl.includes('live') && !gl.includes('canlı') && !gl.includes('tv') && !gl.includes('movie') && !gl.includes('film') && !gl.includes('sinema') && !gl.includes('series') && !gl.includes('dizi') && !gl.includes('show');
+        return false;
+      });
+    };
+
+    const isCategoryActive = (type: string) => {
+      const groups = getCategoryGroups(type);
+      if (groups.length === 0) return false;
+      return !groups.every(g => collapsedCategories.includes(g));
+    };
+
+    return [
+      { id: 'search', label: 'Ara', icon: Search, action: () => {
+        const searchInput = document.getElementById('hero-search-input');
+        if (searchInput) searchInput.focus();
+      }, isActive: true },
+      recentlyWatched.length > 0 && { 
+        id: 'recent', 
+        label: 'İzlemeye Devam Et', 
+        icon: Clock, 
+        action: () => toggleCategory('recent'),
+        isActive: !isCollapsed('İzlemeye Devam Et')
+      },
+      favorites.length > 0 && { 
+        id: 'favorites', 
+        label: 'Favoriler', 
+        icon: Heart, 
+        action: () => toggleCategory('favorites'),
+        isActive: !isCollapsed('Favorilerim')
+      },
+      categories.live.length > 0 && {
+        id: 'live',
+        label: 'Canlı',
+        icon: Tv,
+        action: () => toggleCategory('live'),
+        isActive: isCategoryActive('live')
+      },
+      categories.movies.length > 0 && {
+        id: 'movies',
+        label: 'Film',
+        icon: Play,
+        action: () => toggleCategory('movies'),
+        isActive: isCategoryActive('movies')
+      },
+      categories.series.length > 0 && {
+        id: 'series',
+        label: 'Dizi',
+        icon: List,
+        action: () => toggleCategory('series'),
+        isActive: isCategoryActive('series')
+      },
+      categories.mixed.length > 0 && {
+        id: 'mixed',
+        label: 'Karışık',
+        icon: Grid,
+        action: () => toggleCategory('mixed'),
+        isActive: isCategoryActive('mixed')
+      },
+      { id: 'categories', label: 'Kategoriler', icon: List, action: () => { setShowCategoryMenu(true); setNavContext('category-menu'); setCategoryMenuFocus(0); }, isActive: true }
+    ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, themeColor, collapsedCategories, channels, categories]);
+
   // Remote Control Navigation
+  const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
+  const isKeyHeld = useRef(false);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (navContext === 'player') return;
+
+      // Detect long press for Enter/OK
+      if (e.key === 'Enter' && !isKeyHeld.current) {
+        isKeyHeld.current = true;
+        keyHoldTimer.current = setTimeout(() => {
+          if (navContext === 'browse' && activeRow !== -1) {
+            const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
+            if (selectedChannel) {
+              toggleFavorite(selectedChannel.id);
+              // Visual feedback could be added here
+            }
+          }
+        }, 800); // 800ms for long press
+      }
 
       // Global Back/Escape
       if (e.key === 'Escape' || e.key === 'Backspace') {
@@ -543,45 +760,60 @@ useEffect(() => {
         }
       }
 
-      if (navContext === 'landing') {
+      if (navContext === 'category-menu') {
+        const options = ['live', 'movies', 'series', 'mixed'];
         switch (e.key) {
-          case 'ArrowDown':
-            e.preventDefault();
-            if (landingFocus === 0 || landingFocus === 4) setLandingFocus(1);
-            else if (landingFocus === 1) setLandingFocus(3);
-            else if (landingFocus === 2) setLandingFocus(3);
-            break;
           case 'ArrowUp':
             e.preventDefault();
-            if (landingFocus === 3) setLandingFocus(1);
-            else if (landingFocus === 1) setLandingFocus(0);
-            else if (landingFocus === 2) setLandingFocus(0);
+            setCategoryMenuFocus(prev => Math.max(0, prev - 1));
+            break;
+          case 'ArrowDown':
+            e.preventDefault();
+            setCategoryMenuFocus(prev => Math.min(options.length - 1, prev + 1));
+            break;
+          case 'Enter':
+            e.preventDefault();
+            toggleCategory(options[categoryMenuFocus] as any);
+            setShowCategoryMenu(false);
+            setNavContext('browse');
+            break;
+          case 'Escape':
+          case 'Backspace':
+            e.preventDefault();
+            setShowCategoryMenu(false);
+            setNavContext('browse');
+            break;
+        }
+        return;
+      }
+
+      if (navContext === 'channel-menu') {
+        const options = ['favorite', 'live', 'movies', 'series'];
+        switch (e.key) {
+          case 'ArrowLeft':
+            e.preventDefault();
+            setChannelMenuFocus(prev => Math.max(0, prev - 1));
             break;
           case 'ArrowRight':
             e.preventDefault();
-            if (landingFocus === 0) setLandingFocus(4);
-            else if (landingFocus === 4) setLandingFocus(2);
-            else if (landingFocus === 1) setLandingFocus(2);
-            break;
-          case 'ArrowLeft':
-            e.preventDefault();
-            if (landingFocus === 2) setLandingFocus(4);
-            else if (landingFocus === 4) setLandingFocus(0);
+            setChannelMenuFocus(prev => Math.min(options.length - 1, prev + 1));
             break;
           case 'Enter':
-            if (landingFocus === 0) {
-              urlInputRef.current?.focus();
-            } else if (landingFocus === 1) {
-              epgInputRef.current?.focus();
-            } else if (landingFocus === 2) {
-              handleUrlSubmit();
-            } else if (landingFocus === 3) {
-              fileInputRef.current?.click();
-            } else if (landingFocus === 4) {
-              setPlaylistUrl('');
-              setEpgUrl('');
-              setError(null);
+            e.preventDefault();
+            const option = options[channelMenuFocus];
+            if (option === 'favorite') {
+              toggleFavorite(channelMenuId!);
+            } else {
+              toggleCategory(option as any);
             }
+            setChannelMenuId(null);
+            setNavContext('browse');
+            break;
+          case 'Escape':
+          case 'Backspace':
+            e.preventDefault();
+            setChannelMenuId(null);
+            setNavContext('browse');
             break;
         }
         return;
@@ -606,6 +838,11 @@ useEffect(() => {
                 setSettingsFocus(prev => prev + 1);
               } else if (activeSettingsTab === 0 && settingsFocus === 5) {
                 setSettingsFocus(6);
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 2) setSettingsFocus(3);
+                else if (settingsFocus === 5) setSettingsFocus(6);
+                else if (settingsFocus === 8) setSettingsFocus(9); // File upload to Delete
               }
             }
             break;
@@ -621,6 +858,12 @@ useEffect(() => {
                 setSettingsFocus(prev => prev - 1);
               } else if (activeSettingsTab === 0 && settingsFocus === 6) {
                 setSettingsFocus(5);
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 3) setSettingsFocus(2);
+                else if (settingsFocus === 6) setSettingsFocus(5);
+                else if (settingsFocus === 9) setSettingsFocus(8); // Delete to File upload
+                else if (settingsFocus === 0 || settingsFocus === 2 || settingsFocus === 5 || settingsFocus === 8) setSettingsArea('tabs');
               } else {
                 setSettingsArea('tabs');
               }
@@ -629,44 +872,92 @@ useEffect(() => {
           case 'ArrowDown':
             e.preventDefault();
             if (settingsArea === 'tabs') {
-              if (isMobile) {
-                setSettingsArea('content');
-                setSettingsFocus(0);
-              } else {
-                setActiveSettingsTab(prev => (prev + 1) % 3);
-              }
+              setActiveSettingsTab(prev => (prev + 1) % 3);
             } else {
               if (activeSettingsTab === 0) {
                 if (settingsFocus <= 4) setSettingsFocus(5);
                 else if (settingsFocus === 5 || settingsFocus === 6) setSettingsFocus(7); // Close button
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 0) setSettingsFocus(1);
-                else if (settingsFocus === 1) setSettingsFocus(2); // Close button
+                if (settingsFocus === 0 || settingsFocus === 1) setSettingsFocus(8); // To File Upload
+                else if (settingsFocus === 8) setSettingsFocus(2); // To EPG
+                else if (settingsFocus === 2 || settingsFocus === 3) {
+                  if (epgData) setSettingsFocus(4);
+                  else setSettingsFocus(5);
+                }
+                else if (settingsFocus === 4) setSettingsFocus(5);
+                else if (settingsFocus === 5 || settingsFocus === 9) setSettingsFocus(7); // To Close
+                else if (settingsFocus === 7) { /* at bottom */ }
               } else if (activeSettingsTab === 2) {
                 if (settingsFocus === 0) setSettingsFocus(1);
-                else if (settingsFocus === 1) setSettingsFocus(2); // Close button
+                else if (settingsFocus === 1) setSettingsFocus(2);
+                else if (settingsFocus === 2) setSettingsFocus(3);
               }
             }
             break;
           case 'ArrowUp':
             e.preventDefault();
             if (settingsArea === 'tabs') {
-              if (!isMobile) {
-                setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
-              }
+              setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
             } else {
               if (activeSettingsTab === 0) {
                 if (settingsFocus === 7) setSettingsFocus(5);
                 else if (settingsFocus === 5 || settingsFocus === 6) setSettingsFocus(0);
                 else if (settingsFocus >= 0 && settingsFocus <= 4) setSettingsArea('tabs');
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 2) setSettingsFocus(1);
-                else if (settingsFocus === 1) setSettingsFocus(0);
-                else if (settingsFocus === 0) setSettingsArea('tabs');
+                if (settingsFocus === 7) setSettingsFocus(9);
+                else if (settingsFocus === 9 || settingsFocus === 5) {
+                  if (epgData) setSettingsFocus(4);
+                  else setSettingsFocus(2);
+                }
+                else if (settingsFocus === 4) setSettingsFocus(2);
+                else if (settingsFocus === 2 || settingsFocus === 3) setSettingsFocus(8);
+                else if (settingsFocus === 8) setSettingsFocus(0);
+                else if (settingsFocus === 0 || settingsFocus === 1) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus === 2) setSettingsFocus(1);
+                if (settingsFocus === 3) setSettingsFocus(2);
+                else if (settingsFocus === 2) setSettingsFocus(1);
                 else if (settingsFocus === 1) setSettingsFocus(0);
                 else if (settingsFocus === 0) setSettingsArea('tabs');
+              }
+            }
+            break;
+          case 'ArrowRight':
+            e.preventDefault();
+            if (settingsArea === 'tabs') {
+              if (isMobile) {
+                setActiveSettingsTab(prev => (prev + 1) % 3);
+              } else {
+                setSettingsArea('content');
+                setSettingsFocus(0);
+              }
+            } else {
+              if (activeSettingsTab === 0 && settingsFocus >= 0 && settingsFocus < 4) {
+                setSettingsFocus(prev => prev + 1);
+              } else if (activeSettingsTab === 0 && settingsFocus === 5) {
+                setSettingsFocus(6);
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 2) setSettingsFocus(3);
+                else if (settingsFocus === 5) setSettingsFocus(9);
+              }
+            }
+            break;
+          case 'ArrowLeft':
+            e.preventDefault();
+            if (settingsArea === 'content') {
+              if (activeSettingsTab === 0 && settingsFocus > 0 && settingsFocus <= 4) {
+                setSettingsFocus(prev => prev - 1);
+              } else if (activeSettingsTab === 0 && settingsFocus === 6) {
+                setSettingsFocus(5);
+              } else if (activeSettingsTab === 1) {
+                if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 3) setSettingsFocus(2);
+                else if (settingsFocus === 9) setSettingsFocus(5);
+                else if (settingsFocus === 0 || settingsFocus === 2 || settingsFocus === 5 || settingsFocus === 8) {
+                  setSettingsArea('tabs');
+                }
+              } else {
+                setSettingsArea('tabs');
               }
             }
             break;
@@ -686,14 +977,26 @@ useEffect(() => {
                   setNavContext('browse');
                 }
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 0) {
+                if (settingsFocus === 0) urlInputRef.current?.focus();
+                else if (settingsFocus === 1) handleUrlSubmit();
+                else if (settingsFocus === 2) epgInputRef.current?.focus();
+                else if (settingsFocus === 3) {
+                  const epgBtn = document.getElementById('epg-load-btn');
+                  epgBtn?.click();
+                } else if (settingsFocus === 4) {
+                  setEpgUrl('');
+                  setEpgData(null);
+                  localStorage.removeItem('epg_url');
+                } else if (settingsFocus === 5) {
                   localStorage.removeItem('m3u_deleted');
                   localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
                   setSavedUrl(DEFAULT_M3U_URL);
                   setPlaylistUrl(DEFAULT_M3U_URL);
                   setShowSettings(false);
                   setChannels([]);
-                } else if (settingsFocus === 1) {
+                } else if (settingsFocus === 8) {
+                  fileInputRef.current?.click();
+                } else if (settingsFocus === 9) {
                   localStorage.removeItem('m3u_url');
                   localStorage.removeItem('epg_url');
                   localStorage.setItem('m3u_deleted', 'true');
@@ -703,18 +1006,21 @@ useEffect(() => {
                   setChannels([]);
                   setPlaylistUrl('');
                   setShowSettings(false);
-                  setNavContext('landing');
-                } else if (settingsFocus === 2) {
+                  setNavContext('browse');
+                } else if (settingsFocus === 7) {
                   setShowSettings(false);
                   setNavContext('browse');
                 }
               } else if (activeSettingsTab === 2) {
                 if (settingsFocus === 0) {
-                  // Weather input focus handled by input itself or we can just let it be
+                  const cityInput = document.getElementById('city-input');
+                  cityInput?.focus();
                 } else if (settingsFocus === 1) {
+                  setAutoPreviewEnabled(prev => !prev);
+                } else if (settingsFocus === 2) {
                   localStorage.clear();
                   window.location.reload();
-                } else if (settingsFocus === 2) {
+                } else if (settingsFocus === 3) {
                   setShowSettings(false);
                   setNavContext('browse');
                 }
@@ -733,41 +1039,69 @@ useEffect(() => {
         return;
       }
 
+      if (navContext === 'exit-confirm') {
+        switch (e.key) {
+          case 'ArrowLeft':
+            e.preventDefault();
+            setExitFocus(0);
+            break;
+          case 'ArrowRight':
+            e.preventDefault();
+            setExitFocus(1);
+            break;
+          case 'Enter':
+            e.preventDefault();
+            if (exitFocus === 0) {
+              // Exit application (in web context, we can reload or redirect)
+              window.location.reload();
+            } else {
+              setShowExitConfirm(false);
+              setNavContext('browse');
+            }
+            break;
+          case 'Escape':
+          case 'Backspace':
+            e.preventDefault();
+            setShowExitConfirm(false);
+            setNavContext('browse');
+            break;
+        }
+        return;
+      }
+
       if (navContext === 'browse') {
         switch (e.key) {
-          case 'PageDown':
+          case 'Escape':
+          case 'Backspace':
             e.preventDefault();
-            setActiveRow(prev => Math.min(groupedChannels.length - 1, prev + 3));
-            break;
-          case 'PageUp':
-            e.preventDefault();
-            setActiveRow(prev => Math.max(-1, prev - 3));
-            break;
-          case 'Home':
-            e.preventDefault();
-            setActiveCol(0);
-            break;
-          case 'End':
-            e.preventDefault();
-            if (activeRow === -1) {
-              setActiveCol(1);
-            } else {
-              const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
-              setActiveCol(currentRowLength - 1);
-            }
+            setShowExitConfirm(true);
+            setNavContext('exit-confirm');
+            setExitFocus(1); // Default to 'Hayır'
             break;
           case 'ArrowUp':
             e.preventDefault();
             if (activeRow === 0) {
-              setActiveRow(-1);
-              setActiveCol(1); // Default to Profile
+              setActiveRow(-1); // Filter buttons
+              setActiveCol(0);
+            } else if (activeRow === -1) {
+              setActiveRow(-2); // Primary buttons
+              setActiveCol(0);
+            } else if (activeRow === -2) {
+              setActiveRow(-3); // Top bar (Profile)
+              setActiveCol(0);
             } else if (activeRow > 0) {
               setActiveRow(prev => prev - 1);
             }
             break;
           case 'ArrowDown':
             e.preventDefault();
-            if (activeRow === -1) {
+            if (activeRow === -3) {
+              setActiveRow(-2);
+              setActiveCol(0);
+            } else if (activeRow === -2) {
+              setActiveRow(-1);
+              setActiveCol(0);
+            } else if (activeRow === -1) {
               setActiveRow(0);
               setActiveCol(0);
             } else {
@@ -776,12 +1110,16 @@ useEffect(() => {
             break;
           case 'ArrowLeft':
             e.preventDefault();
+            if (activeRow === -3) return;
             setActiveCol(prev => Math.max(0, prev - 1));
             break;
           case 'ArrowRight':
             e.preventDefault();
-            if (activeRow === -1) {
-              setActiveCol(prev => Math.min(1, prev + 1));
+            if (activeRow === -3) return;
+            if (activeRow === -2) {
+              setActiveCol(prev => Math.min(primaryHeroButtons.length - 1, prev + 1));
+            } else if (activeRow === -1) {
+              setActiveCol(prev => Math.min(filterHeroButtons.length - 1, prev + 1));
             } else {
               const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
               setActiveCol(prev => Math.min(currentRowLength - 1, prev + 1));
@@ -789,12 +1127,16 @@ useEffect(() => {
             break;
           case 'Enter':
             e.preventDefault();
-            if (activeRow === -1) {
-              if (activeCol === 1) {
-                setShowSettings(true);
-                setNavContext('settings');
-                setSettingsFocus(0);
-              }
+            if (activeRow === -3) {
+              setShowSettings(true);
+              setNavContext('settings');
+              setSettingsFocus(0);
+            } else if (activeRow === -2) {
+              const button = primaryHeroButtons[activeCol];
+              if (button) button.action();
+            } else if (activeRow === -1) {
+              const button = filterHeroButtons[activeCol];
+              if (button) button.action();
             } else {
               const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
               if (selectedChannel) {
@@ -807,77 +1149,68 @@ useEffect(() => {
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, landingFocus, settingsFocus, playlistUrl]);
-
-const handleUrlSubmit = async (e?: React.FormEvent) => {
-  if (e) e.preventDefault();
-
-  // 1. Güvenlik ve Hazırlık
-  if (isLoading) return;
-  const targetUrl = playlistUrl || savedUrl; 
-  if (!targetUrl) return;
-
-  setIsLoading(true);
-  setError(null);
-
-  try {
-    // 2. M3U LİSTESİNİ ÇEK (NATIVE HTTP)
-    const options = {
-      url: targetUrl,
-      connectTimeout: 15000,
-      readTimeout: 15000
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        if (keyHoldTimer.current) {
+          clearTimeout(keyHoldTimer.current);
+          keyHoldTimer.current = null;
+        }
+        isKeyHeld.current = false;
+      }
     };
 
-    const response = await CapacitorHttp.get(options);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, settingsFocus, playlistUrl, favorites]);
 
-    if (response.status !== 200) {
-      throw new Error(`Hata: ${response.status} - Liste indirilemedi.`);
-    }
+  const handleUrlSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!playlistUrl) return;
 
-    const content = response.data;
-    const parsed = parseM3U(content);
-
-    // 3. KANALLARI AYARLA
-    if (parsed.length > 0) {
+    setIsLoading(true);
+    setError(null);
+    try {
+      // Load Playlist
+      const response = await fetchWithProxy(playlistUrl);
+      if (!response.ok) throw new Error(`Hata: ${response.status} ${response.statusText}`);
+      const content = await response.text();
+      const parsed = parseM3U(content);
       setChannels(parsed);
-      localStorage.setItem('m3u_url', targetUrl);
-      localStorage.removeItem('m3u_deleted');
-      setSavedUrl(targetUrl);
-      
-      // Navigasyon modunu değiştir (Eğer kullanıyorsan)
-      if (typeof setNavContext === 'function') {
-        setNavContext('browse');
-      }
 
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
-    } else {
-      throw new Error("M3U içeriği boş veya geçersiz.");
-    }
-
-    // 4. EPG VERİSİNİ ÇEK (OPSİYONEL)
-    if (epgUrl) {
-      try {
-        const epgRes = await CapacitorHttp.get({ url: epgUrl });
-        if (epgRes.status === 200) {
-          setEpgData(epgRes.data);
+      // Load EPG if URL provided
+      if (epgUrl) {
+        try {
+          const proxyEpgUrl = `/api/proxy?url=${encodeURIComponent(epgUrl)}`;
+          const epg = await fetchAndParseEPG(proxyEpgUrl);
+          setEpgData(epg);
           localStorage.setItem('epg_url', epgUrl);
+        } catch (epgErr) {
+          console.error('EPG load failed:', epgErr);
         }
-      } catch (epgErr) {
-        // EPG hatası tüm yüklemeyi durdurmasın diye sadece logluyoruz
-        console.error('EPG yükleme hatası:', epgErr);
       }
-    }
 
-  } catch (err: any) {
-    console.error("Yükleme Hatası:", err);
-    setError(err.message || "Liste yüklenirken bir hata oluştu.");
-  } finally {
-    setIsLoading(false);
-  }
-}; // FONKSİYON BURADA BİTİYOR
+      if (parsed.length > 0) {
+        // Save to localStorage
+        localStorage.setItem('m3u_url', playlistUrl);
+        localStorage.removeItem('m3u_deleted');
+        setSavedUrl(playlistUrl);
+        
+        setShowSuccess(true);
+        setNavContext('browse');
+        setTimeout(() => setShowSuccess(false), 3000);
+      } else {
+        setError('Bu oynatma listesinde kanal bulunamadı.');
+      }
+    } catch (err) {
+      setError('Oynatma listesi yüklenirken hata oluştu. URL\'yi veya CORS ayarlarını kontrol edin.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Auto-load saved URL on startup
   useEffect(() => {
@@ -889,7 +1222,7 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
         setIsLoading(true);
         try {
           // Load Playlist
-          const response = await fetch(savedUrl);
+          const response = await fetchWithProxy(savedUrl);
           if (response.ok) {
             const content = await response.text();
             const parsed = parseM3U(content);
@@ -901,7 +1234,8 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
           // Load EPG
           if (savedEpgUrl) {
             try {
-              const epg = await fetchAndParseEPG(savedEpgUrl);
+              const proxyEpgUrl = `/api/proxy?url=${encodeURIComponent(savedEpgUrl)}`;
+              const epg = await fetchAndParseEPG(proxyEpgUrl);
               setEpgData(epg);
             } catch (epgErr) {
               console.error('EPG auto-load failed:', epgErr);
@@ -957,184 +1291,62 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
         </div>
 
         <div className="flex items-center gap-4 md:gap-6">
-          {channels.length > 0 && (
-            <div className={cn(
-              "relative group flex items-center transition-all",
-              activeRow === -1 && activeCol === 0 ? "scale-110" : ""
-            )}>
-              <Search className={cn(
-                "w-5 h-5 cursor-pointer transition-colors",
-                activeRow === -1 && activeCol === 0 ? "text-red-600" : "text-white"
-              )} />
-              <input
-                type="text"
-                placeholder="Ara..."
-                className={cn(
-                  "bg-black/80 border rounded-sm py-1 px-4 ml-2 transition-all outline-none text-sm",
-                  activeRow === -1 && activeCol === 0 
-                    ? "w-64 opacity-100 border-white ring-2 ring-white" 
-                    : "w-0 opacity-0 border-white/20 group-hover:w-64 group-hover:opacity-100 focus:w-64 focus:opacity-100"
-                )}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={() => {
-                  setActiveRow(-1);
-                  setActiveCol(0);
-                }}
-              />
-            </div>
-          )}
           <WeatherWidget city={weatherCity} themeColor={themeColor} />
           <DigitalClock themeColor={themeColor} />
-          <button 
-            onClick={() => {
-              setShowSettings(true);
-              setNavContext('settings');
-              setSettingsFocus(0);
-            }}
-            className={cn(
-              "w-8 h-8 bg-blue-500 rounded-sm overflow-hidden transition-all",
-              activeRow === -1 && activeCol === 1 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
-            )}
-          >
-            <img src="https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png" alt="Profil" />
-          </button>
+          {channels.length > 0 && (
+            <button 
+              onClick={() => {
+                setShowSettings(true);
+                setNavContext('settings');
+                setSettingsFocus(0);
+              }}
+              className={cn(
+                "w-8 h-8 bg-blue-500 rounded-sm overflow-hidden transition-all",
+                activeRow === -3 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
+              )}
+            >
+              <img src="https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png" alt="Profil" />
+            </button>
+          )}
         </div>
       </nav>
 
       <main className="pb-20">
-        {channels.length === 0 ? (
-          <div className="relative min-h-screen">
-            <div className="absolute inset-0 z-0">
-              <img 
-                src="https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=2069&auto=format&fit=crop" 
-                className="w-full h-full object-cover opacity-50"
-                alt="Arka Plan"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/60 to-black/80" />
-            </div>
-
-            <div className="relative z-10 pt-24 sm:pt-40 md:pt-56 px-4 max-w-4xl mx-auto text-center">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8 }}
-              >
-                <h1 className="text-3xl sm:text-5xl md:text-7xl font-black mb-6 tracking-tight leading-tight">
-                  Sınırsız yayın, TV şovları ve daha fazlası.
-                </h1>
-                <p className="text-lg sm:text-xl md:text-2xl mb-8 text-zinc-200 font-medium">
-                  Her yerde izleyin. İstediğiniz zaman iptal edin. İzlemeye hazır mısınız?
-                </p>
-                
-                <div className="bg-black/40 p-6 md:p-10 rounded-xl border border-white/10 backdrop-blur-md shadow-2xl">
-                  <p className="text-lg mb-6 text-zinc-300">Üyeliğinizi başlatmak için M3U oynatma listesi URL'nizi girin.</p>
-                  <form onSubmit={handleUrlSubmit} className="flex flex-col gap-4">
-                    <div className="flex flex-col md:flex-row gap-2">
-                      <div className="flex-1 flex flex-col gap-2">
-                        <div className="relative flex items-center">
-                          <input
-                            ref={urlInputRef}
-                            type="url"
-                            placeholder="M3U Oynatma Listesi URL'si"
-                            className={cn(
-                              "w-full bg-black/60 border rounded-md px-4 py-4 outline-none transition-all text-lg pr-12",
-                              landingFocus === 0 ? "ring-2" : "border-white/30"
-                            )}
-                            style={{ 
-                              borderColor: landingFocus === 0 ? themeColor : undefined,
-                              boxShadow: landingFocus === 0 ? `0 0 0 2px ${themeColor}` : undefined
-                            }}
-                            value={playlistUrl}
-                            onChange={(e) => setPlaylistUrl(e.target.value)}
-                            onFocus={() => setLandingFocus(0)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPlaylistUrl('');
-                              setEpgUrl('');
-                              setError(null);
-                            }}
-                            onMouseEnter={() => setLandingFocus(4)}
-                            className={cn(
-                              "absolute right-2 p-2 rounded-full transition-all",
-                              landingFocus === 4 ? "bg-white text-black scale-110" : "text-zinc-500 hover:text-white"
-                            )}
-                            title="Sıfırla"
-                          >
-                            <RefreshCw className="w-6 h-6" />
-                          </button>
-                        </div>
-                        <input
-                          ref={epgInputRef}
-                          type="url"
-                          placeholder="EPG (XMLTV) URL'si (Opsiyonel)"
-                          className={cn(
-                            "w-full bg-black/60 border rounded-md px-4 py-4 outline-none transition-all text-lg",
-                            landingFocus === 1 ? "ring-2" : "border-white/30"
-                          )}
-                          style={{ 
-                            borderColor: landingFocus === 1 ? themeColor : undefined,
-                            boxShadow: landingFocus === 1 ? `0 0 0 2px ${themeColor}` : undefined
-                          }}
-                          value={epgUrl}
-                          onChange={(e) => setEpgUrl(e.target.value)}
-                          onFocus={() => setLandingFocus(1)}
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={isLoading}
-                        onMouseEnter={() => setLandingFocus(2)}
-                        style={{ backgroundColor: themeColor }}
-                        className={cn(
-                          "hover:opacity-90 disabled:opacity-50 text-white px-10 py-5 rounded-md font-bold text-2xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg h-auto",
-                          landingFocus === 2 ? "ring-4 ring-white scale-105 z-10" : ""
-                        )}
-                      >
-                        {isLoading ? 'Yükleniyor...' : 'Hemen Başla'} <ChevronRight className="w-8 h-8" />
-                      </button>
-                    </div>
-                  </form>
-
-                  <div className="relative py-8">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-                    <div className="relative flex justify-center text-xs uppercase"><span className="bg-zinc-900 px-4 py-1 rounded-full text-zinc-500 font-black tracking-widest">VEYA</span></div>
-                  </div>
-
-                  <label 
-                    className="block cursor-pointer group"
-                    onClick={() => setLandingFocus(3)}
-                  >
-                    <input ref={fileInputRef} type="file" accept=".m3u,.m3u8" className="hidden" onChange={handleFileUpload} />
-                    <div className={cn(
-                      "bg-white/5 hover:bg-white/10 border rounded-md py-8 transition-all flex flex-col items-center gap-3 group-active:scale-[0.98]",
-                      landingFocus === 3 ? "border-white ring-4 ring-white bg-white/10" : "border-white/10"
-                    )}>
-                      <Upload className="w-8 h-8 text-red-600 group-hover:scale-110 transition-transform" />
-                      <span className="text-zinc-300 group-hover:text-white font-bold text-lg">Cihazdan M3U Dosyası Yükle</span>
-                      <p className="text-zinc-500 text-sm">Sürükleyip bırakın veya göz atmak için tıklayın</p>
-                    </div>
-                  </label>
-
-                  {error && (
-                    <motion.p 
-                      initial={{ opacity: 0 }} 
-                      animate={{ opacity: 1 }} 
-                      className="mt-6 text-red-500 font-bold bg-red-500/10 py-3 rounded-md border border-red-500/20"
-                    >
-                      {error}
-                    </motion.p>
-                  )}
+        <div className="animate-in fade-in duration-1000">
+          {channels.length === 0 ? (
+            <div className="relative h-[80vh] flex flex-col items-center justify-center space-y-8 text-center px-4">
+              <div className="absolute inset-0 z-0 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#141414]/60 to-[#141414]" />
+              </div>
+              
+              <div className="relative z-10 space-y-6 max-w-md">
+                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10">
+                  <Tv className="w-10 h-10 text-zinc-600" />
                 </div>
-              </motion.div>
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold text-zinc-300">Oynatma Listesi Yok</h2>
+                  <p className="text-zinc-500">
+                    İzlemeye başlamak için sağ üstteki profil ikonundan ayarlara giderek bir liste ekleyin.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowSettings(true);
+                    setNavContext('settings');
+                    setSettingsFocus(0);
+                    setActiveSettingsTab(1);
+                  }}
+                  style={{ backgroundColor: themeColor }}
+                  className="px-6 py-3 rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-all active:scale-95"
+                >
+                  Ayarları Aç
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <div className="animate-in fade-in duration-1000">
-            {/* Hero Section */}
-            {featuredChannel && (
+          ) : (
+            <>
+              {/* Hero Section */}
+              {featuredChannel && (
               <div className="relative h-[80vh] w-full overflow-hidden">
                 <div className="absolute inset-0">
                   <img 
@@ -1155,97 +1367,151 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                   <p className="text-sm sm:text-lg text-zinc-300 line-clamp-2 sm:line-clamp-3 font-medium">
                     {featuredChannel.group || 'Genel'} kategorisinden canlı yayın. M3UFLIX'te yüksek kaliteli yayın şu an yayında.
                   </p>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button 
-                      onClick={() => handleChannelSelect(featuredChannel)}
-                      style={{ backgroundColor: themeColor, color: 'white' }}
-                      className="hover:opacity-90 px-6 sm:px-8 py-2 sm:py-3 rounded-md font-bold flex items-center gap-2 transition-all text-base sm:text-lg active:scale-95"
-                    >
-                      <Play className="w-5 h-5 sm:w-6 sm:h-6 fill-current" /> Oynat
-                    </button>
-                    <button className="bg-zinc-500/50 hover:bg-zinc-500/70 text-white px-6 sm:px-8 py-2 sm:py-3 rounded-md font-bold flex items-center gap-2 transition-colors text-base sm:text-lg backdrop-blur-md">
-                      <Info className="w-5 h-5 sm:w-6 sm:h-6" /> Detaylar
-                    </button>
-                  </div>
+                  <div className="flex flex-col gap-4 pt-2">
+                    {/* Primary Buttons Row */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      {primaryHeroButtons.map((btn, idx) => {
+                        const isFocused = activeRow === -2 && activeCol === idx;
+                        const isPlay = btn.id === 'play';
+                        
+                        return (
+                          <button 
+                            key={btn.id}
+                            onClick={btn.action}
+                            style={{ 
+                              backgroundColor: isFocused ? 'white' : (isPlay ? themeColor : 'rgba(255,255,255,0.1)'),
+                              color: isFocused ? 'black' : 'white'
+                            }}
+                            className={cn(
+                              "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg",
+                              isPlay ? "px-6 sm:px-8 py-2 sm:py-3 rounded-md text-base sm:text-lg" : "px-6 py-2 rounded-md text-base bg-zinc-500/50 backdrop-blur-md",
+                              isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
+                            )}
+                          >
+                            <btn.icon className={cn("w-5 h-5 sm:w-6 sm:h-6", isPlay && "fill-current")} />
+                            {btn.label}
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                  {/* Category Buttons */}
-                  <div className="flex flex-wrap gap-2 pt-2">
-                    {recentlyWatched.length > 0 && (
-                      <button 
-                        onClick={() => toggleCategory('recent')}
-                        style={{ 
-                          backgroundColor: collapsedCategories.includes('İzlemeye Devam Et') ? 'rgba(255,255,255,0.05)' : themeColor,
-                          borderColor: collapsedCategories.includes('İzlemeye Devam Et') ? 'rgba(255,255,255,0.1)' : 'transparent'
-                        }}
-                        className={cn(
-                          "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-lg flex items-center gap-2",
-                          collapsedCategories.includes('İzlemeye Devam Et') ? "text-zinc-500" : "text-white scale-105"
-                        )}
-                      >
-                        <Clock className="w-3 h-3" />
-                        İzlemeye Devam Et
-                      </button>
-                    )}
-                    {categories.live.length > 0 && (
-                      <button 
-                        onClick={() => toggleCategory('live')}
-                        style={{ 
-                          backgroundColor: categories.live.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.05)' : themeColor,
-                          borderColor: categories.live.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.1)' : 'transparent'
-                        }}
-                        className={cn(
-                          "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-lg",
-                          categories.live.every(ch => collapsedCategories.includes(ch.group || 'General')) ? "text-zinc-500" : "text-white scale-105"
-                        )}
-                      >
-                        Canlı
-                      </button>
-                    )}
-                    {categories.movies.length > 0 && (
-                      <button 
-                        onClick={() => toggleCategory('movies')}
-                        style={{ 
-                          backgroundColor: categories.movies.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.05)' : themeColor,
-                          borderColor: categories.movies.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.1)' : 'transparent'
-                        }}
-                        className={cn(
-                          "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-lg",
-                          categories.movies.every(ch => collapsedCategories.includes(ch.group || 'General')) ? "text-zinc-500" : "text-white scale-105"
-                        )}
-                      >
-                        Film
-                      </button>
-                    )}
-                    {categories.series.length > 0 && (
-                      <button 
-                        onClick={() => toggleCategory('series')}
-                        style={{ 
-                          backgroundColor: categories.series.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.05)' : themeColor,
-                          borderColor: categories.series.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.1)' : 'transparent'
-                        }}
-                        className={cn(
-                          "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-lg",
-                          categories.series.every(ch => collapsedCategories.includes(ch.group || 'General')) ? "text-zinc-500" : "text-white scale-105"
-                        )}
-                      >
-                        Dizi
-                      </button>
-                    )}
-                    {categories.mixed.length > 0 && (
-                      <button 
-                        onClick={() => toggleCategory('mixed')}
-                        style={{ 
-                          backgroundColor: categories.mixed.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.05)' : themeColor,
-                          borderColor: categories.mixed.every(ch => collapsedCategories.includes(ch.group || 'General')) ? 'rgba(255,255,255,0.1)' : 'transparent'
-                        }}
-                        className={cn(
-                          "px-4 py-2 rounded-full text-xs font-bold transition-all border shadow-lg",
-                          categories.mixed.every(ch => collapsedCategories.includes(ch.group || 'General')) ? "text-zinc-500" : "text-white scale-105"
-                        )}
-                      >
-                        Karışık
-                      </button>
-                    )}
+                    {/* Filter Buttons Row */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {filterHeroButtons.map((btn, idx) => {
+                        const isFocused = activeRow === -1 && activeCol === idx;
+                        
+                        return (
+                          <div key={btn.id} className="relative">
+                            {btn.id === 'search' ? (
+                              <div className={cn(
+                                "flex items-center transition-all",
+                                isFocused ? "scale-110" : ""
+                              )}>
+                                <button 
+                                  onClick={btn.action}
+                                  style={{ 
+                                    backgroundColor: isFocused ? 'white' : 'rgba(255,255,255,0.05)',
+                                    color: isFocused ? 'black' : 'white',
+                                    borderColor: isFocused ? 'transparent' : 'rgba(255,255,255,0.1)'
+                                  }}
+                                  className={cn(
+                                    "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
+                                    isFocused && "shadow-2xl ring-4 ring-white/20"
+                                  )}
+                                >
+                                  <Search className="w-3 h-3" />
+                                  {btn.label}
+                                </button>
+                                <div className="relative flex items-center ml-2">
+                                  <input
+                                    id="hero-search-input"
+                                    type="text"
+                                    placeholder="Ara..."
+                                    className={cn(
+                                      "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
+                                      isFocused || searchQuery 
+                                        ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
+                                        : "w-0 opacity-0 border-transparent"
+                                    )}
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    onFocus={() => {
+                                      setActiveRow(-1);
+                                      setActiveCol(idx);
+                                    }}
+                                  />
+                                  {searchQuery && (isFocused || searchQuery) && (
+                                    <button
+                                      onClick={() => setSearchQuery('')}
+                                      className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={btn.action}
+                                style={{ 
+                                  backgroundColor: isFocused 
+                                    ? 'white' 
+                                    : (btn.isActive ? themeColor : 'rgba(255,255,255,0.05)'),
+                                  color: isFocused ? 'black' : (btn.isActive ? 'white' : 'rgba(255,255,255,0.4)'),
+                                  borderColor: btn.isActive ? 'transparent' : 'rgba(255,255,255,0.1)'
+                                }}
+                                className={cn(
+                                  "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
+                                  isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
+                                )}
+                              >
+                                <btn.icon className="w-3 h-3" />
+                                {btn.label}
+                              </button>
+                            )}
+
+                            {btn.id === 'categories' && (
+                              <AnimatePresence>
+                                {showCategoryMenu && (
+                                  <motion.div
+                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    className="absolute bottom-full left-0 mb-2 w-48 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[60] p-1"
+                                  >
+                                    {[
+                                      { id: 'live', label: 'Canlı', icon: Tv },
+                                      { id: 'movies', label: 'Film', icon: Play },
+                                      { id: 'series', label: 'Dizi', icon: List },
+                                      { id: 'mixed', label: 'Karışık', icon: Grid }
+                                    ].map((opt, idx) => (
+                                      <button
+                                        key={opt.id}
+                                        onClick={() => {
+                                          toggleCategory(opt.id as any);
+                                          setShowCategoryMenu(false);
+                                          setNavContext('browse');
+                                        }}
+                                        onMouseEnter={() => setCategoryMenuFocus(idx)}
+                                        className={cn(
+                                          "w-full flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all text-left",
+                                          categoryMenuFocus === idx 
+                                            ? "bg-white text-black" 
+                                            : "text-zinc-400 hover:bg-white/5 hover:text-white"
+                                        )}
+                                      >
+                                        <opt.icon className="w-4 h-4" />
+                                        <span className="text-sm">{opt.label}</span>
+                                      </button>
+                                    ))}
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1263,6 +1529,14 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                     setActiveRow(r);
                     setActiveCol(c);
                   }}
+                  onToggleFavorite={toggleFavorite}
+                  onDeleteChannel={handleDeleteChannel}
+                  onLongPress={(id) => {
+                    setChannelMenuId(id);
+                    setNavContext('channel-menu');
+                    setChannelMenuFocus(0);
+                  }}
+                  favorites={favorites}
                   rowIndex={idx}
                   activeRow={activeRow}
                   activeCol={activeCol}
@@ -1272,11 +1546,70 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                 />
               ))}
             </div>
-          </div>
+          </>
         )}
-      </main>
+      </div>
+    </main>
 
-      {/* Settings Modal */}
+      {/* Channel Context Menu Overlay */}
+      <AnimatePresence>
+        {channelMenuId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4"
+            onClick={() => {
+              setChannelMenuId(null);
+              setNavContext('browse');
+            }}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-zinc-900 border border-white/10 rounded-2xl p-6 max-w-lg w-full shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <h3 className="text-xl font-bold mb-6 text-center">Seçenekler</h3>
+              <div className="flex flex-wrap justify-center gap-4">
+                {[
+                  { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart },
+                  { id: 'live', label: 'Canlı', icon: Tv },
+                  { id: 'movies', label: 'Film', icon: Play },
+                  { id: 'series', label: 'Dizi', icon: List }
+                ].map((opt, idx) => (
+                  <button
+                    key={opt.id}
+                    onClick={() => {
+                      if (opt.id === 'favorite') {
+                        toggleFavorite(channelMenuId);
+                      } else {
+                        toggleCategory(opt.id as any);
+                      }
+                      setChannelMenuId(null);
+                      setNavContext('browse');
+                    }}
+                    onMouseEnter={() => setChannelMenuFocus(idx)}
+                    className={cn(
+                      "flex flex-col items-center gap-3 p-4 rounded-xl transition-all min-w-[100px]",
+                      channelMenuFocus === idx 
+                        ? "bg-white text-black scale-110 shadow-xl" 
+                        : "bg-white/5 text-white hover:bg-white/10"
+                    )}
+                  >
+                    <opt.icon className={cn("w-6 h-6", opt.id === 'favorite' && favorites.includes(channelMenuId) && "fill-current text-red-500")} />
+                    <span className="text-xs font-bold">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-8 pt-6 border-t border-white/5 text-center">
+                <p className="text-zinc-500 text-sm">Seçmek için Enter'a, kapatmak için Geri'ye basın</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {showSettings && (
           <motion.div
@@ -1438,62 +1771,178 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                       <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Listesi Yönetimi</label>
                         <div className="space-y-4">
+                          <div className="bg-white/5 p-6 rounded-2xl space-y-4">
+                            <label className="text-sm font-bold text-zinc-400">M3U Linki Ekle</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                placeholder="M3U URL'si girin..."
+                                className={cn(
+                                  "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
+                                  settingsArea === 'content' && settingsFocus === 0 ? "border-white ring-2 ring-white/20" : "border-white/10"
+                                )}
+                                value={playlistUrl}
+                                onChange={(e) => setPlaylistUrl(e.target.value)}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
+                              />
+                              <button
+                                onClick={() => handleUrlSubmit()}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                                style={{ backgroundColor: themeColor }}
+                                className={cn(
+                                  "px-6 py-3 rounded-xl font-bold text-white transition-all",
+                                  settingsArea === 'content' && settingsFocus === 1 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
+                                )}
+                              >
+                                Yükle
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="bg-white/5 p-6 rounded-2xl space-y-4">
+                            <label className="text-sm font-bold text-zinc-400">M3U Dosyası Yükle</label>
+                            <label className="block cursor-pointer group">
+                              <input type="file" accept=".m3u,.m3u8" className="hidden" onChange={handleFileUpload} />
+                              <div className={cn(
+                                "bg-black/40 border-2 border-dashed rounded-xl py-6 transition-all flex flex-col items-center gap-2",
+                                settingsArea === 'content' && settingsFocus === 8 ? "border-white bg-white/5" : "border-white/10"
+                              )}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(8); }}
+                              >
+                                <Upload className="w-6 h-6 text-zinc-500" />
+                                <span className="text-sm font-bold text-zinc-300">Dosya Seç</span>
+                              </div>
+                            </label>
+                          </div>
+                          <div className="bg-white/5 p-6 rounded-2xl space-y-4">
+                            <label className="text-sm font-bold text-zinc-400">EPG Linki Ekle</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                placeholder="EPG URL'si girin..."
+                                className={cn(
+                                  "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
+                                  settingsArea === 'content' && settingsFocus === 2 ? "border-white ring-2 ring-white/20" : "border-white/10"
+                                )}
+                                value={epgUrl}
+                                onChange={(e) => setEpgUrl(e.target.value)}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
+                              />
+                              <button
+                                id="epg-load-btn"
+                                onClick={async () => {
+                                  if (!epgUrl) return;
+                                  setIsLoading(true);
+                                  try {
+                                    const epg = await fetchAndParseEPG(epgUrl);
+                                    setEpgData(epg);
+                                    localStorage.setItem('epg_url', epgUrl);
+                                    setShowSuccess(true);
+                                    setTimeout(() => setShowSuccess(false), 3000);
+                                  } catch (err) {
+                                    setError('EPG yüklenirken hata oluştu.');
+                                  } finally {
+                                    setIsLoading(false);
+                                  }
+                                }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(3); }}
+                                style={{ backgroundColor: themeColor }}
+                                className={cn(
+                                  "px-6 py-3 rounded-xl font-bold text-white transition-all",
+                                  settingsArea === 'content' && settingsFocus === 3 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
+                                )}
+                              >
+                                Yükle
+                              </button>
+                            </div>
+                            {epgData && (
+                              <button
+                                onClick={() => {
+                                  setEpgUrl('');
+                                  setEpgData(null);
+                                  localStorage.removeItem('epg_url');
+                                }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(4); }}
+                                className={cn(
+                                  "w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
+                                  settingsArea === 'content' && settingsFocus === 4 ? "bg-red-600 text-white" : "bg-red-500/10 text-red-500"
+                                )}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Mevcut EPG'yi Sil
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <button
+                              onClick={() => {
+                                localStorage.removeItem('m3u_deleted');
+                                localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+                                setSavedUrl(DEFAULT_M3U_URL);
+                                setPlaylistUrl(DEFAULT_M3U_URL);
+                                setShowSettings(false);
+                                setChannels([]);
+                              }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(5); }}
+                              className={cn(
+                                "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                                settingsArea === 'content' && settingsFocus === 5 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                              )}
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
+                                  <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 5 && "animate-spin")} />
+                                </div>
+                                <div>
+                                  <div className="text-lg">Ana Linki Yükle</div>
+                                  <div className="text-xs opacity-50 font-medium">Varsayılan listeyi açar</div>
+                                </div>
+                              </div>
+                            </button>
+                            
+                            <button
+                              onClick={() => {
+                                localStorage.removeItem('m3u_url');
+                                localStorage.removeItem('epg_url');
+                                localStorage.setItem('m3u_deleted', 'true');
+                                setSavedUrl(null);
+                                setEpgUrl('');
+                                setEpgData(null);
+                                setChannels([]);
+                                setPlaylistUrl('');
+                                setShowSettings(false);
+                              }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(9); }}
+                              className={cn(
+                                "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                                settingsArea === 'content' && settingsFocus === 9 ? "bg-red-600 text-white scale-105 shadow-xl" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                              )}
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className="p-3 bg-red-500/20 rounded-xl group-hover:scale-110 transition-transform">
+                                  <Trash2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                  <div className="text-lg">Listeyi Sil</div>
+                                  <div className="text-xs opacity-50 font-medium">Tüm verileri temizler</div>
+                                </div>
+                              </div>
+                            </button>
+                          </div>
+
                           <button
                             onClick={() => {
-                              localStorage.removeItem('m3u_deleted');
-                              localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
-                              setSavedUrl(DEFAULT_M3U_URL);
-                              setPlaylistUrl(DEFAULT_M3U_URL);
                               setShowSettings(false);
-                              setChannels([]);
+                              setNavContext('browse');
                             }}
-                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(7); }}
                             className={cn(
-                              "w-full text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                              settingsArea === 'content' && settingsFocus === 0 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                              "w-full py-4 rounded-xl font-black uppercase tracking-widest transition-all",
+                              settingsArea === 'content' && settingsFocus === 7 ? "bg-white text-black scale-105" : "bg-white/10 text-white"
                             )}
                           >
-                            <div className="flex items-center gap-4">
-                              <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
-                                <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 0 && "animate-spin")} />
-                              </div>
-                              <div>
-                                <div className="text-lg">Ana Linki Yükle</div>
-                                <div className="text-xs opacity-50 font-medium">Varsayılan M3U listesini geri yükler</div>
-                              </div>
-                            </div>
-                            <ChevronRight className="w-6 h-6 opacity-30" />
-                          </button>
-                          
-                          <button
-                            onClick={() => {
-                              localStorage.removeItem('m3u_url');
-                              localStorage.removeItem('epg_url');
-                              localStorage.setItem('m3u_deleted', 'true');
-                              setSavedUrl(null);
-                              setEpgUrl('');
-                              setEpgData(null);
-                              setChannels([]);
-                              setPlaylistUrl('');
-                              setShowSettings(false);
-                              setNavContext('landing');
-                            }}
-                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
-                            className={cn(
-                              "w-full text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                              settingsArea === 'content' && settingsFocus === 1 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
-                            )}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
-                                <Plus className="w-6 h-6" />
-                              </div>
-                              <div>
-                                <div className="text-lg">Yeni Link Ekle</div>
-                                <div className="text-xs opacity-50 font-medium">Mevcut listeyi siler ve kurulum ekranına döner</div>
-                              </div>
-                            </div>
-                            <ChevronRight className="w-6 h-6 opacity-30" />
+                            Ayarları Kapat
                           </button>
                         </div>
                       </section>
@@ -1513,6 +1962,7 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Hava Durumu Ayarları</label>
                         <div className="relative">
                           <input
+                            id="city-input"
                             type="text"
                             value={weatherCity}
                             onChange={(e) => setWeatherCity(e.target.value)}
@@ -1528,16 +1978,50 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                       </section>
 
                       <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Ayarları</label>
+                        <button 
+                          onClick={() => setAutoPreviewEnabled(prev => !prev)}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                          className={cn(
+                            "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                            settingsArea === 'content' && settingsFocus === 1 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                          )}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              "p-3 rounded-xl transition-transform",
+                              settingsArea === 'content' && settingsFocus === 1 ? "bg-black/10" : "bg-white/10"
+                            )}>
+                              <Play className="w-6 h-6" />
+                            </div>
+                            <div className="text-left">
+                              <div className="text-lg">Otomatik Önizleme</div>
+                              <div className="text-xs opacity-50 font-medium">Poster üzerinde bekleyince oynatır</div>
+                            </div>
+                          </div>
+                          <div className={cn(
+                            "w-12 h-6 rounded-full relative transition-colors",
+                            autoPreviewEnabled ? "bg-emerald-500" : "bg-zinc-700"
+                          )}>
+                            <div className={cn(
+                              "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                              autoPreviewEnabled ? "right-1" : "left-1"
+                            )} />
+                          </div>
+                        </button>
+                      </section>
+
+                      <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Sistem</label>
                         <button 
                           onClick={() => {
                             localStorage.clear();
                             window.location.reload();
                           }}
-                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            settingsArea === 'content' && settingsFocus === 1 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
+                            settingsArea === 'content' && settingsFocus === 2 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
                           )}
                         >
                           <RefreshCw className="w-6 h-6" />
@@ -1548,24 +2032,24 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
                   )}
                   </AnimatePresence>
 
-                  {/* Universal Close Button for Mobile/Touch */}
-                  <div className="pt-10">
-                    <button 
-                      onClick={() => {
-                        setShowSettings(false);
-                        setNavContext('browse');
-                      }}
-                      onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
-                      style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : 2)) ? themeColor : undefined }}
-                      className={cn(
-                        "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                        (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : 2)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                      )}
-                    >
-                      <X className="w-6 h-6" />
-                      Ayarları Kapat
-                    </button>
-                  </div>
+                      {/* Universal Close Button for Mobile/Touch */}
+                      <div className="pt-10">
+                        <button 
+                          onClick={() => {
+                            setShowSettings(false);
+                            setNavContext('browse');
+                          }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3); }}
+                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3)) ? themeColor : undefined }}
+                          className={cn(
+                            "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
+                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                          )}
+                        >
+                          <X className="w-6 h-6" />
+                          Ayarları Kapat
+                        </button>
+                      </div>
                 </div>
               </div>
             </motion.div>
@@ -1590,7 +2074,80 @@ const handleUrlSubmit = async (e?: React.FormEvent) => {
         )}
       </AnimatePresence>
 
-  
+      {/* Exit Confirmation Dialog */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-zinc-900 border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl text-center space-y-8"
+            >
+              <div className="w-20 h-20 bg-red-600/10 rounded-full flex items-center justify-center mx-auto border border-red-600/20">
+                <X className="w-10 h-10 text-red-600" />
+              </div>
+              
+              <div className="space-y-2">
+                <h2 className="text-3xl font-black uppercase tracking-tighter italic">Çıkış Yapılsın mı?</h2>
+                <p className="text-zinc-400 font-medium">Uygulamadan çıkmak istediğinize emin misiniz?</p>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => window.location.reload()}
+                  onMouseEnter={() => setExitFocus(0)}
+                  style={{ 
+                    backgroundColor: exitFocus === 0 ? themeColor : 'rgba(255,255,255,0.05)',
+                    color: exitFocus === 0 ? 'white' : 'rgba(255,255,255,0.4)'
+                  }}
+                  className={cn(
+                    "flex-1 py-4 rounded-2xl font-black uppercase tracking-widest transition-all",
+                    exitFocus === 0 ? "scale-105 shadow-2xl" : "hover:bg-white/10"
+                  )}
+                >
+                  Evet
+                </button>
+                <button
+                  onClick={() => {
+                    setShowExitConfirm(false);
+                    setNavContext('browse');
+                  }}
+                  onMouseEnter={() => setExitFocus(1)}
+                  style={{ 
+                    backgroundColor: exitFocus === 1 ? 'white' : 'rgba(255,255,255,0.05)',
+                    color: exitFocus === 1 ? 'black' : 'rgba(255,255,255,0.4)'
+                  }}
+                  className={cn(
+                    "flex-1 py-4 rounded-2xl font-black uppercase tracking-widest transition-all",
+                    exitFocus === 1 ? "scale-105 shadow-2xl" : "hover:bg-white/10"
+                  )}
+                >
+                  Hayır
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Video Player */}
+      {currentChannel && (
+        <VideoPlayer 
+          url={currentChannel.url} 
+          channel={currentChannel}
+          epgData={epgData}
+          onClose={() => {
+            setCurrentChannel(null);
+            setNavContext('browse');
+          }} 
+        />
+      )}
     </div>
   );
 }
