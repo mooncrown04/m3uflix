@@ -1283,6 +1283,10 @@ export default function App() {
       const parsed = parseM3U(content);
       setChannels(parsed);
 
+// Kanallar yüklendikten sonra kategorileri görünür yap
+const allCategories = Array.from(new Set(parsed.map(c => c.category || 'Genel')));
+setVisibleCategories(allCategories);
+
       // Load EPG if URL provided
       if (epgUrl) {
         try {
@@ -1306,23 +1310,22 @@ export default function App() {
         }
       }
 
-      if (parsed.length > 0) {
-        // Save to localStorage
-        localStorage.setItem('m3u_url', finalUrl);
-        localStorage.removeItem('m3u_deleted');
-        setSavedUrl(finalUrl);
-        
-        setShowSuccess(true);
-        setNavContext('browse');
-        setTimeout(() => setShowSuccess(false), 3000);
-      } else {
-        setError('Bu oynatma listesinde kanal bulunamadı.');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Oynatma listesi yüklenirken hata oluştu.');
-    } finally {
-      setIsLoading(false);
-    }
+ // handleUrlSubmit içindeki ilgili kısım:
+if (parsed.length > 0) {
+  setChannels(parsed);
+  
+  // KRİTİK: Kategorileri aktif et
+  const uniqueCats = Array.from(new Set(parsed.map(c => c.category || 'Genel')));
+  setVisibleCategories(uniqueCats);
+  
+  localStorage.setItem('m3u_url', finalUrl);
+  setSavedUrl(finalUrl);
+  
+  setNavContext('browse');
+  setActiveRow(0); // İlk satıra odaklan
+  setActiveCol(0); // İlk sütuna odaklan
+  setShowSuccess(true);
+}
   };
 
   // Auto-load saved URL on startup
