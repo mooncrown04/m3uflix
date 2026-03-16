@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart } from 'lucide-react';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -82,15 +82,25 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
 
   return (
     <div className="space-y-3 group/row relative">
-      <h3 
-        style={{ color: isActiveRow ? themeColor : undefined }}
-        className={cn(
-          "text-xl font-bold px-4 md:px-12 transition-colors",
-          !isActiveRow && "text-zinc-500"
-        )}
-      >
-        {title}
-      </h3>
+      <div className="px-4 md:px-12 flex items-center">
+        <div 
+          style={{ 
+            backgroundColor: isActiveRow ? themeColor : 'rgba(255,255,255,0.05)',
+            color: 'white',
+            borderColor: isActiveRow ? 'transparent' : 'rgba(255,255,255,0.1)'
+          }}
+          className={cn(
+            "flex items-center px-6 py-2.5 rounded-full text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
+            isActiveRow ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
+          )}
+        >
+          <div className={cn(
+            "w-2 h-2 rounded-full mr-3 animate-pulse",
+            isActiveRow ? "bg-white" : "bg-white/20"
+          )} />
+          {title}
+        </div>
+      </div>
       <div className="relative">
         <div 
           ref={scrollRef}
@@ -104,6 +114,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             const isPressing = pressingId === channel.id;
 
             const getCategoryBadge = () => {
+              if (title === 'İzlemeye Devam Et') return 'İ';
               const group = (channel.group || '').toLowerCase();
               if (group.includes('live') || group.includes('canlı') || group.includes('tv')) return 'C';
               if (group.includes('movie') || group.includes('film') || group.includes('sinema')) return 'F';
@@ -114,7 +125,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
 
             return (
               <div key={channel.id} className="flex flex-col gap-2 snap-start">
-                <motion.button
+                <motion.div
                   animate={{ 
                     scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
                     zIndex: isFocused ? 30 : 10,
@@ -136,7 +147,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                     borderColor: isFocused ? themeColor : 'transparent'
                   }}
                   className={cn(
-                    "relative flex-none bg-zinc-900 rounded-md overflow-hidden group/card transition-all duration-300 border-4",
+                    "relative flex-none bg-zinc-900 rounded-md overflow-hidden group/card transition-all duration-300 border-4 cursor-pointer",
                     orientation === 'landscape' ? "w-40 md:w-56 aspect-video" : "w-32 md:w-44 aspect-[2/3]"
                   )}
                 >
@@ -148,36 +159,38 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       className="absolute bottom-0 left-0 h-1.5 bg-white z-50"
                     />
                   )}
-                  {isFavorite && (
-                    <div 
-                      style={{ borderColor: themeColor }}
-                      className="absolute top-2 left-2 z-40 w-5 h-5 rounded-full shadow-lg flex items-center justify-center border-2 bg-black/40"
-                    >
-                      <div style={{ backgroundColor: themeColor }} className="w-1.5 h-1.5 rounded-full" />
-                    </div>
-                  )}
-                  {badge && (
-                    <div 
-                      className={cn(
-                        "absolute top-2 z-40 w-5 h-5 rounded-full shadow-lg flex items-center justify-center border border-white/20 text-[10px] font-black text-white",
-                        isFavorite ? "left-8" : "left-2",
-                        badge === 'C' ? "bg-emerald-600" : badge === 'F' ? "bg-blue-600" : "bg-purple-600"
-                      )}
-                    >
-                      {badge}
-                    </div>
-                  )}
+                  
+                  {/* Badges Container */}
+                  <div className="absolute top-2 left-2 z-40 flex flex-col gap-1.5">
+                    {isFavorite && (
+                      <div 
+                        style={{ borderColor: themeColor }}
+                        className="w-5 h-5 rounded-full shadow-lg flex items-center justify-center border-2 bg-black/40 backdrop-blur-sm"
+                      >
+                        <div style={{ backgroundColor: themeColor }} className="w-1.5 h-1.5 rounded-full" />
+                      </div>
+                    )}
+                    {badge && (
+                      <div 
+                        style={{ backgroundColor: themeColor }}
+                        className="text-[10px] font-black text-white px-2 py-0.5 rounded shadow-lg flex items-center justify-center min-w-[20px]"
+                      >
+                        {badge}
+                      </div>
+                    )}
+                  </div>
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onDeleteChannel(channel.id);
                     }}
                     className={cn(
-                      "absolute top-2 right-2 z-40 w-5 h-5 rounded-full bg-black/60 border border-white/20 flex items-center justify-center transition-all hover:bg-red-600",
+                      "absolute top-2 right-2 z-40 w-6 h-6 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center transition-all hover:bg-red-600 group/delete",
                       isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50"
                     )}
                   >
-                    <X className="w-3 h-3 text-white" />
+                    <X className="w-3.5 h-3.5 text-white group-hover/delete:scale-110 transition-transform" />
                   </button>
                   {isPreviewing ? (
                     <div className="w-full h-full bg-black">
@@ -221,7 +234,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       <span className="text-[10px] text-zinc-400 uppercase tracking-tighter">Şimdi İzle</span>
                     </div>
                   </div>
-                </motion.button>
+                </motion.div>
                 <p className={cn(
                   "text-xs font-medium truncate transition-all duration-300",
                   orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44",
@@ -385,6 +398,7 @@ export default function App() {
   const [currentChannel, setCurrentChannel] = useState<M3UChannel | null>(null);
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [epgUrl, setEpgUrl] = useState('');
+  const [extraUrl, setExtraUrl] = useState('');
   const [epgData, setEpgData] = useState<EPGData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -407,15 +421,27 @@ export default function App() {
     const saved = localStorage.getItem('favorites');
     return saved ? JSON.parse(saved) : [];
   });
+  const [canliChannels, setCanliChannels] = useState<string[]>(() => {
+    const saved = localStorage.getItem('canli_channels');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [diziChannels, setDiziChannels] = useState<string[]>(() => {
+    const saved = localStorage.getItem('dizi_channels');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [filmChannels, setFilmChannels] = useState<string[]>(() => {
+    const saved = localStorage.getItem('film_channels');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
-  const [collapsedCategories, setCollapsedCategories] = useState<string[]>([]);
+  const [visibleCategories, setVisibleCategories] = useState<string[]>([]);
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
   const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('auto_preview_enabled');
-    return saved === null ? true : saved === 'true';
+    return saved === null ? false : saved === 'true';
   });
 
   const featuredChannel = useMemo(() => {
@@ -426,17 +452,29 @@ export default function App() {
   // TV Navigation State
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
-  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'category-menu' | 'exit-confirm'>('browse');
+  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu'>('browse');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'content'>('tabs');
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
-  const [categoryMenuFocus, setCategoryMenuFocus] = useState(0);
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
   const [channelMenuFocus, setChannelMenuFocus] = useState(0);
   const settingsContentRef = useRef<HTMLDivElement>(null);
+  const settingsSidebarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (showSettings && settingsSidebarRef.current) {
+      const activeTabElement = settingsSidebarRef.current.querySelector(`[data-tab-id="${activeSettingsTab}"]`);
+      if (activeTabElement) {
+        activeTabElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'center'
+        });
+      }
+    }
+  }, [activeSettingsTab, showSettings]);
 
   useEffect(() => {
     if (settingsContentRef.current) {
@@ -475,6 +513,18 @@ export default function App() {
   }, [favorites]);
 
   useEffect(() => {
+    localStorage.setItem('canli_channels', JSON.stringify(canliChannels));
+  }, [canliChannels]);
+
+  useEffect(() => {
+    localStorage.setItem('dizi_channels', JSON.stringify(diziChannels));
+  }, [diziChannels]);
+
+  useEffect(() => {
+    localStorage.setItem('film_channels', JSON.stringify(filmChannels));
+  }, [filmChannels]);
+
+  useEffect(() => {
     localStorage.setItem('auto_preview_enabled', String(autoPreviewEnabled));
   }, [autoPreviewEnabled]);
 
@@ -494,6 +544,9 @@ export default function App() {
   const handleDeleteChannel = (channelId: string) => {
     setChannels(prev => prev.filter(ch => ch.id !== channelId));
     setFavorites(prev => prev.filter(id => id !== channelId));
+    setCanliChannels(prev => prev.filter(id => id !== channelId));
+    setDiziChannels(prev => prev.filter(id => id !== channelId));
+    setFilmChannels(prev => prev.filter(id => id !== channelId));
     setRecentlyWatched(prev => prev.filter(ch => ch.id !== channelId));
   };
 
@@ -514,7 +567,25 @@ export default function App() {
       }
     }
 
-    // Add Recently Watched as the second group if it has items
+    // Add Canlı as a group if it has items
+    if (canliChannels.length > 0) {
+      const matched = channels.filter(ch => canliChannels.includes(ch.id));
+      if (matched.length > 0) groups['Canlı'] = matched;
+    }
+
+    // Add Dizi as a group if it has items
+    if (diziChannels.length > 0) {
+      const matched = channels.filter(ch => diziChannels.includes(ch.id));
+      if (matched.length > 0) groups['Dizi'] = matched;
+    }
+
+    // Add Film as a group if it has items
+    if (filmChannels.length > 0) {
+      const matched = channels.filter(ch => filmChannels.includes(ch.id));
+      if (matched.length > 0) groups['Film'] = matched;
+    }
+
+    // Add Recently Watched as the next group if it has items
     if (recentlyWatched.length > 0) {
       groups['İzlemeye Devam Et'] = recentlyWatched;
     }
@@ -526,53 +597,63 @@ export default function App() {
     });
 
     return Object.entries(groups)
-      .filter(([group]) => !collapsedCategories.includes(group))
+      .filter(([group]) => {
+        const specialGroups = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        if (specialGroups.includes(group)) {
+          return visibleCategories.includes(group);
+        }
+        return true; // Main M3U categories always show
+      })
       .sort((a, b) => {
-        if (a[0] === 'Favorilerim') return -1;
-        if (b[0] === 'Favorilerim') return 1;
-        if (a[0] === 'İzlemeye Devam Et') return -1;
-        if (b[0] === 'İzlemeye Devam Et') return 1;
+        const order = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        const aIdx = order.indexOf(a[0]);
+        const bIdx = order.indexOf(b[0]);
+        
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        if (aIdx !== -1) return -1;
+        if (bIdx !== -1) return 1;
+        
         return b[1].length - a[1].length;
       });
-  }, [channels, searchQuery, recentlyWatched, collapsedCategories, favorites]);
+  }, [channels, searchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels]);
 
-  const categories = useMemo(() => {
-    const cats = {
-      live: [] as M3UChannel[],
-      movies: [] as M3UChannel[],
-      series: [] as M3UChannel[],
-      mixed: [] as M3UChannel[]
+  const toggleManualCategory = (channelId: string, type: 'canli' | 'dizi' | 'film') => {
+    const setters = {
+      canli: setCanliChannels,
+      dizi: setDiziChannels,
+      film: setFilmChannels
     };
-
-    channels.forEach(ch => {
-      const g = (ch.group || '').toLowerCase();
-      const n = ch.name.toLowerCase();
-      
-      if (g.includes('live') || g.includes('canlı') || g.includes('tv')) {
-        cats.live.push(ch);
-      } else if (g.includes('movie') || g.includes('film') || g.includes('sinema')) {
-        cats.movies.push(ch);
-      } else if (g.includes('series') || g.includes('dizi') || g.includes('show')) {
-        cats.series.push(ch);
-      } else {
-        cats.mixed.push(ch);
-      }
+    setters[type](prev => {
+      const current = Array.isArray(prev) ? prev : [];
+      return current.includes(channelId) 
+        ? current.filter(id => id !== channelId)
+        : [...current, channelId];
     });
+  };
 
-    return cats;
-  }, [channels]);
-
-  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites') => {
+  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites' | 'canli' | 'dizi' | 'film') => {
     if (type === 'favorites') {
-      setCollapsedCategories(prev => 
+      setVisibleCategories(prev => 
         prev.includes('Favorilerim') 
           ? prev.filter(c => c !== 'Favorilerim')
           : [...prev, 'Favorilerim']
       );
       return;
     }
+    if (type === 'canli') {
+      setVisibleCategories(prev => prev.includes('Canlı') ? prev.filter(c => c !== 'Canlı') : [...prev, 'Canlı']);
+      return;
+    }
+    if (type === 'dizi') {
+      setVisibleCategories(prev => prev.includes('Dizi') ? prev.filter(c => c !== 'Dizi') : [...prev, 'Dizi']);
+      return;
+    }
+    if (type === 'film') {
+      setVisibleCategories(prev => prev.includes('Film') ? prev.filter(c => c !== 'Film') : [...prev, 'Film']);
+      return;
+    }
     if (type === 'recent') {
-      setCollapsedCategories(prev => 
+      setVisibleCategories(prev => 
         prev.includes('İzlemeye Devam Et') 
           ? prev.filter(c => c !== 'İzlemeye Devam Et')
           : [...prev, 'İzlemeye Devam Et']
@@ -590,11 +671,13 @@ export default function App() {
       return false;
     });
 
-    setCollapsedCategories(prev => {
-      const isAllCollapsed = targetGroups.every(g => prev.includes(g));
-      if (isAllCollapsed) {
+    setVisibleCategories(prev => {
+      const isAnyVisible = targetGroups.some(g => prev.includes(g));
+      if (isAnyVisible) {
+        // Hide all in this category
         return prev.filter(g => !targetGroups.includes(g));
       } else {
+        // Show all in this category
         return [...new Set([...prev, ...targetGroups])];
       }
     });
@@ -640,7 +723,7 @@ export default function App() {
   const filterHeroButtons = useMemo(() => {
     if (!featuredChannel) return [];
     
-    const isCollapsed = (name: string) => collapsedCategories.includes(name);
+    const isVisible = (name: string) => visibleCategories.includes(name);
     
     const getCategoryGroups = (type: string) => {
       const groupNames = Array.from(new Set(channels.map(ch => String(ch.group || 'General'))));
@@ -657,7 +740,7 @@ export default function App() {
     const isCategoryActive = (type: string) => {
       const groups = getCategoryGroups(type);
       if (groups.length === 0) return false;
-      return !groups.every(g => collapsedCategories.includes(g));
+      return groups.some(g => visibleCategories.includes(g));
     };
 
     return [
@@ -670,46 +753,38 @@ export default function App() {
         label: 'İzlemeye Devam Et', 
         icon: Clock, 
         action: () => toggleCategory('recent'),
-        isActive: !isCollapsed('İzlemeye Devam Et')
+        isActive: visibleCategories.includes('İzlemeye Devam Et')
       },
       favorites.length > 0 && { 
         id: 'favorites', 
         label: 'Favoriler', 
         icon: Heart, 
         action: () => toggleCategory('favorites'),
-        isActive: !isCollapsed('Favorilerim')
+        isActive: visibleCategories.includes('Favorilerim')
       },
-      categories.live.length > 0 && {
-        id: 'live',
+      canliChannels.length > 0 && {
+        id: 'canli',
         label: 'Canlı',
         icon: Tv,
-        action: () => toggleCategory('live'),
-        isActive: isCategoryActive('live')
+        action: () => toggleCategory('canli'),
+        isActive: visibleCategories.includes('Canlı')
       },
-      categories.movies.length > 0 && {
-        id: 'movies',
+      filmChannels.length > 0 && {
+        id: 'film',
         label: 'Film',
         icon: Play,
-        action: () => toggleCategory('movies'),
-        isActive: isCategoryActive('movies')
+        action: () => toggleCategory('film'),
+        isActive: visibleCategories.includes('Film')
       },
-      categories.series.length > 0 && {
-        id: 'series',
+      diziChannels.length > 0 && {
+        id: 'dizi',
         label: 'Dizi',
         icon: List,
-        action: () => toggleCategory('series'),
-        isActive: isCategoryActive('series')
-      },
-      categories.mixed.length > 0 && {
-        id: 'mixed',
-        label: 'Karışık',
-        icon: Grid,
-        action: () => toggleCategory('mixed'),
-        isActive: isCategoryActive('mixed')
-      },
-      { id: 'categories', label: 'Kategoriler', icon: List, action: () => { setShowCategoryMenu(true); setNavContext('category-menu'); setCategoryMenuFocus(0); }, isActive: true }
+        action: () => toggleCategory('dizi'),
+        isActive: visibleCategories.includes('Dizi')
+      }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
-  }, [featuredChannel, recentlyWatched.length, favorites.length, themeColor, collapsedCategories, channels, categories]);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length]);
 
   // Remote Control Navigation
   const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
@@ -758,33 +833,6 @@ export default function App() {
           // If already at top, maybe exit or do nothing
           return;
         }
-      }
-
-      if (navContext === 'category-menu') {
-        const options = ['live', 'movies', 'series', 'mixed'];
-        switch (e.key) {
-          case 'ArrowUp':
-            e.preventDefault();
-            setCategoryMenuFocus(prev => Math.max(0, prev - 1));
-            break;
-          case 'ArrowDown':
-            e.preventDefault();
-            setCategoryMenuFocus(prev => Math.min(options.length - 1, prev + 1));
-            break;
-          case 'Enter':
-            e.preventDefault();
-            toggleCategory(options[categoryMenuFocus] as any);
-            setShowCategoryMenu(false);
-            setNavContext('browse');
-            break;
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            setShowCategoryMenu(false);
-            setNavContext('browse');
-            break;
-        }
-        return;
       }
 
       if (navContext === 'channel-menu') {
@@ -878,13 +926,15 @@ export default function App() {
                 if (settingsFocus <= 4) setSettingsFocus(5);
                 else if (settingsFocus === 5 || settingsFocus === 6) setSettingsFocus(7); // Close button
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 0 || settingsFocus === 1) setSettingsFocus(8); // To File Upload
+                if (settingsFocus === 20) setSettingsFocus(0);
+                else if (settingsFocus === 0 || settingsFocus === 1) setSettingsFocus(8); // To File Upload
                 else if (settingsFocus === 8) setSettingsFocus(2); // To EPG
                 else if (settingsFocus === 2 || settingsFocus === 3) {
                   if (epgData) setSettingsFocus(4);
-                  else setSettingsFocus(5);
+                  else setSettingsFocus(10);
                 }
-                else if (settingsFocus === 4) setSettingsFocus(5);
+                else if (settingsFocus === 4) setSettingsFocus(10);
+                else if (settingsFocus === 10 || settingsFocus === 11) setSettingsFocus(5);
                 else if (settingsFocus === 5 || settingsFocus === 9) setSettingsFocus(7); // To Close
                 else if (settingsFocus === 7) { /* at bottom */ }
               } else if (activeSettingsTab === 2) {
@@ -905,14 +955,16 @@ export default function App() {
                 else if (settingsFocus >= 0 && settingsFocus <= 4) setSettingsArea('tabs');
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 7) setSettingsFocus(9);
-                else if (settingsFocus === 9 || settingsFocus === 5) {
+                else if (settingsFocus === 9 || settingsFocus === 5) setSettingsFocus(10);
+                else if (settingsFocus === 10 || settingsFocus === 11) {
                   if (epgData) setSettingsFocus(4);
                   else setSettingsFocus(2);
                 }
                 else if (settingsFocus === 4) setSettingsFocus(2);
                 else if (settingsFocus === 2 || settingsFocus === 3) setSettingsFocus(8);
                 else if (settingsFocus === 8) setSettingsFocus(0);
-                else if (settingsFocus === 0 || settingsFocus === 1) setSettingsArea('tabs');
+                else if (settingsFocus === 0 || settingsFocus === 1) setSettingsFocus(20);
+                else if (settingsFocus === 20) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
                 if (settingsFocus === 3) setSettingsFocus(2);
                 else if (settingsFocus === 2) setSettingsFocus(1);
@@ -928,7 +980,7 @@ export default function App() {
                 setActiveSettingsTab(prev => (prev + 1) % 3);
               } else {
                 setSettingsArea('content');
-                setSettingsFocus(0);
+                setSettingsFocus(activeSettingsTab === 1 ? 20 : 0);
               }
             } else {
               if (activeSettingsTab === 0 && settingsFocus >= 0 && settingsFocus < 4) {
@@ -938,6 +990,7 @@ export default function App() {
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 0) setSettingsFocus(1);
                 else if (settingsFocus === 2) setSettingsFocus(3);
+                else if (settingsFocus === 10) setSettingsFocus(11);
                 else if (settingsFocus === 5) setSettingsFocus(9);
               }
             }
@@ -952,8 +1005,9 @@ export default function App() {
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 1) setSettingsFocus(0);
                 else if (settingsFocus === 3) setSettingsFocus(2);
+                else if (settingsFocus === 11) setSettingsFocus(10);
                 else if (settingsFocus === 9) setSettingsFocus(5);
-                else if (settingsFocus === 0 || settingsFocus === 2 || settingsFocus === 5 || settingsFocus === 8) {
+                else if (settingsFocus === 0 || settingsFocus === 2 || settingsFocus === 5 || settingsFocus === 8 || settingsFocus === 10 || settingsFocus === 20) {
                   setSettingsArea('tabs');
                 }
               } else {
@@ -973,11 +1027,13 @@ export default function App() {
                 } else if (settingsFocus === 5) setPosterOrientation('landscape');
                 else if (settingsFocus === 6) setPosterOrientation('portrait');
                 else if (settingsFocus === 7) {
-                  setShowSettings(false);
-                  setNavContext('browse');
+                  setSettingsArea('tabs');
                 }
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 0) urlInputRef.current?.focus();
+                if (settingsFocus === 20) {
+                  setPlaylistUrl(DEFAULT_M3U_URL);
+                  handleUrlSubmit(DEFAULT_M3U_URL);
+                } else if (settingsFocus === 0) urlInputRef.current?.focus();
                 else if (settingsFocus === 1) handleUrlSubmit();
                 else if (settingsFocus === 2) epgInputRef.current?.focus();
                 else if (settingsFocus === 3) {
@@ -987,6 +1043,13 @@ export default function App() {
                   setEpgUrl('');
                   setEpgData(null);
                   localStorage.removeItem('epg_url');
+                } else if (settingsFocus === 10) {
+                  // Extra URL input focus
+                } else if (settingsFocus === 11) {
+                  if (extraUrl) {
+                    setPlaylistUrl(extraUrl);
+                    handleUrlSubmit(extraUrl);
+                  }
                 } else if (settingsFocus === 5) {
                   localStorage.removeItem('m3u_deleted');
                   localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
@@ -1008,8 +1071,7 @@ export default function App() {
                   setShowSettings(false);
                   setNavContext('browse');
                 } else if (settingsFocus === 7) {
-                  setShowSettings(false);
-                  setNavContext('browse');
+                  setSettingsArea('tabs');
                 }
               } else if (activeSettingsTab === 2) {
                 if (settingsFocus === 0) {
@@ -1021,8 +1083,7 @@ export default function App() {
                   localStorage.clear();
                   window.location.reload();
                 } else if (settingsFocus === 3) {
-                  setShowSettings(false);
-                  setNavContext('browse');
+                  setSettingsArea('tabs');
                 }
               }
             }
@@ -1084,10 +1145,13 @@ export default function App() {
               setActiveRow(-1); // Filter buttons
               setActiveCol(0);
             } else if (activeRow === -1) {
-              setActiveRow(-2); // Primary buttons
+              setActiveRow(-2); // Search row
               setActiveCol(0);
             } else if (activeRow === -2) {
-              setActiveRow(-3); // Top bar (Profile)
+              setActiveRow(-3); // Primary buttons
+              setActiveCol(0);
+            } else if (activeRow === -3) {
+              setActiveRow(-4); // Top bar (Profile)
               setActiveCol(0);
             } else if (activeRow > 0) {
               setActiveRow(prev => prev - 1);
@@ -1095,7 +1159,10 @@ export default function App() {
             break;
           case 'ArrowDown':
             e.preventDefault();
-            if (activeRow === -3) {
+            if (activeRow === -4) {
+              setActiveRow(-3);
+              setActiveCol(0);
+            } else if (activeRow === -3) {
               setActiveRow(-2);
               setActiveCol(0);
             } else if (activeRow === -2) {
@@ -1110,16 +1177,20 @@ export default function App() {
             break;
           case 'ArrowLeft':
             e.preventDefault();
-            if (activeRow === -3) return;
+            if (activeRow === -4) return;
             setActiveCol(prev => Math.max(0, prev - 1));
             break;
           case 'ArrowRight':
             e.preventDefault();
-            if (activeRow === -3) return;
-            if (activeRow === -2) {
+            if (activeRow === -4) return;
+            if (activeRow === -3) {
               setActiveCol(prev => Math.min(primaryHeroButtons.length - 1, prev + 1));
+            } else if (activeRow === -2) {
+              // Search row - only one button (search)
+              setActiveCol(0);
             } else if (activeRow === -1) {
-              setActiveCol(prev => Math.min(filterHeroButtons.length - 1, prev + 1));
+              const otherFilters = filterHeroButtons.filter(b => b.id !== 'search');
+              setActiveCol(prev => Math.min(otherFilters.length - 1, prev + 1));
             } else {
               const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
               setActiveCol(prev => Math.min(currentRowLength - 1, prev + 1));
@@ -1127,15 +1198,19 @@ export default function App() {
             break;
           case 'Enter':
             e.preventDefault();
-            if (activeRow === -3) {
+            if (activeRow === -4) {
               setShowSettings(true);
               setNavContext('settings');
               setSettingsFocus(0);
-            } else if (activeRow === -2) {
+            } else if (activeRow === -3) {
               const button = primaryHeroButtons[activeCol];
               if (button) button.action();
+            } else if (activeRow === -2) {
+              const searchBtn = filterHeroButtons.find(b => b.id === 'search');
+              if (searchBtn) searchBtn.action();
             } else if (activeRow === -1) {
-              const button = filterHeroButtons[activeCol];
+              const otherFilters = filterHeroButtons.filter(b => b.id !== 'search');
+              const button = otherFilters[activeCol];
               if (button) button.action();
             } else {
               const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
@@ -1167,27 +1242,65 @@ export default function App() {
     };
   }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, settingsFocus, playlistUrl, favorites]);
 
-  const handleUrlSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!playlistUrl) return;
+  const resolveUrl = (rawUrl: string) => {
+    if (!rawUrl) return [];
+    if (rawUrl.startsWith('http')) return [rawUrl];
+    // If it's a code, try cutt.ly first, then the raw string
+    return [`https://cutt.ly/${rawUrl}`, rawUrl];
+  };
+
+  const handleUrlSubmit = async (urlOverride?: string) => {
+    const rawUrl = urlOverride || playlistUrl;
+    if (!rawUrl) return;
 
     setIsLoading(true);
     setError(null);
+
+    const urlsToTry = resolveUrl(rawUrl);
+
+    let successfulResponse = null;
+    let finalUrl = '';
+
     try {
-      // Load Playlist
-      const response = await fetchWithProxy(playlistUrl);
-      if (!response.ok) throw new Error(`Hata: ${response.status} ${response.statusText}`);
-      const content = await response.text();
+      for (const url of urlsToTry) {
+        try {
+          const response = await fetchWithProxy(url);
+          if (response.ok) {
+            successfulResponse = response;
+            finalUrl = url;
+            break;
+          }
+        } catch (e) {
+          console.error(`Failed to load ${url}:`, e);
+        }
+      }
+
+      if (!successfulResponse) {
+        throw new Error('Oynatma listesi yüklenemedi. URL\'yi kontrol edin.');
+      }
+
+      const content = await successfulResponse.text();
       const parsed = parseM3U(content);
       setChannels(parsed);
 
       // Load EPG if URL provided
       if (epgUrl) {
         try {
-          const proxyEpgUrl = `/api/proxy?url=${encodeURIComponent(epgUrl)}`;
-          const epg = await fetchAndParseEPG(proxyEpgUrl);
-          setEpgData(epg);
-          localStorage.setItem('epg_url', epgUrl);
+          const urlsToTryEpg = resolveUrl(epgUrl);
+          let epg = null;
+          for (const url of urlsToTryEpg) {
+            try {
+              const proxyEpgUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+              epg = await fetchAndParseEPG(proxyEpgUrl);
+              if (epg) {
+                localStorage.setItem('epg_url', url);
+                break;
+              }
+            } catch (e) {
+              console.error(`EPG load failed for ${url}:`, e);
+            }
+          }
+          if (epg) setEpgData(epg);
         } catch (epgErr) {
           console.error('EPG load failed:', epgErr);
         }
@@ -1195,9 +1308,9 @@ export default function App() {
 
       if (parsed.length > 0) {
         // Save to localStorage
-        localStorage.setItem('m3u_url', playlistUrl);
+        localStorage.setItem('m3u_url', finalUrl);
         localStorage.removeItem('m3u_deleted');
-        setSavedUrl(playlistUrl);
+        setSavedUrl(finalUrl);
         
         setShowSuccess(true);
         setNavContext('browse');
@@ -1206,7 +1319,7 @@ export default function App() {
         setError('Bu oynatma listesinde kanal bulunamadı.');
       }
     } catch (err) {
-      setError('Oynatma listesi yüklenirken hata oluştu. URL\'yi veya CORS ayarlarını kontrol edin.');
+      setError(err instanceof Error ? err.message : 'Oynatma listesi yüklenirken hata oluştu.');
     } finally {
       setIsLoading(false);
     }
@@ -1302,7 +1415,7 @@ export default function App() {
               }}
               className={cn(
                 "w-8 h-8 bg-blue-500 rounded-sm overflow-hidden transition-all",
-                activeRow === -3 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
+                activeRow === -4 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
               )}
             >
               <img src="https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png" alt="Profil" />
@@ -1371,7 +1484,7 @@ export default function App() {
                     {/* Primary Buttons Row */}
                     <div className="flex flex-wrap items-center gap-3">
                       {primaryHeroButtons.map((btn, idx) => {
-                        const isFocused = activeRow === -2 && activeCol === idx;
+                        const isFocused = activeRow === -3 && activeCol === idx;
                         const isPlay = btn.id === 'play';
                         
                         return (
@@ -1395,119 +1508,89 @@ export default function App() {
                       })}
                     </div>
 
+                    {/* Search Row */}
+                    <div className="flex items-center gap-2">
+                      {filterHeroButtons.filter(b => b.id === 'search').map((btn, idx) => {
+                        const isFocused = activeRow === -2 && activeCol === idx;
+                        
+                        return (
+                          <div key={btn.id} className="relative">
+                            <div className={cn(
+                              "flex items-center transition-all",
+                              isFocused ? "scale-110" : ""
+                            )}>
+                              <button 
+                                onClick={btn.action}
+                                style={{ 
+                                  backgroundColor: isFocused ? 'white' : 'rgba(255,255,255,0.05)',
+                                  color: isFocused ? 'black' : 'white',
+                                  borderColor: isFocused ? 'transparent' : 'rgba(255,255,255,0.1)'
+                                }}
+                                className={cn(
+                                  "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
+                                  isFocused && "shadow-2xl ring-4 ring-white/20"
+                                )}
+                              >
+                                <Search className="w-3 h-3" />
+                                {btn.label}
+                              </button>
+                              <div className="relative flex items-center ml-2">
+                                <input
+                                  id="hero-search-input"
+                                  type="text"
+                                  placeholder="Ara..."
+                                  className={cn(
+                                    "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
+                                    isFocused || searchQuery 
+                                      ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
+                                      : "w-0 opacity-0 border-transparent"
+                                  )}
+                                  value={searchQuery}
+                                  onChange={(e) => setSearchQuery(e.target.value)}
+                                  onFocus={() => {
+                                    setActiveRow(-2);
+                                    setActiveCol(idx);
+                                  }}
+                                />
+                                {searchQuery && (isFocused || searchQuery) && (
+                                  <button
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
                     {/* Filter Buttons Row */}
                     <div className="flex flex-wrap items-center gap-2">
-                      {filterHeroButtons.map((btn, idx) => {
+                      {filterHeroButtons.filter(b => b.id !== 'search').map((btn, idx) => {
                         const isFocused = activeRow === -1 && activeCol === idx;
                         
                         return (
                           <div key={btn.id} className="relative">
-                            {btn.id === 'search' ? (
-                              <div className={cn(
-                                "flex items-center transition-all",
-                                isFocused ? "scale-110" : ""
-                              )}>
-                                <button 
-                                  onClick={btn.action}
-                                  style={{ 
-                                    backgroundColor: isFocused ? 'white' : 'rgba(255,255,255,0.05)',
-                                    color: isFocused ? 'black' : 'white',
-                                    borderColor: isFocused ? 'transparent' : 'rgba(255,255,255,0.1)'
-                                  }}
-                                  className={cn(
-                                    "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
-                                    isFocused && "shadow-2xl ring-4 ring-white/20"
-                                  )}
-                                >
-                                  <Search className="w-3 h-3" />
-                                  {btn.label}
-                                </button>
-                                <div className="relative flex items-center ml-2">
-                                  <input
-                                    id="hero-search-input"
-                                    type="text"
-                                    placeholder="Ara..."
-                                    className={cn(
-                                      "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
-                                      isFocused || searchQuery 
-                                        ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
-                                        : "w-0 opacity-0 border-transparent"
-                                    )}
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onFocus={() => {
-                                      setActiveRow(-1);
-                                      setActiveCol(idx);
-                                    }}
-                                  />
-                                  {searchQuery && (isFocused || searchQuery) && (
-                                    <button
-                                      onClick={() => setSearchQuery('')}
-                                      className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              <button 
-                                onClick={btn.action}
-                                style={{ 
-                                  backgroundColor: isFocused 
-                                    ? 'white' 
-                                    : (btn.isActive ? themeColor : 'rgba(255,255,255,0.05)'),
-                                  color: isFocused ? 'black' : (btn.isActive ? 'white' : 'rgba(255,255,255,0.4)'),
-                                  borderColor: btn.isActive ? 'transparent' : 'rgba(255,255,255,0.1)'
-                                }}
-                                className={cn(
-                                  "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
-                                  isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
-                                )}
-                              >
-                                <btn.icon className="w-3 h-3" />
-                                {btn.label}
-                              </button>
-                            )}
-
-                            {btn.id === 'categories' && (
-                              <AnimatePresence>
-                                {showCategoryMenu && (
-                                  <motion.div
-                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    className="absolute bottom-full left-0 mb-2 w-48 bg-zinc-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[60] p-1"
-                                  >
-                                    {[
-                                      { id: 'live', label: 'Canlı', icon: Tv },
-                                      { id: 'movies', label: 'Film', icon: Play },
-                                      { id: 'series', label: 'Dizi', icon: List },
-                                      { id: 'mixed', label: 'Karışık', icon: Grid }
-                                    ].map((opt, idx) => (
-                                      <button
-                                        key={opt.id}
-                                        onClick={() => {
-                                          toggleCategory(opt.id as any);
-                                          setShowCategoryMenu(false);
-                                          setNavContext('browse');
-                                        }}
-                                        onMouseEnter={() => setCategoryMenuFocus(idx)}
-                                        className={cn(
-                                          "w-full flex items-center gap-3 px-4 py-3 rounded-lg font-bold transition-all text-left",
-                                          categoryMenuFocus === idx 
-                                            ? "bg-white text-black" 
-                                            : "text-zinc-400 hover:bg-white/5 hover:text-white"
-                                        )}
-                                      >
-                                        <opt.icon className="w-4 h-4" />
-                                        <span className="text-sm">{opt.label}</span>
-                                      </button>
-                                    ))}
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            )}
+                            <button 
+                              onClick={btn.action}
+                              style={{ 
+                                backgroundColor: isFocused 
+                                  ? 'white' 
+                                  : (btn.isActive ? themeColor : 'rgba(255,255,255,0.05)'),
+                                color: isFocused ? 'black' : (btn.isActive ? 'white' : 'rgba(255,255,255,0.4)'),
+                                borderColor: btn.isActive ? 'transparent' : 'rgba(255,255,255,0.1)'
+                              }}
+                              className={cn(
+                                "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
+                                isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
+                              )}
+                            >
+                              <btn.icon className="w-3 h-3" />
+                              {btn.label}
+                            </button>
                           </div>
                         );
                       })}
@@ -1574,10 +1657,10 @@ export default function App() {
               <h3 className="text-xl font-bold mb-6 text-center">Seçenekler</h3>
               <div className="flex flex-wrap justify-center gap-4">
                 {[
-                  { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart },
-                  { id: 'live', label: 'Canlı', icon: Tv },
-                  { id: 'movies', label: 'Film', icon: Play },
-                  { id: 'series', label: 'Dizi', icon: List }
+                  { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart, active: favorites.includes(channelMenuId) },
+                  { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
+                  { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
+                  { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) }
                 ].map((opt, idx) => (
                   <button
                     key={opt.id}
@@ -1585,7 +1668,7 @@ export default function App() {
                       if (opt.id === 'favorite') {
                         toggleFavorite(channelMenuId);
                       } else {
-                        toggleCategory(opt.id as any);
+                        toggleManualCategory(channelMenuId, opt.id as any);
                       }
                       setChannelMenuId(null);
                       setNavContext('browse');
@@ -1598,7 +1681,7 @@ export default function App() {
                         : "bg-white/5 text-white hover:bg-white/10"
                     )}
                   >
-                    <opt.icon className={cn("w-6 h-6", opt.id === 'favorite' && favorites.includes(channelMenuId) && "fill-current text-red-500")} />
+                    <opt.icon className={cn("w-6 h-6", opt.active && "fill-current text-red-500")} />
                     <span className="text-xs font-bold">{opt.label}</span>
                   </button>
                 ))}
@@ -1622,12 +1705,15 @@ export default function App() {
               initial={{ y: 50, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 50, opacity: 0 }}
-              className="bg-zinc-900 border-0 sm:border border-white/10 w-full h-full sm:h-auto sm:max-w-4xl sm:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden"
+              className="bg-zinc-900 border-0 sm:border border-white/10 w-full h-full sm:h-[600px] sm:max-h-[90vh] sm:max-w-4xl sm:rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden"
             >
               {/* Sidebar Tabs */}
-              <div className="w-full md:w-64 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 p-4 md:p-6 flex flex-row md:flex-col gap-2 overflow-x-auto md:overflow-x-visible no-scrollbar">
-                <div className="hidden md:block mb-8">
-                  <h2 className="text-2xl font-black italic tracking-tighter uppercase text-white">Ayarlar</h2>
+              <div 
+                ref={settingsSidebarRef}
+                className="w-full md:w-56 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 p-3 md:p-5 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-y-auto no-scrollbar scroll-smooth"
+              >
+                <div className="hidden md:block mb-6">
+                  <h2 className="text-xl font-black italic tracking-tighter uppercase text-white opacity-50">Ayarlar</h2>
                 </div>
                 {[
                   { id: 0, label: 'Görünüm', icon: Sun },
@@ -1636,6 +1722,7 @@ export default function App() {
                 ].map((tab) => (
                   <button
                     key={tab.id}
+                    data-tab-id={tab.id}
                     onClick={() => {
                       setActiveSettingsTab(tab.id);
                       setSettingsArea('tabs');
@@ -1645,15 +1732,15 @@ export default function App() {
                       setSettingsArea('tabs');
                     }}
                     className={cn(
-                      "flex-1 md:flex-none flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all whitespace-nowrap",
+                      "flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg font-bold transition-all whitespace-nowrap",
                       activeSettingsTab === tab.id 
                         ? "bg-white text-black scale-105 shadow-lg" 
                         : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
                       settingsArea === 'tabs' && activeSettingsTab === tab.id && "ring-2 ring-white"
                     )}
                   >
-                    <tab.icon className="w-5 h-5" />
-                    <span className="text-sm md:text-base">{tab.label}</span>
+                    <tab.icon className="w-4 h-4 md:w-5 md:h-5" />
+                    <span className="text-xs md:text-sm">{tab.label}</span>
                   </button>
                 ))}
                 
@@ -1771,12 +1858,43 @@ export default function App() {
                       <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Listesi Yönetimi</label>
                         <div className="space-y-4">
+                          {/* Main Link Activation */}
+                          <button
+                            onClick={() => {
+                              setPlaylistUrl(DEFAULT_M3U_URL);
+                              handleUrlSubmit(DEFAULT_M3U_URL);
+                            }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(20); }}
+                            className={cn(
+                              "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between group",
+                              settingsArea === 'content' && settingsFocus === 20 
+                                ? "border-white bg-white/10 scale-105 shadow-2xl" 
+                                : "border-white/5 bg-white/5 hover:border-white/20"
+                            )}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="p-3 bg-emerald-500/20 rounded-xl group-hover:scale-110 transition-transform">
+                                <Check className="w-6 h-6 text-emerald-500" />
+                              </div>
+                              <div className="text-left">
+                                <div className="text-lg font-bold">Ana Linki Etkinleştir</div>
+                                <div className="text-xs opacity-50 font-medium">Varsayılan listeyi (GtYU85cD) yükler</div>
+                              </div>
+                            </div>
+                            <div className={cn(
+                              "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
+                              settingsArea === 'content' && settingsFocus === 20 ? "bg-white text-black" : "bg-white/10 text-white/40"
+                            )}>
+                              Aktif Et
+                            </div>
+                          </button>
+
                           <div className="bg-white/5 p-6 rounded-2xl space-y-4">
                             <label className="text-sm font-bold text-zinc-400">M3U Linki Ekle</label>
                             <div className="flex gap-2">
                               <input
                                 type="url"
-                                placeholder="M3U URL'si girin..."
+                                placeholder="URL veya Cutt.ly kodu girin..."
                                 className={cn(
                                   "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
                                   settingsArea === 'content' && settingsFocus === 0 ? "border-white ring-2 ring-white/20" : "border-white/10"
@@ -1834,11 +1952,29 @@ export default function App() {
                                   if (!epgUrl) return;
                                   setIsLoading(true);
                                   try {
-                                    const epg = await fetchAndParseEPG(epgUrl);
-                                    setEpgData(epg);
-                                    localStorage.setItem('epg_url', epgUrl);
-                                    setShowSuccess(true);
-                                    setTimeout(() => setShowSuccess(false), 3000);
+                                    const urlsToTry = resolveUrl(epgUrl);
+                                    let epg = null;
+                                    let successUrl = '';
+                                    for (const url of urlsToTry) {
+                                      try {
+                                        epg = await fetchAndParseEPG(url);
+                                        if (epg) {
+                                          successUrl = url;
+                                          break;
+                                        }
+                                      } catch (e) {
+                                        console.error(`EPG load failed for ${url}:`, e);
+                                      }
+                                    }
+                                    
+                                    if (epg) {
+                                      setEpgData(epg);
+                                      localStorage.setItem('epg_url', successUrl);
+                                      setShowSuccess(true);
+                                      setTimeout(() => setShowSuccess(false), 3000);
+                                    } else {
+                                      throw new Error('EPG yüklenemedi.');
+                                    }
                                   } catch (err) {
                                     setError('EPG yüklenirken hata oluştu.');
                                   } finally {
@@ -1872,6 +2008,38 @@ export default function App() {
                                 Mevcut EPG'yi Sil
                               </button>
                             )}
+                          </div>
+
+                          <div className="bg-white/5 p-6 rounded-2xl space-y-4">
+                            <label className="text-sm font-bold text-zinc-400">URL Linki Ekle</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                placeholder="URL veya Cutt.ly kodu girin..."
+                                className={cn(
+                                  "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
+                                  settingsArea === 'content' && settingsFocus === 10 ? "border-white ring-2 ring-white/20" : "border-white/10"
+                                )}
+                                value={extraUrl}
+                                onChange={(e) => setExtraUrl(e.target.value)}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(10); }}
+                              />
+                              <button
+                                onClick={() => {
+                                  if (!extraUrl) return;
+                                  setPlaylistUrl(extraUrl);
+                                  handleUrlSubmit(extraUrl);
+                                }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(11); }}
+                                style={{ backgroundColor: themeColor }}
+                                className={cn(
+                                  "px-6 py-3 rounded-xl font-bold text-white transition-all",
+                                  settingsArea === 'content' && settingsFocus === 11 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
+                                )}
+                              >
+                                Yükle
+                              </button>
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2032,12 +2200,11 @@ export default function App() {
                   )}
                   </AnimatePresence>
 
-                      {/* Universal Close Button for Mobile/Touch */}
+                      {/* Universal Back Button for Mobile/Touch/Remote */}
                       <div className="pt-10">
                         <button 
                           onClick={() => {
-                            setShowSettings(false);
-                            setNavContext('browse');
+                            setSettingsArea('tabs');
                           }}
                           onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3); }}
                           style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3)) ? themeColor : undefined }}
@@ -2046,8 +2213,8 @@ export default function App() {
                             (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 7 : 3)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
                           )}
                         >
-                          <X className="w-6 h-6" />
-                          Ayarları Kapat
+                          <ChevronLeft className="w-6 h-6" />
+                          Geri Dön
                         </button>
                       </div>
                 </div>
