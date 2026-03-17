@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -28,6 +28,9 @@ interface ChannelRowProps {
   orientation: 'landscape' | 'portrait';
   previewChannelId: string | null;
   themeColor: string;
+  deviceType: 'pc' | 'tv' | 'tablet' | 'phone';
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 const ChannelRow: React.FC<ChannelRowProps> = ({ 
@@ -44,15 +47,19 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   activeCol, 
   orientation, 
   previewChannelId, 
-  themeColor 
+  themeColor,
+  deviceType,
+  isCollapsed,
+  onToggleCollapse
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isActiveRow = rowIndex === activeRow;
+  const isHeaderFocused = isActiveRow && activeCol === -1;
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [pressingId, setPressingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isActiveRow && scrollRef.current) {
+    if (isActiveRow && !isCollapsed && scrollRef.current && activeCol >= 0) {
       const activeElement = scrollRef.current.children[activeCol] as HTMLElement;
       if (activeElement) {
         activeElement.scrollIntoView({
@@ -62,7 +69,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
         });
       }
     }
-  }, [isActiveRow, activeCol]);
+  }, [isActiveRow, activeCol, isCollapsed]);
 
   const handlePressStart = (channelId: string) => {
     setPressingId(channelId);
@@ -81,77 +88,94 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   };
 
   return (
-    <div className="space-y-3 group/row relative">
+    <div className="space-y-2 group/row relative">
       <div className="px-4 md:px-12 flex items-center">
         <div 
+          onClick={onToggleCollapse}
+          onPointerDown={() => onFocus(rowIndex, -1)}
           style={{ 
-            backgroundColor: isActiveRow ? themeColor : 'rgba(255,255,255,0.05)',
+            backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
             color: 'white',
-            borderColor: isActiveRow ? 'transparent' : 'rgba(255,255,255,0.1)'
+            borderColor: isHeaderFocused ? 'white' : 'transparent'
           }}
           className={cn(
             "flex items-center px-6 py-2.5 rounded-full text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
-            isActiveRow ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
+            isHeaderFocused ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
           )}
         >
           <div className={cn(
             "w-2 h-2 rounded-full mr-3 animate-pulse",
-            isActiveRow ? "bg-white" : "bg-white/20"
+            isHeaderFocused ? "bg-white" : "bg-white/20"
           )} />
-          {title}
+          <span className="mr-3">{title}</span>
+          {!isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          <span className="ml-2 text-[10px] opacity-50">({channels.length})</span>
         </div>
       </div>
-      <div className="relative">
-        <div 
-          ref={scrollRef}
-          className="flex gap-4 overflow-x-auto scrollbar-hide px-4 md:px-12 pt-8 pb-8 snap-x"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        >
-          {channels.map((channel, colIndex) => {
-            const isFocused = isActiveRow && colIndex === activeCol;
-            const isPreviewing = isFocused && previewChannelId === channel.id;
-            const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
-            const isPressing = pressingId === channel.id;
+      
+      <AnimatePresence>
+        {!isCollapsed && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+            className="relative overflow-hidden"
+          >
+            <div 
+              ref={scrollRef}
+              className="flex gap-4 overflow-x-auto scrollbar-hide px-4 md:px-12 pt-4 pb-4 snap-x"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+              {channels.map((channel, colIndex) => {
+                const isFocused = isActiveRow && colIndex === activeCol;
+                const isPreviewing = isFocused && previewChannelId === channel.id;
+                const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
+                const isPressing = pressingId === channel.id;
 
-            const getCategoryBadge = () => {
-              if (title === 'İzlemeye Devam Et') return 'İ';
-              const group = (channel.group || '').toLowerCase();
-              if (group.includes('live') || group.includes('canlı') || group.includes('tv')) return 'C';
-              if (group.includes('movie') || group.includes('film') || group.includes('sinema')) return 'F';
-              if (group.includes('series') || group.includes('dizi') || group.includes('show')) return 'D';
-              return null;
-            };
-            const badge = getCategoryBadge();
+                const getCategoryBadge = () => {
+                  if (title === 'İzlemeye Devam Et') return 'İ';
+                  const group = (channel.group || '').toLowerCase();
+                  if (group.includes('live') || group.includes('canlı') || group.includes('tv')) return 'C';
+                  if (group.includes('movie') || group.includes('film') || group.includes('sinema')) return 'F';
+                  if (group.includes('series') || group.includes('dizi') || group.includes('show')) return 'D';
+                  return null;
+                };
+                const badge = getCategoryBadge();
 
-            return (
-              <div key={channel.id} className="flex flex-col gap-2 snap-start">
-                <motion.div
-                  animate={{ 
-                    scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
-                    zIndex: isFocused ? 30 : 10,
-                    y: isFocused ? -10 : 0
-                  }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                  onClick={() => {
-                    onFocus(rowIndex, colIndex);
-                    onSelect(channel);
-                  }}
-                  onPointerDown={() => onFocus(rowIndex, colIndex)}
-                  onMouseDown={() => handlePressStart(channel.id)}
-                  onMouseUp={handlePressEnd}
-                  onMouseLeave={handlePressEnd}
-                  onTouchStart={() => handlePressStart(channel.id)}
-                  onTouchEnd={handlePressEnd}
-                  onMouseEnter={() => onFocus(rowIndex, colIndex)}
-                  style={{ 
-                    boxShadow: isFocused ? `0 0 30px ${themeColor}4d` : undefined,
-                    borderColor: isFocused ? themeColor : 'transparent'
-                  }}
-                  className={cn(
-                    "relative flex-none bg-zinc-900 rounded-md overflow-hidden group/card transition-all duration-300 border-4 cursor-pointer",
-                    orientation === 'landscape' ? "w-40 md:w-56 aspect-video" : "w-32 md:w-44 aspect-[2/3]"
-                  )}
-                >
+                return (
+                  <div key={channel.id} className="flex flex-col gap-2 snap-start">
+                    <motion.div
+                      animate={{ 
+                        scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
+                        zIndex: isFocused ? 30 : 10,
+                        y: isFocused ? -10 : 0
+                      }}
+                      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                      onClick={() => {
+                        onFocus(rowIndex, colIndex);
+                        onSelect(channel);
+                      }}
+                      onPointerDown={() => onFocus(rowIndex, colIndex)}
+                      onMouseDown={() => handlePressStart(channel.id)}
+                      onMouseUp={handlePressEnd}
+                      onMouseLeave={handlePressEnd}
+                      onTouchStart={() => handlePressStart(channel.id)}
+                      onTouchEnd={handlePressEnd}
+                      onMouseEnter={() => onFocus(rowIndex, colIndex)}
+                      style={{ 
+                        boxShadow: isFocused ? `0 0 30px ${themeColor}4d` : undefined,
+                        borderColor: isFocused ? themeColor : 'transparent'
+                      }}
+                      className={cn(
+                        "relative flex-none bg-zinc-900 rounded-md overflow-hidden group/card transition-all duration-300 border-4 cursor-pointer",
+                        deviceType === 'tv' 
+                          ? (orientation === 'landscape' ? "w-48 md:w-72 aspect-video" : "w-40 md:w-56 aspect-[2/3]")
+                          : deviceType === 'phone'
+                          ? (orientation === 'landscape' ? "w-32 aspect-video" : "w-24 aspect-[2/3]")
+                          : (orientation === 'landscape' ? "w-40 md:w-56 aspect-video" : "w-32 md:w-44 aspect-[2/3]")
+                      )}
+                    >
                   {isPressing && (
                     <motion.div 
                       initial={{ width: 0 }}
@@ -195,7 +219,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                   </button>
                   {isPreviewing ? (
                     <div className="w-full h-full bg-black">
-                      <PreviewPlayer url={channel.url} />
+                      <PreviewPlayer url={channel.urls[0]} />
                       <div 
                         style={{ backgroundColor: themeColor }}
                         className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 animate-pulse text-white"
@@ -247,9 +271,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             );
           })}
         </div>
-      </div>
-    </div>
-  );
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
+);
 };
 
 const Logo = () => {
@@ -300,7 +326,7 @@ const Logo = () => {
 };
 
 const WeatherWidget = ({ city, themeColor }: { city: string, themeColor: string }) => {
-  const [weather, setWeather] = useState<{ temp: number, code: number } | null>(null);
+  const [weather, setWeather] = useState<{ temp: number, code: number, isDay: number } | null>(null);
 
   useEffect(() => {
     const fetchWeather = async () => {
@@ -313,7 +339,8 @@ const WeatherWidget = ({ city, themeColor }: { city: string, themeColor: string 
           const weatherData = await weatherRes.json();
           setWeather({
             temp: Math.round(weatherData.current_weather.temperature),
-            code: weatherData.current_weather.weathercode
+            code: weatherData.current_weather.weathercode,
+            isDay: weatherData.current_weather.is_day
           });
         }
       } catch (err) {
@@ -326,22 +353,37 @@ const WeatherWidget = ({ city, themeColor }: { city: string, themeColor: string 
     return () => clearInterval(interval);
   }, [city]);
 
-  const getEmoji = (code: number) => {
-    if (code === 0) return '☀️';
-    if (code >= 1 && code <= 3) return '🌤️';
-    if (code >= 45 && code <= 48) return '🌫️';
-    if (code >= 51 && code <= 67) return '🌧️';
-    if (code >= 71 && code <= 77) return '❄️';
-    if (code >= 80 && code <= 82) return '🌦️';
-    if (code >= 95 && code <= 99) return '⛈️';
-    return '🌡️';
+  const getEmoji = (code: number, isDay: number) => {
+    const isNight = isDay === 0;
+    
+    if (isNight) {
+      // Gece için en estetik tekli emojiler
+      if (code === 0) return '🌙'; // Açık Gece
+      if (code >= 1 && code <= 3) return '☁️'; // Bulutlu Gece
+      if (code >= 45 && code <= 48) return '🌫️'; // Sisli
+      if (code >= 51 && code <= 67) return '🌧️'; // Yağmurlu
+      if (code >= 71 && code <= 77) return '🌨️'; // Karlı
+      if (code >= 80 && code <= 82) return '🌧️'; // Sağanak
+      if (code >= 95 && code <= 99) return '⛈️'; // Fırtına
+      return '🌙';
+    } else {
+      // Gündüz için güneşli/entegre emojiler
+      if (code === 0) return '☀️'; // Açık
+      if (code >= 1 && code <= 3) return '🌤️'; // Az Bulutlu
+      if (code >= 45 && code <= 48) return '🌫️'; // Sisli
+      if (code >= 51 && code <= 67) return '🌦️'; // Yağmurlu
+      if (code >= 71 && code <= 77) return '🌨️'; // Karlı
+      if (code >= 80 && code <= 82) return '🌦️'; // Sağanak
+      if (code >= 95 && code <= 99) return '⛈️'; // Fırtına
+      return '☀️';
+    }
   };
 
   if (!weather) return null;
 
   return (
     <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md mr-4">
-      <span className="text-xl">{getEmoji(weather.code)}</span>
+      <span className="text-xl">{getEmoji(weather.code, weather.isDay)}</span>
       <div className="flex flex-col leading-none">
         <span style={{ color: themeColor }} className="text-sm font-black italic">{weather.temp}°C</span>
         <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-wider">{city}</span>
@@ -442,12 +484,22 @@ export default function App() {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
-  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et']);
+  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
+  const [brokenChannelIds, setBrokenChannelIds] = useState<Set<string>>(new Set());
+  const [hasCheckedLinks, setHasCheckedLinks] = useState(() => {
+    const saved = sessionStorage.getItem('has_checked_links');
+    return saved === 'true';
+  });
+  const [isCheckingLinks, setIsCheckingLinks] = useState(false);
+  const [checkProgress, setCheckProgress] = useState(0);
   const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('auto_preview_enabled');
     return saved === null ? false : saved === 'true';
   });
+  const [deviceType, setDeviceType] = useState<'pc' | 'tv' | 'tablet' | 'phone'>(() => 
+    (localStorage.getItem('device_type') as 'pc' | 'tv' | 'tablet' | 'phone') || 'pc'
+  );
 
   const featuredChannel = useMemo(() => {
     if (channels.length === 0) return null;
@@ -457,6 +509,7 @@ export default function App() {
   // TV Navigation State
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
+  const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
   const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu'>('browse');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
@@ -546,6 +599,13 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    if (channels.length === 0) {
+      setActiveRow(0);
+      setActiveCol(0);
+    }
+  }, [channels.length]);
+
   const handleDeleteChannel = (channelId: string) => {
     setChannels(prev => prev.filter(ch => ch.id !== channelId));
     setFavorites(prev => prev.filter(id => id !== channelId));
@@ -567,10 +627,11 @@ export default function App() {
     }
 
     const groups: Record<string, M3UChannel[]> = {};
+    const broken: M3UChannel[] = [];
     
     // Add Favorites as the first group if it has items
     if (Array.isArray(favorites) && favorites.length > 0) {
-      const favoriteChannels = channels.filter(ch => favorites.includes(ch.id));
+      const favoriteChannels = channels.filter(ch => favorites.includes(ch.id) && !brokenChannelIds.has(ch.id));
       if (favoriteChannels.length > 0) {
         groups['Favorilerim'] = favoriteChannels;
       }
@@ -578,40 +639,48 @@ export default function App() {
 
     // Add Canlı as a group if it has items
     if (canliChannels.length > 0) {
-      const matched = channels.filter(ch => canliChannels.includes(ch.id));
+      const matched = channels.filter(ch => canliChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
       if (matched.length > 0) groups['Canlı'] = matched;
     }
 
     // Add Dizi as a group if it has items
     if (diziChannels.length > 0) {
-      const matched = channels.filter(ch => diziChannels.includes(ch.id));
+      const matched = channels.filter(ch => diziChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
       if (matched.length > 0) groups['Dizi'] = matched;
     }
 
     // Add Film as a group if it has items
     if (filmChannels.length > 0) {
-      const matched = channels.filter(ch => filmChannels.includes(ch.id));
+      const matched = channels.filter(ch => filmChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
       if (matched.length > 0) groups['Film'] = matched;
     }
 
     // Add Recently Watched as the next group if it has items
     if (recentlyWatched.length > 0) {
-      groups['İzlemeye Devam Et'] = recentlyWatched;
+      groups['İzlemeye Devam Et'] = recentlyWatched.filter(ch => !brokenChannelIds.has(ch.id));
     }
 
     filtered.forEach(channel => {
+      if (brokenChannelIds.has(channel.id)) {
+        broken.push(channel);
+        return;
+      }
       const groupName = channel.group || 'General';
       if (!groups[groupName]) groups[groupName] = [];
       groups[groupName].push(channel);
     });
 
+    if (broken.length > 0) {
+      groups['Çalışmayanlar'] = broken;
+    }
+
     return Object.entries(groups)
       .filter(([group]) => {
         if (visibleCategories.length > 0) {
-          return visibleCategories.includes(group);
+          return visibleCategories.includes(group) || group === 'Çalışmayanlar';
         }
         // Varsayılan olarak özel grupları gizle, M3U gruplarını göster
-        const specialGroups = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        const specialGroups = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar'];
         return !specialGroups.includes(group);
       })
       .sort((a, b) => {
@@ -623,9 +692,12 @@ export default function App() {
         if (aIdx !== -1) return -1;
         if (bIdx !== -1) return 1;
         
+        if (a[0] === 'Çalışmayanlar') return 1;
+        if (b[0] === 'Çalışmayanlar') return -1;
+        
         return b[1].length - a[1].length;
       });
-  }, [channels, searchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels]);
+  }, [channels, searchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds]);
 
   const toggleManualCategory = (channelId: string, type: 'canli' | 'dizi' | 'film') => {
     const setters = {
@@ -825,11 +897,12 @@ export default function App() {
       let key = e.key;
       // Normalize TV remote keys
       if (key === 'Select' || key === 'OK') key = 'Enter';
-      if (key === 'Back' || key === 'GoBack' || key === 'XF86Back') key = 'Backspace';
+      if (key === 'Back' || key === 'GoBack' || key === 'XF86Back' || key === 'MediaStop') key = 'Backspace';
       if (key === 'Up') key = 'ArrowUp';
       if (key === 'Down') key = 'ArrowDown';
       if (key === 'Left') key = 'ArrowLeft';
       if (key === 'Right') key = 'ArrowRight';
+      if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = 'Enter';
 
       // Detect long press for Enter/OK
       if (key === 'Enter' && !isKeyHeld.current) {
@@ -868,6 +941,60 @@ export default function App() {
         if (navContext === 'browse' && activeRow === -1 && channels.length > 0) {
           return;
         }
+      }
+
+      if (navContext === 'browse' && channels.length === 0) {
+        switch (key) {
+          case 'ArrowDown':
+            e.preventDefault();
+            if (activeRow === 1) setActiveRow(3);
+            else setActiveRow(prev => Math.min(4, prev + 1));
+            break;
+          case 'ArrowUp':
+            e.preventDefault();
+            if (activeRow === 3) setActiveRow(1);
+            else setActiveRow(prev => Math.max(0, prev - 1));
+            break;
+          case 'ArrowRight':
+            if (activeRow === 1) {
+              e.preventDefault();
+              setActiveCol(1);
+            }
+            break;
+          case 'ArrowLeft':
+            if (activeRow === 1) {
+              e.preventDefault();
+              setActiveCol(0);
+            }
+            break;
+          case 'Enter':
+            e.preventDefault();
+            if (activeRow === 0) {
+              document.getElementById('empty-file-upload')?.click();
+            } else if (activeRow === 1) {
+              if (activeCol === 0) {
+                document.getElementById('empty-url-input')?.focus();
+              } else {
+                if (extraUrl) {
+                  setPlaylistUrl(extraUrl);
+                  handleUrlSubmit(extraUrl);
+                }
+              }
+            } else if (activeRow === 3) {
+              localStorage.removeItem('m3u_deleted');
+              localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+              setSavedUrl(DEFAULT_M3U_URL);
+              setPlaylistUrl(DEFAULT_M3U_URL);
+              setChannels([]);
+            } else if (activeRow === 4) {
+              setShowSettings(true);
+              setNavContext('settings');
+              setSettingsFocus(0);
+              setActiveSettingsTab(1);
+            }
+            break;
+        }
+        return;
       }
 
       if (navContext === 'channel-menu') {
@@ -923,8 +1050,9 @@ export default function App() {
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 1) setSettingsFocus(2);
                 else if (settingsFocus === 4) setSettingsFocus(5);
-                else if (settingsFocus === 7) setSettingsFocus(8);
-                else if (settingsFocus === 9) setSettingsFocus(10);
+                else if (settingsFocus === 6) setSettingsFocus(7);
+              } else if (activeSettingsTab === 2) {
+                if (settingsFocus >= 2 && settingsFocus < 5) setSettingsFocus(prev => prev + 1);
               }
             }
             break;
@@ -943,11 +1071,11 @@ export default function App() {
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 2) setSettingsFocus(1);
                 else if (settingsFocus === 5) setSettingsFocus(4);
-                else if (settingsFocus === 8) setSettingsFocus(7);
-                else if (settingsFocus === 10) setSettingsFocus(9);
-                else if ([0, 1, 3, 4, 7, 9, 11].includes(settingsFocus)) setSettingsArea('tabs');
+                else if (settingsFocus === 7) setSettingsFocus(6);
+                else if ([0, 1, 3, 4, 6, 8].includes(settingsFocus)) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
-                setSettingsArea('tabs');
+                if (settingsFocus > 2 && settingsFocus <= 5) setSettingsFocus(prev => prev - 1);
+                else if (settingsFocus === 0 || settingsFocus === 1 || settingsFocus === 2 || settingsFocus === 6 || settingsFocus === 7) setSettingsArea('tabs');
               }
             }
             break;
@@ -961,17 +1089,18 @@ export default function App() {
                 else if (settingsFocus === 8 || settingsFocus === 9) setSettingsFocus(10);
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 0) setSettingsFocus(1);
-                else if (settingsFocus === 1 || settingsFocus === 2) setSettingsFocus(3);
-                else if (settingsFocus === 3) setSettingsFocus(4);
-                else if (settingsFocus === 4 || settingsFocus === 5) {
-                  if (epgData) setSettingsFocus(6);
-                  else setSettingsFocus(7);
+                else if (settingsFocus === 1 || settingsFocus === 2) {
+                  if (epgData) setSettingsFocus(3);
+                  else setSettingsFocus(4);
                 }
-                else if (settingsFocus === 6) setSettingsFocus(7);
-                else if (settingsFocus === 7 || settingsFocus === 8) setSettingsFocus(9);
-                else if (settingsFocus === 9 || settingsFocus === 10) setSettingsFocus(11);
+                else if (settingsFocus === 3) setSettingsFocus(4);
+                else if (settingsFocus === 4 || settingsFocus === 5) setSettingsFocus(6);
+                else if (settingsFocus === 6 || settingsFocus === 7) setSettingsFocus(8);
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus < 3) setSettingsFocus(prev => prev + 1);
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(2);
+                else if (settingsFocus >= 2 && settingsFocus <= 5) setSettingsFocus(6);
+                else if (settingsFocus === 6) setSettingsFocus(7);
               }
             }
             break;
@@ -985,20 +1114,21 @@ export default function App() {
                 else if (settingsFocus === 8 || settingsFocus === 9) setSettingsFocus(0);
                 else if (settingsFocus <= 7) setSettingsArea('tabs');
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 11) setSettingsFocus(9);
-                else if (settingsFocus === 9 || settingsFocus === 10) setSettingsFocus(7);
-                else if (settingsFocus === 7 || settingsFocus === 8) {
-                  if (epgData) setSettingsFocus(6);
-                  else setSettingsFocus(4);
+                if (settingsFocus === 8) setSettingsFocus(6);
+                else if (settingsFocus === 6 || settingsFocus === 7) setSettingsFocus(4);
+                else if (settingsFocus === 4 || settingsFocus === 5) {
+                  if (epgData) setSettingsFocus(3);
+                  else setSettingsFocus(1);
                 }
-                else if (settingsFocus === 6) setSettingsFocus(4);
-                else if (settingsFocus === 4 || settingsFocus === 5) setSettingsFocus(3);
                 else if (settingsFocus === 3) setSettingsFocus(1);
                 else if (settingsFocus === 1 || settingsFocus === 2) setSettingsFocus(0);
                 else if (settingsFocus === 0) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus > 0) setSettingsFocus(prev => prev - 1);
-                else setSettingsArea('tabs');
+                if (settingsFocus === 7) setSettingsFocus(6);
+                else if (settingsFocus === 6) setSettingsFocus(2);
+                else if (settingsFocus >= 2 && settingsFocus <= 5) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 0) setSettingsArea('tabs');
               }
             }
             break;
@@ -1083,7 +1213,12 @@ export default function App() {
               setActiveRow(-4);
               setActiveCol(0);
             } else if (activeRow > 0) {
-              setActiveRow(prev => prev - 1);
+              const nextRow = activeRow - 1;
+              const group = groupedChannels[nextRow]?.[0];
+              setActiveRow(nextRow);
+              if (group && collapsedRows.has(group)) {
+                setActiveCol(-1);
+              }
             }
             break;
           case 'ArrowDown':
@@ -1098,16 +1233,36 @@ export default function App() {
               setActiveRow(-1);
               setActiveCol(0);
             } else if (activeRow === -1) {
+              const group = groupedChannels[0]?.[0];
               setActiveRow(0);
-              setActiveCol(0);
+              if (group && collapsedRows.has(group)) {
+                setActiveCol(-1);
+              } else {
+                setActiveCol(0);
+              }
             } else {
-              setActiveRow(prev => Math.min(groupedChannels.length - 1, prev + 1));
+              const isLastRow = activeRow === groupedChannels.length - 1;
+              const nextRow = isLastRow ? 0 : activeRow + 1;
+              const group = groupedChannels[nextRow]?.[0];
+              setActiveRow(nextRow);
+              
+              // Reset or clamp column when wrapping around or changing rows
+              const nextRowChannels = groupedChannels[nextRow]?.[1] || [];
+              if (group && collapsedRows.has(group)) {
+                setActiveCol(-1);
+              } else if (activeCol >= nextRowChannels.length) {
+                setActiveCol(Math.max(0, nextRowChannels.length - 1));
+              }
             }
             break;
           case 'ArrowLeft':
             e.preventDefault();
             if (activeRow === -4) return;
-            setActiveCol(prev => Math.max(0, prev - 1));
+            if (activeRow >= 0) {
+              setActiveCol(prev => Math.max(-1, prev - 1));
+            } else {
+              setActiveCol(prev => Math.max(0, prev - 1));
+            }
             break;
           case 'ArrowRight':
             e.preventDefault();
@@ -1120,6 +1275,11 @@ export default function App() {
               const otherFilters = filterHeroButtons.filter(b => b.id !== 'search');
               setActiveCol(prev => Math.min(otherFilters.length - 1, prev + 1));
             } else {
+              const group = groupedChannels[activeRow]?.[0];
+              if (group && collapsedRows.has(group)) {
+                // Do nothing, stay on header
+                return;
+              }
               const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
               setActiveCol(prev => Math.min(currentRowLength - 1, prev + 1));
             }
@@ -1141,10 +1301,22 @@ export default function App() {
               const button = otherFilters[activeCol];
               if (button) button.action();
             } else {
-              const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
-              if (selectedChannel) {
-                setCurrentChannel(selectedChannel);
-                setNavContext('player');
+              if (activeCol === -1) {
+                const group = groupedChannels[activeRow]?.[0];
+                if (group) {
+                  setCollapsedRows(prev => {
+                    const next = new Set(prev);
+                    if (next.has(group)) next.delete(group);
+                    else next.add(group);
+                    return next;
+                  });
+                }
+              } else {
+                const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
+                if (selectedChannel) {
+                  setCurrentChannel(selectedChannel);
+                  setNavContext('player');
+                }
               }
             }
             break;
@@ -1210,9 +1382,11 @@ export default function App() {
         throw new Error('Oynatma listesi yüklenemedi. URL\'yi kontrol edin.');
       }
 
-      const content = await successfulResponse.text();
+      const content = await (successfulResponse as Response).text();
       const parsed = parseM3U(content);
       setChannels(parsed);
+      setHasCheckedLinks(false);
+      setBrokenChannelIds(new Set());
 
       // Load EPG if URL provided
       if (epgUrl) {
@@ -1256,6 +1430,74 @@ export default function App() {
     }
   };
 
+  const checkAbortController = useRef<AbortController | null>(null);
+
+  const checkChannelLinks = async (channelsToCheck: M3UChannel[]) => {
+    if (isCheckingLinks) return;
+    
+    if (checkAbortController.current) {
+      checkAbortController.current.abort();
+    }
+    checkAbortController.current = new AbortController();
+    const signal = checkAbortController.current.signal;
+    
+    setIsCheckingLinks(true);
+    setCheckProgress(0);
+    
+    const broken = new Set<string>();
+    const concurrencyLimit = 100;
+    const timeoutDuration = 3000;
+    
+    for (let i = 0; i < channelsToCheck.length; i += concurrencyLimit) {
+      if (signal.aborted) break;
+      
+      const chunk = channelsToCheck.slice(i, i + concurrencyLimit);
+      await Promise.all(chunk.map(async (channel) => {
+        if (signal.aborted) return;
+        
+        let atLeastOneWorks = false;
+        // Check all URLs for this channel
+        for (const url of channel.urls) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+            
+            const response = await fetch(getProxiedUrl(url), {
+              signal: controller.signal,
+              headers: { 'Range': 'bytes=0-1024' }
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok || response.status === 206) {
+              atLeastOneWorks = true;
+              break; // Found a working URL
+            }
+          } catch (e) {
+            // Continue to next URL
+          }
+        }
+
+        if (!atLeastOneWorks) {
+          broken.add(channel.id);
+        }
+      }));
+      
+      if (signal.aborted) break;
+      
+      setCheckProgress(Math.round(((i + chunk.length) / channelsToCheck.length) * 100));
+      if (broken.size > 0) {
+        setBrokenChannelIds(new Set(broken));
+      }
+    }
+    
+    if (!signal.aborted) {
+      setIsCheckingLinks(false);
+      setHasCheckedLinks(true);
+      sessionStorage.setItem('has_checked_links', 'true');
+    }
+  };
+
   // Auto-load saved URL on startup
   useEffect(() => {
     const autoLoad = async () => {
@@ -1263,13 +1505,20 @@ export default function App() {
       if (savedEpgUrl) setEpgUrl(savedEpgUrl);
 
       if (savedUrl && channels.length === 0) {
-        handleUrlSubmit(savedUrl);
+        await handleUrlSubmit(savedUrl);
       } else {
         setIsLoading(false);
       }
     };
     autoLoad();
   }, [savedUrl]);
+
+  // Trigger link check on initial load
+  useEffect(() => {
+    if (channels.length > 0 && !hasCheckedLinks && !isCheckingLinks) {
+      checkChannelLinks(channels);
+    }
+  }, [channels, hasCheckedLinks, isCheckingLinks]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1280,6 +1529,8 @@ export default function App() {
       const content = event.target?.result as string;
       const parsed = parseM3U(content);
       setChannels(parsed);
+      setHasCheckedLinks(false);
+      setBrokenChannelIds(new Set());
       if (parsed.length > 0) {
         setShowSuccess(true);
         setNavContext('browse');
@@ -1292,7 +1543,11 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#141414] text-white font-sans selection:bg-red-600/30 overflow-x-hidden">
+    <div className={cn(
+      "min-h-screen bg-[#141414] text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-500",
+      deviceType === 'tv' && "text-lg",
+      deviceType === 'phone' && "text-sm"
+    )}>
       {/* Navbar */}
       <nav className={cn(
         "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
@@ -1313,6 +1568,12 @@ export default function App() {
         <div className="flex items-center gap-4 md:gap-6">
           <WeatherWidget city={weatherCity} themeColor={themeColor} />
           <DigitalClock themeColor={themeColor} />
+          {isCheckingLinks && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
+              <div className="w-3 h-3 border-2 border-white/10 border-t-white rounded-full animate-spin" style={{ borderTopColor: themeColor }} />
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Kontrol: %{checkProgress}</span>
+            </div>
+          )}
           {channels.length > 0 && (
             <button 
               onClick={() => {
@@ -1347,33 +1608,133 @@ export default function App() {
               <p className="text-zinc-500 font-medium animate-pulse">Kanallar Yükleniyor...</p>
             </div>
           ) : channels.length === 0 ? (
-            <div className="relative h-[80vh] flex flex-col items-center justify-center space-y-8 text-center px-4">
+            <div className="relative min-h-[80vh] flex flex-col items-center justify-center space-y-8 text-center px-4 py-20">
               <div className="absolute inset-0 z-0 overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#141414]/60 to-[#141414]" />
               </div>
               
-              <div className="relative z-10 space-y-6 max-w-md">
-                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10">
-                  <Tv className="w-10 h-10 text-zinc-600" />
+              <div className="relative z-10 space-y-8 max-w-2xl w-full">
+                <div className="space-y-4">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 shadow-2xl">
+                    <Tv className="w-10 h-10 text-zinc-400" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-4xl font-black italic uppercase tracking-tighter text-white">Oynatma Listesi Yok</h2>
+                    <p className="text-zinc-500 max-w-md mx-auto font-medium">
+                      İzlemeye başlamak için bir M3U dosyası yükleyin veya bir URL adresi girin.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-bold text-zinc-300">Oynatma Listesi Yok</h2>
-                  <p className="text-zinc-500">
-                    İzlemeye başlamak için sağ üstteki profil ikonundan ayarlara giderek bir liste ekleyin.
-                  </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* File Upload Section */}
+                  <div className={cn(
+                    "bg-white/5 p-8 rounded-3xl border-2 transition-all flex flex-col items-center gap-4 group cursor-pointer",
+                    activeRow === 0 ? "border-white bg-white/10 scale-105 shadow-2xl" : "border-white/5 hover:border-white/10"
+                  )}
+                  onClick={() => document.getElementById('empty-file-upload')?.click()}
+                  onPointerDown={() => { setActiveRow(0); setActiveCol(0); }}
+                  onMouseEnter={() => { setActiveRow(0); setActiveCol(0); }}
+                  >
+                    <input id="empty-file-upload" type="file" accept=".m3u,.m3u8" className="hidden" onChange={handleFileUpload} />
+                    <div className="p-4 bg-white/10 rounded-2xl group-hover:scale-110 transition-transform">
+                      <Upload className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-white">Dosya Yükle</div>
+                      <div className="text-sm text-zinc-500">Cihazınızdan bir .m3u dosyası seçin</div>
+                    </div>
+                  </div>
+
+                  {/* URL Input Section */}
+                  <div className={cn(
+                    "bg-white/5 p-8 rounded-3xl border-2 transition-all flex flex-col gap-4",
+                    activeRow === 1 ? "border-white bg-white/10 scale-105 shadow-2xl" : "border-white/5"
+                  )}
+                  onPointerDown={() => { setActiveRow(1); setActiveCol(0); }}
+                  onMouseEnter={() => { setActiveRow(1); setActiveCol(0); }}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-4 bg-white/10 rounded-2xl">
+                        <LinkIcon className="w-8 h-8 text-white" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-xl font-bold text-white">URL Adresi</div>
+                        <div className="text-sm text-zinc-500">M3U linki veya Cutt.ly kodu</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        id="empty-url-input"
+                        type="url"
+                        placeholder="URL girin..."
+                        className={cn(
+                          "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm font-bold",
+                          activeRow === 1 && activeCol === 0 ? "border-white ring-4 ring-white/10" : "border-white/10"
+                        )}
+                        value={extraUrl}
+                        onChange={(e) => setExtraUrl(e.target.value)}
+                        onPointerDown={() => { setActiveRow(1); setActiveCol(0); }}
+                        onFocus={() => { setActiveRow(1); setActiveCol(0); }}
+                      />
+                      <button
+                        onClick={() => {
+                          if (!extraUrl) return;
+                          setPlaylistUrl(extraUrl);
+                          handleUrlSubmit(extraUrl);
+                        }}
+                        onPointerDown={() => { setActiveRow(1); setActiveCol(1); }}
+                        onMouseEnter={() => { setActiveRow(1); setActiveCol(1); }}
+                        style={{ backgroundColor: themeColor }}
+                        className={cn(
+                          "px-6 py-3 rounded-xl font-bold text-white transition-all",
+                          activeRow === 1 && activeCol === 1 ? "scale-110 shadow-xl brightness-110" : "opacity-90"
+                        )}
+                      >
+                        Yükle
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <button
-                  onClick={() => {
-                    setShowSettings(true);
-                    setNavContext('settings');
-                    setSettingsFocus(0);
-                    setActiveSettingsTab(1);
-                  }}
-                  style={{ backgroundColor: themeColor }}
-                  className="px-6 py-3 rounded-xl font-bold text-lg shadow-xl hover:scale-105 transition-all active:scale-95"
-                >
-                  Ayarları Aç
-                </button>
+
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('m3u_deleted');
+                      localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+                      setSavedUrl(DEFAULT_M3U_URL);
+                      setPlaylistUrl(DEFAULT_M3U_URL);
+                      setChannels([]);
+                    }}
+                    onPointerDown={() => { setActiveRow(3); setActiveCol(0); }}
+                    onMouseEnter={() => { setActiveRow(3); setActiveCol(0); }}
+                    className={cn(
+                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      activeRow === 3 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                    )}
+                  >
+                    <RefreshCw className={cn("w-5 h-5", activeRow === 3 && "animate-spin")} />
+                    Varsayılan Listeyi Yükle
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowSettings(true);
+                      setNavContext('settings');
+                      setSettingsFocus(0);
+                      setActiveSettingsTab(1);
+                    }}
+                    onPointerDown={() => { setActiveRow(4); setActiveCol(0); }}
+                    onMouseEnter={() => { setActiveRow(4); setActiveCol(0); }}
+                    className={cn(
+                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      activeRow === 4 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                    )}
+                  >
+                    <Settings className="w-5 h-5" />
+                    Gelişmiş Ayarlar
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
@@ -1398,7 +1759,10 @@ export default function App() {
                         <Tv className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
                         <span>ÖNE ÇIKAN CANLI YAYIN</span>
                       </div>
-                      <h1 className="text-3xl sm:text-5xl md:text-7xl font-black tracking-tighter uppercase italic line-clamp-2">{featuredChannel.name}</h1>
+                      <h1 className={cn(
+                        "font-black tracking-tighter uppercase italic line-clamp-2",
+                        deviceType === 'tv' ? "text-5xl sm:text-7xl md:text-9xl" : "text-3xl sm:text-5xl md:text-7xl"
+                      )}>{featuredChannel.name}</h1>
                       <p className="text-sm sm:text-lg text-zinc-300 line-clamp-2 sm:line-clamp-3 font-medium">
                         {featuredChannel.group || 'Genel'} kategorisinden canlı yayın. M3UFLIX'te yüksek kaliteli yayın şu an yayında.
                       </p>
@@ -1553,7 +1917,7 @@ export default function App() {
             )}
 
             {/* Rows */}
-            <div className={cn("relative z-20 space-y-12 pb-20 transition-all duration-500", searchQuery ? "mt-8" : "-mt-24")}>
+            <div className={cn("relative z-20 space-y-4 pb-20 transition-all duration-500", searchQuery ? "mt-8" : "-mt-24")}>
               {groupedChannels.map(([group, groupChannels], idx) => (
                 <ChannelRow 
                   key={group} 
@@ -1578,6 +1942,16 @@ export default function App() {
                   orientation={posterOrientation}
                   previewChannelId={previewChannelId}
                   themeColor={themeColor}
+                  deviceType={deviceType}
+                  isCollapsed={collapsedRows.has(group)}
+                  onToggleCollapse={() => {
+                    setCollapsedRows(prev => {
+                      const next = new Set(prev);
+                      if (next.has(group)) next.delete(group);
+                      else next.add(group);
+                      return next;
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -1758,6 +2132,7 @@ export default function App() {
                             <button
                               key={c.color}
                               onClick={() => setThemeColor(c.color)}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(i); }}
                               onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(i); }}
                               style={{ backgroundColor: c.color }}
                               className={cn(
@@ -1824,76 +2199,15 @@ export default function App() {
                       <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Listesi Yönetimi</label>
                         <div className="space-y-4">
-                          {/* Main Link Activation */}
-                          <button
-                            onClick={() => {
-                              setPlaylistUrl(DEFAULT_M3U_URL);
-                              handleUrlSubmit(DEFAULT_M3U_URL);
-                            }}
-                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
-                            className={cn(
-                              "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between group",
-                              settingsArea === 'content' && settingsFocus === 0 
-                                ? "border-white bg-white/10 scale-105 shadow-2xl" 
-                                : "border-white/5 bg-white/5 hover:border-white/20"
-                            )}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="p-3 bg-emerald-500/20 rounded-xl group-hover:scale-110 transition-transform">
-                                <Check className="w-6 h-6 text-emerald-500" />
-                              </div>
-                              <div className="text-left">
-                                <div className="text-lg font-bold">Ana Linki Etkinleştir</div>
-                                <div className="text-xs opacity-50 font-medium">Varsayılan listeyi (GtYU85cD) yükler</div>
-                              </div>
-                            </div>
-                            <div className={cn(
-                              "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
-                              settingsArea === 'content' && settingsFocus === 0 ? "bg-white text-black" : "bg-white/10 text-white/40"
-                            )}>
-                              Aktif Et
-                            </div>
-                          </button>
-
-                          <div className="bg-white/5 p-6 rounded-2xl space-y-4">
-                            <label className="text-sm font-bold text-zinc-400">M3U Linki Ekle</label>
-                            <div className="flex gap-2">
-                              <input
-                                type="url"
-                                placeholder="URL veya Cutt.ly kodu girin..."
-                                className={cn(
-                                  "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                  settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-2 ring-white/20" : "border-white/10"
-                                )}
-                                value={playlistUrl}
-                                onChange={(e) => setPlaylistUrl(e.target.value)}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(1); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
-                              />
-                              <button
-                                onClick={() => handleUrlSubmit()}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
-                                style={{ backgroundColor: themeColor }}
-                                className={cn(
-                                  "px-6 py-3 rounded-xl font-bold text-white transition-all",
-                                  settingsArea === 'content' && settingsFocus === 2 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
-                                )}
-                              >
-                                Yükle
-                              </button>
-                            </div>
-                          </div>
-
                           <div className="bg-white/5 p-6 rounded-2xl space-y-4">
                             <label className="text-sm font-bold text-zinc-400">M3U Dosyası Yükle</label>
                             <label className="block cursor-pointer group">
                               <input type="file" accept=".m3u,.m3u8" className="hidden" onChange={handleFileUpload} />
                               <div className={cn(
                                 "bg-black/40 border-2 border-dashed rounded-xl py-6 transition-all flex flex-col items-center gap-2",
-                                settingsArea === 'content' && settingsFocus === 3 ? "border-white bg-white/5" : "border-white/10"
+                                settingsArea === 'content' && settingsFocus === 0 ? "border-white bg-white/5" : "border-white/10"
                               )}
-                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(3); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(0); }}
                               >
                                 <Upload className="w-6 h-6 text-zinc-500" />
                                 <span className="text-sm font-bold text-zinc-300">Dosya Seç</span>
@@ -1908,12 +2222,12 @@ export default function App() {
                                 placeholder="EPG URL'si girin..."
                                 className={cn(
                                   "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                  settingsArea === 'content' && settingsFocus === 4 ? "border-white ring-2 ring-white/20" : "border-white/10"
+                                  settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-2 ring-white/20" : "border-white/10"
                                 )}
                                 value={epgUrl}
                                 onChange={(e) => setEpgUrl(e.target.value)}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(4); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(4); }}
+                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
                               />
                               <button
                                 id="epg-load-btn"
@@ -1950,12 +2264,12 @@ export default function App() {
                                     setIsLoading(false);
                                   }
                                 }}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(5); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(5); }}
+                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2); }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
                                 style={{ backgroundColor: themeColor }}
                                 className={cn(
                                   "px-6 py-3 rounded-xl font-bold text-white transition-all",
-                                  settingsArea === 'content' && settingsFocus === 5 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
+                                  settingsArea === 'content' && settingsFocus === 2 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
                                 )}
                               >
                                 Yükle
@@ -1968,11 +2282,11 @@ export default function App() {
                                   setEpgData(null);
                                   localStorage.removeItem('epg_url');
                                 }}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(6); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
+                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(3); }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(3); }}
                                 className={cn(
                                   "w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
-                                  settingsArea === 'content' && settingsFocus === 6 ? "bg-red-600 text-white" : "bg-red-500/10 text-red-500"
+                                  settingsArea === 'content' && settingsFocus === 3 ? "bg-red-600 text-white" : "bg-red-500/10 text-red-500"
                                 )}
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1989,12 +2303,12 @@ export default function App() {
                                 placeholder="URL veya Cutt.ly kodu girin..."
                                 className={cn(
                                   "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                  settingsArea === 'content' && settingsFocus === 7 ? "border-white ring-2 ring-white/20" : "border-white/10"
+                                  settingsArea === 'content' && settingsFocus === 4 ? "border-white ring-2 ring-white/20" : "border-white/10"
                                 )}
                                 value={extraUrl}
                                 onChange={(e) => setExtraUrl(e.target.value)}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(7); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(7); }}
+                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(4); }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(4); }}
                               />
                               <button
                                 onClick={() => {
@@ -2002,12 +2316,12 @@ export default function App() {
                                   setPlaylistUrl(extraUrl);
                                   handleUrlSubmit(extraUrl);
                                 }}
-                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(8); }}
-                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(8); }}
+                                onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(5); }}
+                                onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(5); }}
                                 style={{ backgroundColor: themeColor }}
                                 className={cn(
                                   "px-6 py-3 rounded-xl font-bold text-white transition-all",
-                                  settingsArea === 'content' && settingsFocus === 8 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
+                                  settingsArea === 'content' && settingsFocus === 5 ? "scale-105 shadow-lg brightness-110" : "opacity-90 hover:opacity-100"
                                 )}
                               >
                                 Yükle
@@ -2025,16 +2339,16 @@ export default function App() {
                                 setShowSettings(false);
                                 setChannels([]);
                               }}
-                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(9); }}
-                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(9); }}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(6); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
                               className={cn(
                                 "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                settingsArea === 'content' && settingsFocus === 9 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                                settingsArea === 'content' && settingsFocus === 6 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
                               )}
                             >
                               <div className="flex items-center gap-4">
                                 <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
-                                  <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 9 && "animate-spin")} />
+                                  <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 6 && "animate-spin")} />
                                 </div>
                                 <div>
                                   <div className="text-lg">Ana Linki Yükle</div>
@@ -2055,11 +2369,11 @@ export default function App() {
                                 setPlaylistUrl('');
                                 setShowSettings(false);
                               }}
-                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(10); }}
-                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(10); }}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(7); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(7); }}
                               className={cn(
                                 "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                settingsArea === 'content' && settingsFocus === 10 ? "bg-red-600 text-white scale-105 shadow-xl" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
+                                settingsArea === 'content' && settingsFocus === 7 ? "bg-red-600 text-white scale-105 shadow-xl" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
                               )}
                             >
                               <div className="flex items-center gap-4">
@@ -2145,17 +2459,52 @@ export default function App() {
                       </section>
 
                       <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2">
+                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                          Ekran Seçimi
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                          {[
+                            { id: 'pc', label: 'PC', icon: Monitor },
+                            { id: 'tv', label: 'TV', icon: Tv },
+                            { id: 'tablet', label: 'Tablet', icon: Tablet },
+                            { id: 'phone', label: 'Telefon', icon: Smartphone }
+                          ].map((device, i) => (
+                            <button
+                              key={device.id}
+                              onClick={() => {
+                                setDeviceType(device.id as any);
+                                localStorage.setItem('device_type', device.id);
+                              }}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2 + i); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2 + i); }}
+                              className={cn(
+                                "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-3",
+                                deviceType === device.id 
+                                  ? "border-white bg-white/10" 
+                                  : "border-white/5 hover:border-white/20 bg-white/5",
+                                settingsArea === 'content' && settingsFocus === (2 + i) && "ring-4 ring-white scale-105 z-10"
+                              )}
+                            >
+                              <device.icon className="w-6 h-6" />
+                              <span className="font-bold text-sm">{device.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Sistem</label>
                         <button 
                           onClick={() => {
                             localStorage.clear();
                             window.location.reload();
                           }}
-                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2); }}
-                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
+                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(6); }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            settingsArea === 'content' && settingsFocus === 2 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
+                            settingsArea === 'content' && settingsFocus === 6 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
                           )}
                         >
                           <RefreshCw className="w-6 h-6" />
@@ -2177,12 +2526,12 @@ export default function App() {
                           }}
                           onMouseEnter={() => { 
                             setSettingsArea('content'); 
-                            setSettingsFocus(activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 11 : 3); 
+                            setSettingsFocus(activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7); 
                           }}
-                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 11 : 3)) ? themeColor : undefined }}
+                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7)) ? themeColor : undefined }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 11 : 3)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
                           )}
                         >
                           <ChevronLeft className="w-6 h-6" />
@@ -2280,13 +2629,19 @@ export default function App() {
       {/* Video Player */}
       {currentChannel && (
         <VideoPlayer 
-          url={currentChannel.url} 
+          url={currentChannel.urls[0]} 
           channel={currentChannel}
+          channels={channels}
           epgData={epgData}
+          themeColor={themeColor}
           onClose={() => {
             setCurrentChannel(null);
             setNavContext('browse');
           }} 
+          onChannelSelect={(ch) => {
+            setCurrentChannel(ch);
+            setNavContext('player');
+          }}
         />
       )}
     </div>
