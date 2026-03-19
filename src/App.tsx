@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Wand2 } from 'lucide-react';
 import { parseM3U, M3UChannel } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
+import { VeoAnimator } from './components/VeoAnimator';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -31,6 +32,7 @@ interface ChannelRowProps {
   deviceType: 'pc' | 'tv' | 'tablet' | 'phone';
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  customProxyUrl?: string;
 }
 
 const ChannelRow: React.FC<ChannelRowProps> = ({ 
@@ -50,13 +52,24 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   themeColor,
   deviceType,
   isCollapsed,
-  onToggleCollapse
+  onToggleCollapse,
+  customProxyUrl
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   const isActiveRow = rowIndex === activeRow;
   const isHeaderFocused = isActiveRow && activeCol === -1;
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [pressingId, setPressingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isActiveRow && rowRef.current) {
+      rowRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [isActiveRow]);
 
   useEffect(() => {
     if (isActiveRow && !isCollapsed && scrollRef.current && activeCol >= 0) {
@@ -88,7 +101,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   };
 
   return (
-    <div className="space-y-2 group/row relative">
+    <div ref={rowRef} className="space-y-2 group/row relative">
       <div className="px-4 md:px-12 flex items-center">
         <div 
           onClick={onToggleCollapse}
@@ -153,6 +166,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       }}
                       transition={{ type: 'spring', stiffness: 300, damping: 20 }}
                       onClick={() => {
+                        console.log('ChannelRow clicked:', channel.name);
                         onFocus(rowIndex, colIndex);
                         onSelect(channel);
                       }}
@@ -218,8 +232,8 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                     <X className="w-3.5 h-3.5 text-white group-hover/delete:scale-110 transition-transform" />
                   </button>
                   {isPreviewing ? (
-                    <div className="w-full h-full bg-black">
-                      <PreviewPlayer url={channel.urls[0]} />
+                    <div className="w-full h-full bg-black pointer-events-none">
+                      <PreviewPlayer urls={channel.urls} customProxyUrl={customProxyUrl} />
                       <div 
                         style={{ backgroundColor: themeColor }}
                         className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 animate-pulse text-white"
@@ -435,6 +449,15 @@ const DigitalClock = ({ themeColor }: { themeColor: string }) => {
 
 const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
 
+const PROFILE_PICS = [
+  'THEME_COLOR',
+  'https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png',
+  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/1bdc9a33850498.56ba69ac2ba5b.png',
+  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/bf6e4a33850498.56ba69ac3064f.png',
+  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/64623a33850498.56ba69ac2a6f7.png',
+  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/e70b1333850498.56ba69ac32ae3.png'
+];
+
 export default function App() {
   const [channels, setChannels] = useState<M3UChannel[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -493,12 +516,19 @@ export default function App() {
   });
   const [isCheckingLinks, setIsCheckingLinks] = useState(false);
   const [checkProgress, setCheckProgress] = useState(0);
+
   const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('auto_preview_enabled');
     return saved === null ? false : saved === 'true';
   });
+  const [customProxyUrl, setCustomProxyUrl] = useState<string>(() => 
+    localStorage.getItem('custom_proxy_url') || ''
+  );
   const [deviceType, setDeviceType] = useState<'pc' | 'tv' | 'tablet' | 'phone'>(() => 
     (localStorage.getItem('device_type') as 'pc' | 'tv' | 'tablet' | 'phone') || 'pc'
+  );
+  const [profilePic, setProfilePic] = useState<string>(() => 
+    localStorage.getItem('profile_pic') || PROFILE_PICS[0]
   );
 
   const featuredChannel = useMemo(() => {
@@ -510,16 +540,51 @@ export default function App() {
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
-  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu'>('browse');
+  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu' | 'ai-animator'>('browse');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
+  const [showVeoAnimator, setShowVeoAnimator] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'content'>('tabs');
+  const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
   const [channelMenuFocus, setChannelMenuFocus] = useState(0);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
+
+  // Screen size detection for responsive focus and layout
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      // Only auto-update if not manually set in localStorage
+      if (!localStorage.getItem('device_type')) {
+        if (width < 640) setDeviceType('phone');
+        else if (width < 1024) setDeviceType('tablet');
+        else if (width > 2000) setDeviceType('tv');
+        else setDeviceType('pc');
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Global focus visibility management
+  useEffect(() => {
+    if (navContext === 'browse') {
+      if (activeRow < 0) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }, [activeRow, navContext]);
+
+  // Scroll settings content to top when tab changes
+  useEffect(() => {
+    if (settingsContentRef.current) {
+      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [activeSettingsTab]);
 
   useEffect(() => {
     if (showSettings && settingsSidebarRef.current) {
@@ -758,11 +823,17 @@ export default function App() {
     });
   };
 
+  useEffect(() => {
+    console.log('navContext changed to:', navContext);
+  }, [navContext]);
+
   const handleChannelSelect = (channel: M3UChannel) => {
+    console.log('handleChannelSelect called for:', channel.name);
     setRecentlyWatched(prev => {
       const filtered = prev.filter(ch => ch.id !== channel.id);
       return [channel, ...filtered].slice(0, 20);
     });
+    console.log('Setting currentChannel and navContext to player');
     setCurrentChannel(channel);
     setNavContext('player');
   };
@@ -801,6 +872,9 @@ export default function App() {
     if (Capacitor.isNativePlatform()) {
       return url;
     }
+    if (customProxyUrl) {
+      return `${customProxyUrl}${encodeURIComponent(url)}`;
+    }
     return `/api/proxy?url=${encodeURIComponent(url)}`;
   };
 
@@ -812,7 +886,8 @@ export default function App() {
     if (!featuredChannel) return [];
     return [
       { id: 'play', label: 'Oynat', icon: Play, action: () => handleChannelSelect(featuredChannel) },
-      { id: 'details', label: 'Detaylar', icon: Info, action: () => {} } // Details action can be added later
+      { id: 'animator', label: 'AI Animator', icon: Wand2, action: () => { setShowVeoAnimator(true); setNavContext('ai-animator'); } },
+      { id: 'details', label: 'Detaylar', icon: Info, action: () => {} }
     ];
   }, [featuredChannel]);
 
@@ -892,6 +967,7 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      console.log('App handleKeyDown:', e.key, 'navContext:', navContext);
       if (navContext === 'player') return;
 
       let key = e.key;
@@ -972,20 +1048,18 @@ export default function App() {
             if (activeRow === 0) {
               document.getElementById('empty-file-upload')?.click();
             } else if (activeRow === 1) {
-              if (activeCol === 0) {
+              if (extraUrl) {
+                setPlaylistUrl(extraUrl);
+                handleUrlSubmit(extraUrl);
+              } else if (activeCol === 0) {
                 document.getElementById('empty-url-input')?.focus();
-              } else {
-                if (extraUrl) {
-                  setPlaylistUrl(extraUrl);
-                  handleUrlSubmit(extraUrl);
-                }
               }
             } else if (activeRow === 3) {
               localStorage.removeItem('m3u_deleted');
               localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
               setSavedUrl(DEFAULT_M3U_URL);
               setPlaylistUrl(DEFAULT_M3U_URL);
-              setChannels([]);
+              handleUrlSubmit(DEFAULT_M3U_URL);
             } else if (activeRow === 4) {
               setShowSettings(true);
               setNavContext('settings');
@@ -1037,22 +1111,36 @@ export default function App() {
             e.preventDefault();
             if (settingsArea === 'tabs') {
               if (isMobile) {
-                setActiveSettingsTab(prev => (prev + 1) % 3);
+                setSidebarFocus(prev => (prev + 1) % 4);
+                if (sidebarFocus < 3) setActiveSettingsTab(sidebarFocus);
               } else {
-                setSettingsArea('content');
-                setSettingsFocus(0);
+                if (sidebarFocus < 3) {
+                  setSettingsArea('content');
+                  setSettingsFocus(0);
+                }
               }
             } else {
               // Internal navigation
               if (activeSettingsTab === 0) {
                 if (settingsFocus >= 0 && settingsFocus < 7) setSettingsFocus(prev => prev + 1);
                 else if (settingsFocus === 8) setSettingsFocus(9);
+                else if (settingsFocus === 9) setSettingsFocus(10);
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 1) setSettingsFocus(2);
                 else if (settingsFocus === 4) setSettingsFocus(5);
                 else if (settingsFocus === 6) setSettingsFocus(7);
+                else if (settingsFocus === 7) setSettingsFocus(8);
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus >= 2 && settingsFocus < 5) setSettingsFocus(prev => prev + 1);
+                if (settingsFocus === 0) setSettingsFocus(1);
+                else if (settingsFocus === 1) setSettingsFocus(2);
+                else if (settingsFocus === 2) setSettingsFocus(3);
+                else if (settingsFocus >= 3 && settingsFocus <= 10) {
+                  if (settingsFocus % 4 !== 2) setSettingsFocus(prev => prev + 1);
+                }
+                else if (settingsFocus >= 11 && settingsFocus <= 14) {
+                  if (settingsFocus < 14) setSettingsFocus(prev => prev + 1);
+                }
+                else if (settingsFocus === 15) setSettingsFocus(16);
               }
             }
             break;
@@ -1060,29 +1148,45 @@ export default function App() {
             e.preventDefault();
             if (settingsArea === 'tabs') {
               if (isMobile) {
-                setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
+                setSidebarFocus(prev => (prev - 1 + 4) % 4);
+                if (sidebarFocus < 3) setActiveSettingsTab(sidebarFocus);
               }
             } else {
               // Internal navigation or back to tabs
               if (activeSettingsTab === 0) {
                 if (settingsFocus > 0 && settingsFocus <= 7) setSettingsFocus(prev => prev - 1);
                 else if (settingsFocus === 9) setSettingsFocus(8);
-                else if (settingsFocus === 0 || settingsFocus === 8 || settingsFocus === 10) setSettingsArea('tabs');
+                else if (settingsFocus === 10) setSettingsFocus(9);
+                else if (settingsFocus === 0 || settingsFocus === 8) setSettingsArea('tabs');
               } else if (activeSettingsTab === 1) {
                 if (settingsFocus === 2) setSettingsFocus(1);
                 else if (settingsFocus === 5) setSettingsFocus(4);
                 else if (settingsFocus === 7) setSettingsFocus(6);
-                else if ([0, 1, 3, 4, 6, 8].includes(settingsFocus)) setSettingsArea('tabs');
+                else if (settingsFocus === 8) setSettingsFocus(7);
+                else if ([0, 1, 3, 4, 6].includes(settingsFocus)) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus > 2 && settingsFocus <= 5) setSettingsFocus(prev => prev - 1);
-                else if (settingsFocus === 0 || settingsFocus === 1 || settingsFocus === 2 || settingsFocus === 6 || settingsFocus === 7) setSettingsArea('tabs');
+                if (settingsFocus === 1) setSettingsFocus(0);
+                else if (settingsFocus === 2) setSettingsFocus(1);
+                else if (settingsFocus >= 3 && settingsFocus <= 10) {
+                  if (settingsFocus % 4 === 3) setSettingsArea('tabs');
+                  else setSettingsFocus(prev => prev - 1);
+                }
+                else if (settingsFocus >= 11 && settingsFocus <= 14) {
+                  if (settingsFocus % 4 === 3) setSettingsArea('tabs');
+                  else setSettingsFocus(prev => prev - 1);
+                }
+                else if (settingsFocus === 15) setSettingsFocus(11);
+                else if (settingsFocus === 16) setSettingsFocus(15);
+                else if (settingsFocus === 0) setSettingsArea('tabs');
               }
             }
             break;
           case 'ArrowDown':
             e.preventDefault();
             if (settingsArea === 'tabs') {
-              setActiveSettingsTab(prev => (prev + 1) % 3);
+              const nextFocus = (sidebarFocus + 1) % 4;
+              setSidebarFocus(nextFocus);
+              if (nextFocus < 3) setActiveSettingsTab(nextFocus);
             } else {
               if (activeSettingsTab === 0) {
                 if (settingsFocus <= 7) setSettingsFocus(8);
@@ -1095,67 +1199,99 @@ export default function App() {
                 }
                 else if (settingsFocus === 3) setSettingsFocus(4);
                 else if (settingsFocus === 4 || settingsFocus === 5) setSettingsFocus(6);
-                else if (settingsFocus === 6 || settingsFocus === 7) setSettingsFocus(8);
+                else if (settingsFocus === 6) setSettingsFocus(7);
+                else if (settingsFocus === 7) setSettingsFocus(8);
               } else if (activeSettingsTab === 2) {
                 if (settingsFocus === 0) setSettingsFocus(1);
                 else if (settingsFocus === 1) setSettingsFocus(2);
-                else if (settingsFocus >= 2 && settingsFocus <= 5) setSettingsFocus(6);
-                else if (settingsFocus === 6) setSettingsFocus(7);
+                else if (settingsFocus === 2) setSettingsFocus(3);
+                else if (settingsFocus >= 3 && settingsFocus <= 6) setSettingsFocus(settingsFocus + 4);
+                else if (settingsFocus >= 7 && settingsFocus <= 10) setSettingsFocus(11);
+                else if (settingsFocus >= 11 && settingsFocus <= 14) setSettingsFocus(15);
+                else if (settingsFocus === 15) setSettingsFocus(16);
               }
             }
             break;
           case 'ArrowUp':
             e.preventDefault();
             if (settingsArea === 'tabs') {
-              setActiveSettingsTab(prev => (prev - 1 + 3) % 3);
+              const nextFocus = (sidebarFocus - 1 + 4) % 4;
+              setSidebarFocus(nextFocus);
+              if (nextFocus < 3) setActiveSettingsTab(nextFocus);
             } else {
               if (activeSettingsTab === 0) {
                 if (settingsFocus === 10) setSettingsFocus(8);
                 else if (settingsFocus === 8 || settingsFocus === 9) setSettingsFocus(0);
-                else if (settingsFocus <= 7) setSettingsArea('tabs');
               } else if (activeSettingsTab === 1) {
-                if (settingsFocus === 8) setSettingsFocus(6);
-                else if (settingsFocus === 6 || settingsFocus === 7) setSettingsFocus(4);
+                if (settingsFocus === 8) setSettingsFocus(7);
+                else if (settingsFocus === 7) setSettingsFocus(6);
+                else if (settingsFocus === 6) setSettingsFocus(4);
                 else if (settingsFocus === 4 || settingsFocus === 5) {
                   if (epgData) setSettingsFocus(3);
                   else setSettingsFocus(1);
                 }
                 else if (settingsFocus === 3) setSettingsFocus(1);
                 else if (settingsFocus === 1 || settingsFocus === 2) setSettingsFocus(0);
-                else if (settingsFocus === 0) setSettingsArea('tabs');
               } else if (activeSettingsTab === 2) {
-                if (settingsFocus === 7) setSettingsFocus(6);
-                else if (settingsFocus === 6) setSettingsFocus(2);
-                else if (settingsFocus >= 2 && settingsFocus <= 5) setSettingsFocus(1);
+                if (settingsFocus === 16) setSettingsFocus(15);
+                else if (settingsFocus === 15) setSettingsFocus(11);
+                else if (settingsFocus >= 11 && settingsFocus <= 14) setSettingsFocus(7);
+                else if (settingsFocus >= 7 && settingsFocus <= 10) setSettingsFocus(settingsFocus - 4);
+                else if (settingsFocus >= 3 && settingsFocus <= 6) setSettingsFocus(2);
+                else if (settingsFocus === 2) setSettingsFocus(1);
                 else if (settingsFocus === 1) setSettingsFocus(0);
-                else if (settingsFocus === 0) setSettingsArea('tabs');
               }
             }
             break;
           case 'Enter':
+          case 'Select':
+          case 'OK':
             e.preventDefault();
             if (settingsArea === 'tabs') {
-              setSettingsArea('content');
-              setSettingsFocus(0);
+              if (sidebarFocus === 3) {
+                setShowSettings(false);
+                setNavContext('browse');
+              } else {
+                setSettingsArea('content');
+                setSettingsFocus(0);
+              }
             } else {
-              // Trigger click on focused element
-              const activeElement = document.querySelector('.ring-4, .ring-2, .border-white');
-              if (activeElement instanceof HTMLElement) {
-                activeElement.click();
-                if (activeElement.tagName === 'INPUT') {
-                  activeElement.focus();
+              if (activeSettingsTab === 1 && settingsFocus === 4 && extraUrl) {
+                setPlaylistUrl(extraUrl);
+                handleUrlSubmit(extraUrl);
+                setShowSettings(false);
+              } else {
+                // Trigger click on focused element
+                const activeElement = document.querySelector('.ring-4, .ring-2, .border-white');
+                if (activeElement instanceof HTMLElement) {
+                  activeElement.click();
+                  if (activeElement.tagName === 'INPUT') {
+                    activeElement.focus();
+                  }
                 }
               }
             }
             break;
           case 'Escape':
           case 'Backspace':
-            if (settingsArea === 'content') setSettingsArea('tabs');
-            else {
+          case 'GoBack':
+            e.preventDefault();
+            if (settingsArea === 'content') {
+              setSettingsArea('tabs');
+            } else {
               setShowSettings(false);
               setNavContext('browse');
             }
             break;
+        }
+        return;
+      }
+
+      if (navContext === 'ai-animator') {
+        if (key === 'Escape' || key === 'Backspace') {
+          e.preventDefault();
+          setShowVeoAnimator(false);
+          setNavContext('browse');
         }
         return;
       }
@@ -1286,6 +1422,7 @@ export default function App() {
             break;
           case 'Enter':
             e.preventDefault();
+            console.log('App Enter pressed, activeRow:', activeRow, 'activeCol:', activeCol);
             if (activeRow === -4) {
               setShowSettings(true);
               setNavContext('settings');
@@ -1314,11 +1451,17 @@ export default function App() {
               } else {
                 const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
                 if (selectedChannel) {
-                  setCurrentChannel(selectedChannel);
-                  setNavContext('player');
+                  handleChannelSelect(selectedChannel);
                 }
               }
             }
+            break;
+          case 'Backspace':
+          case 'Escape':
+          case 'GoBack':
+            e.preventDefault();
+            setShowExitConfirm(true);
+            setNavContext('exit-confirm');
             break;
         }
       }
@@ -1347,9 +1490,10 @@ export default function App() {
 
   const resolveUrl = (rawUrl: string) => {
     if (!rawUrl) return [];
-    if (rawUrl.startsWith('http')) return [rawUrl];
+    const trimmed = rawUrl.trim();
+    if (trimmed.startsWith('http')) return [trimmed];
     // If it's a code, try cutt.ly first, then the raw string
-    return [`https://cutt.ly/${rawUrl}`, rawUrl];
+    return [`https://cutt.ly/${trimmed}`, trimmed];
   };
 
   const handleUrlSubmit = async (urlOverride?: string) => {
@@ -1358,6 +1502,7 @@ export default function App() {
 
     setIsLoading(true);
     setError(null);
+    setChannels([]); // Clear current channels while loading new ones
 
     const urlsToTry = resolveUrl(rawUrl);
 
@@ -1367,7 +1512,19 @@ export default function App() {
     try {
       for (const url of urlsToTry) {
         try {
-          const response = await fetchWithProxy(url);
+          // Try with proxy first
+          let response = await fetchWithProxy(url);
+          
+          // If proxy fails or returns error, try direct (some URLs might have CORS enabled)
+          if (!response.ok) {
+            try {
+              const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
+              if (directResponse.ok) response = directResponse;
+            } catch (e) {
+              // Direct fetch failed, stick with proxy response
+            }
+          }
+
           if (response.ok) {
             successfulResponse = response;
             finalUrl = url;
@@ -1375,6 +1532,18 @@ export default function App() {
           }
         } catch (e) {
           console.error(`Failed to load ${url}:`, e);
+          
+          // Last resort: try direct fetch if proxy itself failed
+          try {
+            const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
+            if (directResponse.ok) {
+              successfulResponse = directResponse;
+              finalUrl = url;
+              break;
+            }
+          } catch (directErr) {
+            // Both failed
+          }
         }
       }
 
@@ -1456,26 +1625,31 @@ export default function App() {
         if (signal.aborted) return;
         
         let atLeastOneWorks = false;
-        // Check all URLs for this channel
-        for (const url of channel.urls) {
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
-            
-            const response = await fetch(getProxiedUrl(url), {
-              signal: controller.signal,
-              headers: { 'Range': 'bytes=0-1024' }
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (response.ok || response.status === 206) {
-              atLeastOneWorks = true;
-              break; // Found a working URL
+        // Check URLs for this channel
+        try {
+          // Try all URLs for the channel
+          for (const url of channel.urls) {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+              
+              const response = await fetch(getProxiedUrl(url), {
+                signal: controller.signal,
+                headers: { 'Range': 'bytes=0-1024' }
+              });
+              
+              clearTimeout(timeoutId);
+              
+              if (response.ok || response.status === 206) {
+                atLeastOneWorks = true;
+                break;
+              }
+            } catch (e) {
+              // This URL failed, try next
             }
-          } catch (e) {
-            // Continue to next URL
           }
+        } catch (e) {
+          // Channel check failed
         }
 
         if (!atLeastOneWorks) {
@@ -1590,11 +1764,21 @@ export default function App() {
                 setActiveRow(-4);
               }}
               className={cn(
-                "w-8 h-8 bg-blue-500 rounded-sm overflow-hidden transition-all",
+                "w-8 h-8 rounded-sm overflow-hidden transition-all flex items-center justify-center",
                 activeRow === -4 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
               )}
+              style={{ backgroundColor: themeColor }}
             >
-              <img src="https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png" alt="Profil" />
+              {profilePic === 'THEME_COLOR' ? (
+                <User className="w-5 h-5 text-white" />
+              ) : (
+                <img 
+                  src={profilePic} 
+                  alt="Profil" 
+                  referrerPolicy="no-referrer" 
+                  className="w-full h-full object-cover"
+                />
+              )}
             </button>
           )}
         </div>
@@ -1623,6 +1807,15 @@ export default function App() {
                     <p className="text-zinc-500 max-w-md mx-auto font-medium">
                       İzlemeye başlamak için bir M3U dosyası yükleyin veya bir URL adresi girin.
                     </p>
+                    {error && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-red-500/20 border border-red-500/50 text-red-500 px-4 py-2 rounded-xl text-sm font-bold mt-4 max-w-md mx-auto"
+                      >
+                        {error}
+                      </motion.div>
+                    )}
                   </div>
                 </div>
 
@@ -1704,7 +1897,7 @@ export default function App() {
                       localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
                       setSavedUrl(DEFAULT_M3U_URL);
                       setPlaylistUrl(DEFAULT_M3U_URL);
-                      setChannels([]);
+                      handleUrlSubmit(DEFAULT_M3U_URL);
                     }}
                     onPointerDown={() => { setActiveRow(3); setActiveCol(0); }}
                     onMouseEnter={() => { setActiveRow(3); setActiveCol(0); }}
@@ -1944,6 +2137,7 @@ export default function App() {
                   themeColor={themeColor}
                   deviceType={deviceType}
                   isCollapsed={collapsedRows.has(group)}
+                  customProxyUrl={customProxyUrl}
                   onToggleCollapse={() => {
                     setCollapsedRows(prev => {
                       const next = new Set(prev);
@@ -2024,7 +2218,14 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {showSettings && (
+        {showVeoAnimator && (
+        <VeoAnimator 
+          onClose={() => setShowVeoAnimator(false)} 
+          themeColor={themeColor} 
+        />
+      )}
+
+      {showSettings && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2055,37 +2256,74 @@ export default function App() {
                     data-tab-id={tab.id}
                     onClick={() => {
                       setActiveSettingsTab(tab.id);
+                      setSidebarFocus(tab.id);
                       setSettingsArea('content');
                       setSettingsFocus(0);
                     }}
                     onPointerDown={() => {
                       setActiveSettingsTab(tab.id);
+                      setSidebarFocus(tab.id);
                       setSettingsArea('tabs');
                     }}
                     onMouseEnter={() => {
                       setActiveSettingsTab(tab.id);
+                      setSidebarFocus(tab.id);
                       setSettingsArea('tabs');
                     }}
                     className={cn(
-                      "flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg font-bold transition-all whitespace-nowrap",
+                      "relative flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg font-bold transition-all whitespace-nowrap overflow-hidden",
                       activeSettingsTab === tab.id 
                         ? "bg-white text-black scale-105 shadow-lg" 
                         : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
-                      settingsArea === 'tabs' && activeSettingsTab === tab.id && "ring-2 ring-white"
+                      settingsArea === 'tabs' && sidebarFocus === tab.id && "ring-4 ring-white ring-offset-2 ring-offset-black z-10"
                     )}
                   >
+                    {activeSettingsTab === tab.id && (
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-600" style={{ backgroundColor: themeColor }} />
+                    )}
                     <tab.icon className="w-4 h-4 md:w-5 md:h-5" />
                     <span className="text-xs md:text-sm">{tab.label}</span>
+                    {settingsArea === 'tabs' && sidebarFocus === tab.id && (
+                      <motion.span 
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="ml-auto text-[8px] font-black uppercase tracking-widest text-black/40"
+                      >
+                        [ENTER]
+                      </motion.span>
+                    )}
                   </button>
                 ))}
                 
-                <div className="hidden md:block mt-auto pt-4">
+                <div className="hidden md:block mt-auto pt-4 space-y-4">
+                  {settingsArea === 'tabs' && (
+                    <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 animate-pulse">
+                      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Navigasyon</div>
+                      <div className="flex items-center gap-2 text-xs font-bold text-white">
+                        <div className="px-1.5 py-0.5 bg-white text-black rounded text-[10px]">ENTER</div>
+                        <span>Düzenle</span>
+                      </div>
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setShowSettings(false);
                       setNavContext('browse');
                     }}
-                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-zinc-500 hover:bg-white/5 hover:text-white transition-all"
+                    onPointerDown={() => {
+                      setSidebarFocus(3);
+                      setSettingsArea('tabs');
+                    }}
+                    onMouseEnter={() => {
+                      setSidebarFocus(3);
+                      setSettingsArea('tabs');
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all",
+                      settingsArea === 'tabs' && sidebarFocus === 3 
+                        ? "bg-white text-black ring-4 ring-white ring-offset-2 ring-offset-black z-10" 
+                        : "text-zinc-500 hover:bg-white/5 hover:text-white"
+                    )}
                   >
                     <X className="w-5 h-5" />
                     <span>Kapat</span>
@@ -2102,7 +2340,10 @@ export default function App() {
                   <button onClick={() => setShowSettings(false)} className="p-2 bg-white/5 rounded-full"><X className="w-5 h-5" /></button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 md:p-10 space-y-10 custom-scrollbar scroll-smooth" ref={settingsContentRef}>
+                <div className={cn(
+                  "flex-1 overflow-y-auto p-6 md:p-10 space-y-10 custom-scrollbar scroll-smooth transition-all duration-500",
+                  settingsArea === 'tabs' ? "opacity-30 grayscale-[0.5] scale-[0.98] pointer-events-none" : "opacity-100 grayscale-0 scale-100"
+                )} ref={settingsContentRef}>
                   <AnimatePresence mode="wait">
                     {activeSettingsTab === 0 && (
                       <motion.div 
@@ -2337,7 +2578,7 @@ export default function App() {
                                 setSavedUrl(DEFAULT_M3U_URL);
                                 setPlaylistUrl(DEFAULT_M3U_URL);
                                 setShowSettings(false);
-                                setChannels([]);
+                                handleUrlSubmit(DEFAULT_M3U_URL);
                               }}
                               onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(6); }}
                               onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
@@ -2424,20 +2665,44 @@ export default function App() {
                       </section>
 
                       <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Özel Proxy Ayarları</label>
+                        <div className="relative">
+                          <input
+                            id="proxy-input"
+                            type="text"
+                            value={customProxyUrl}
+                            onChange={(e) => {
+                              setCustomProxyUrl(e.target.value);
+                              localStorage.setItem('custom_proxy_url', e.target.value);
+                            }}
+                            onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                            className={cn(
+                              "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold",
+                              settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-4 ring-white/20" : "border-white/5"
+                            )}
+                            placeholder="Örn: https://proxy.com/?url="
+                          />
+                          <Link2 className="absolute right-6 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
+                        </div>
+                        <p className="text-xs text-zinc-500 px-2 italic">Boş bırakılırsa sistemin kendi proxy'si kullanılır.</p>
+                      </section>
+
+                      <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Oynatma Ayarları</label>
                         <button 
                           onClick={() => setAutoPreviewEnabled(prev => !prev)}
-                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(1); }}
-                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(1); }}
+                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2); }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2); }}
                           className={cn(
                             "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                            settingsArea === 'content' && settingsFocus === 1 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
+                            settingsArea === 'content' && settingsFocus === 2 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
                           )}
                         >
                           <div className="flex items-center gap-4">
                             <div className={cn(
                               "p-3 rounded-xl transition-transform",
-                              settingsArea === 'content' && settingsFocus === 1 ? "bg-black/10" : "bg-white/10"
+                              settingsArea === 'content' && settingsFocus === 2 ? "bg-black/10" : "bg-white/10"
                             )}>
                               <Play className="w-6 h-6" />
                             </div>
@@ -2459,6 +2724,45 @@ export default function App() {
                       </section>
 
                       <section className="space-y-4">
+                        <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Profil Resmi</label>
+                        <div className="grid grid-cols-4 gap-4">
+                          {PROFILE_PICS.map((pic, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setProfilePic(pic);
+                                localStorage.setItem('profile_pic', pic);
+                              }}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(3 + i); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(3 + i); }}
+                              className={cn(
+                                "aspect-square rounded-2xl overflow-hidden border-4 transition-all relative group flex items-center justify-center",
+                                profilePic === pic ? "border-white" : "border-transparent hover:border-white/20",
+                                settingsArea === 'content' && settingsFocus === (3 + i) && "ring-4 ring-white scale-110 z-10 shadow-2xl"
+                              )}
+                              style={{ backgroundColor: themeColor }}
+                            >
+                              {pic === 'THEME_COLOR' ? (
+                                <User className="w-12 h-12 text-white" />
+                              ) : (
+                                <img 
+                                  src={pic} 
+                                  alt={`Profil ${i + 1}`} 
+                                  className="w-full h-full object-cover" 
+                                  referrerPolicy="no-referrer" 
+                                />
+                              )}
+                              {profilePic === pic && (
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                  <Check className="w-8 h-8 text-white" />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="space-y-4">
                         <label className="text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2">
                           <div className="w-1 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
                           Ekran Seçimi
@@ -2476,14 +2780,14 @@ export default function App() {
                                 setDeviceType(device.id as any);
                                 localStorage.setItem('device_type', device.id);
                               }}
-                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(2 + i); }}
-                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(2 + i); }}
+                              onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(11 + i); }}
+                              onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(11 + i); }}
                               className={cn(
                                 "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-3",
                                 deviceType === device.id 
                                   ? "border-white bg-white/10" 
                                   : "border-white/5 hover:border-white/20 bg-white/5",
-                                settingsArea === 'content' && settingsFocus === (2 + i) && "ring-4 ring-white scale-105 z-10"
+                                settingsArea === 'content' && settingsFocus === (11 + i) && "ring-4 ring-white scale-105 z-10"
                               )}
                             >
                               <device.icon className="w-6 h-6" />
@@ -2500,11 +2804,11 @@ export default function App() {
                             localStorage.clear();
                             window.location.reload();
                           }}
-                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(6); }}
-                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(6); }}
+                          onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(15); }}
+                          onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(15); }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            settingsArea === 'content' && settingsFocus === 6 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
+                            settingsArea === 'content' && settingsFocus === 15 ? "bg-red-600 text-white scale-105 shadow-2xl" : "bg-white/5 text-red-500 hover:bg-red-500/10"
                           )}
                         >
                           <RefreshCw className="w-6 h-6" />
@@ -2526,12 +2830,12 @@ export default function App() {
                           }}
                           onMouseEnter={() => { 
                             setSettingsArea('content'); 
-                            setSettingsFocus(activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7); 
+                            setSettingsFocus(activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 16); 
                           }}
-                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7)) ? themeColor : undefined }}
+                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 16)) ? themeColor : undefined }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 7)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 10 : activeSettingsTab === 1 ? 8 : 16)) ? "text-white scale-105 shadow-2xl" : "bg-white/5 text-zinc-400 hover:bg-white/10"
                           )}
                         >
                           <ChevronLeft className="w-6 h-6" />
@@ -2628,12 +2932,15 @@ export default function App() {
 
       {/* Video Player */}
       {currentChannel && (
-        <VideoPlayer 
+        <>
+          {console.log('Rendering VideoPlayer for:', currentChannel.name)}
+          <VideoPlayer 
           url={currentChannel.urls[0]} 
           channel={currentChannel}
           channels={channels}
           epgData={epgData}
           themeColor={themeColor}
+          customProxyUrl={customProxyUrl}
           onClose={() => {
             setCurrentChannel(null);
             setNavContext('browse');
@@ -2643,6 +2950,7 @@ export default function App() {
             setNavContext('player');
           }}
         />
+      </>
       )}
     </div>
   );

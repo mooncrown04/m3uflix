@@ -9,7 +9,7 @@ export interface M3UChannel {
 
 export function parseM3U(content: string): M3UChannel[] {
   const lines = content.split('\n');
-  const channelsMap = new Map<string, M3UChannel>();
+  const channelMap = new Map<string, M3UChannel>();
   let currentChannelInfo: Partial<M3UChannel> = {};
 
   for (let i = 0; i < lines.length; i++) {
@@ -26,27 +26,32 @@ export function parseM3U(content: string): M3UChannel[] {
       currentChannelInfo.group = groupMatch ? groupMatch[1] : 'General';
       currentChannelInfo.tvgId = tvgIdMatch ? tvgIdMatch[1] : undefined;
     } else if (line.startsWith('http')) {
-      const url = line;
+      const url = line.trim();
       const name = currentChannelInfo.name || 'Unknown Channel';
+      const group = currentChannelInfo.group || 'General';
+      const key = `${name}_${group}`;
       
-      if (channelsMap.has(name)) {
-        const existing = channelsMap.get(name)!;
-        if (!existing.urls.includes(url)) {
-          existing.urls.push(url);
+      const existingChannel = channelMap.get(key);
+      if (existingChannel) {
+        if (!existingChannel.urls.includes(url)) {
+          existingChannel.urls.push(url);
         }
       } else {
-        channelsMap.set(name, {
+        channelMap.set(key, {
           id: Math.random().toString(36).substr(2, 9),
           name,
           logo: currentChannelInfo.logo,
-          group: currentChannelInfo.group,
+          group,
           tvgId: currentChannelInfo.tvgId,
           urls: [url]
         });
       }
+      
       currentChannelInfo = {};
     }
   }
 
-  return Array.from(channelsMap.values());
+  const channels = Array.from(channelMap.values());
+  console.log(`Parsed ${channels.length} unique channels from M3U content.`);
+  return channels;
 }

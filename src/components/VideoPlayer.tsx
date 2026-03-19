@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
-import { X, Settings, Volume2, Languages, Check, Info, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause } from 'lucide-react';
+import { X, Settings, Volume2, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
 import { M3UChannel } from '../utils/m3uParser';
 import { EPGData, EPGProgram } from '../utils/epgParser';
@@ -14,6 +15,7 @@ interface VideoPlayerProps {
   onClose?: () => void;
   onChannelSelect?: (channel: M3UChannel) => void;
   themeColor?: string;
+  customProxyUrl?: string;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -23,7 +25,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   epgData, 
   onClose, 
   onChannelSelect,
-  themeColor = '#ef4444'
+  themeColor = '#ef4444',
+  customProxyUrl
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
@@ -33,27 +36,54 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [currentSubtitleTrack, setCurrentSubtitleTrack] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(true);
   const [showControls, setShowControls] = useState(true);
-  const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels'>('none');
+  const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels' | 'sources'>('none');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Category Selector, 5+: Menu items
+  const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Category Selector, 6+: Menu items
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [hasError, setHasError] = useState(false);
   const [currentUrlIndex, setCurrentUrlIndex] = useState(0);
-  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
+
+  useEffect(() => {
+    console.log('VideoPlayer focusIndex changed to:', focusIndex);
+  }, [focusIndex]);
+
+  useEffect(() => {
+    console.log('VideoPlayer activeMenu changed to:', activeMenu);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    console.log('VideoPlayer showControls changed to:', showControls);
+  }, [showControls]);
+
+  useEffect(() => {
+    console.log('VideoPlayer isPlaying changed to:', isPlaying);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (hasError) console.error('VideoPlayer hasError set to true');
+  }, [hasError]);
+
+  const [useProxy, setUseProxy] = useState(false);
 
   const currentUrl = useMemo(() => {
-    if (channel?.urls && channel.urls.length > 0) {
-      return channel.urls[currentUrlIndex] || channel.urls[0];
+    const urls = channel?.urls || [url];
+    const rawUrl = urls[currentUrlIndex] || urls[0] || url;
+    
+    if (Capacitor.isNativePlatform() || !useProxy) {
+      return rawUrl;
     }
-    return url;
-  }, [url, channel, currentUrlIndex]);
+    const proxyBase = customProxyUrl || '/api/proxy?url=';
+    return `${proxyBase}${encodeURIComponent(rawUrl)}`;
+  }, [url, channel, currentUrlIndex, useProxy, customProxyUrl]);
 
   // Initialize selectedGroup when channel changes
   useEffect(() => {
     if (channel?.group) {
       setSelectedGroup(channel.group);
     }
+    setHasError(false);
     setCurrentUrlIndex(0);
-    setIsSwitchingSource(false);
+    setUseProxy(false);
   }, [channel]);
 
   // All available groups
@@ -90,9 +120,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [activeMenu, focusIndex]);
 
-  // Update current time every minute for EPG
+  // Update current time every second for clock and EPG
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -132,16 +162,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   useEffect(() => {
+    console.log('VideoPlayer initializing for URL:', currentUrl);
     const video = videoRef.current;
     if (!video) return;
 
     let hls: Hls | null = null;
-    setIsSwitchingSource(false);
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = currentUrl;
+      video.load();
+      if (isPlaying) video.play().catch(() => {});
     } else if (Hls.isSupported()) {
-      hls = new Hls();
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 60,
+        xhrSetup: (xhr, url) => {
+          // If we are using the proxy for the manifest, we should also proxy segments
+          // But only if the segment URL is not already proxied and is an absolute URL
+          const proxyBase = customProxyUrl || '/api/proxy?url=';
+          const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
+          const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
+
+          if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
+            const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
+            xhr.open('GET', proxiedUrl, true);
+          }
+        }
+      });
       hls.loadSource(currentUrl);
       hls.attachMedia(video);
       
@@ -150,6 +198,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setSubtitleTracks(hls?.subtitleTracks || []);
         setCurrentAudioTrack(hls?.audioTrack || -1);
         setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
+        if (isPlaying) video.play().catch(() => {});
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {
@@ -177,12 +226,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [currentUrl]);
 
   const handleVideoError = () => {
-    if (channel?.urls && currentUrlIndex < channel.urls.length - 1) {
-      console.log(`Source ${currentUrlIndex} failed, switching to ${currentUrlIndex + 1}`);
-      setIsSwitchingSource(true);
-      setTimeout(() => {
-        setCurrentUrlIndex(prev => prev + 1);
-      }, 1000);
+    console.error('Video error occurred for URL:', currentUrl);
+    const urls = channel?.urls || [url];
+    
+    // Try next URL
+    if (currentUrlIndex < urls.length - 1) {
+      setCurrentUrlIndex(prev => prev + 1);
+      setHasError(false);
+    } else if (useProxy) {
+      // If all URLs failed with proxy, try without proxy starting from first URL
+      setUseProxy(false);
+      setCurrentUrlIndex(0);
+      setHasError(false);
+    } else {
+      setHasError(true);
     }
   };
 
@@ -258,7 +315,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           break;
         case 'ArrowRight':
           if (activeMenu === 'none') {
-            setFocusIndex(prev => Math.min(3, prev + 1));
+            setFocusIndex(prev => Math.min(4, prev + 1));
           } else if (activeMenu === 'channels' && focusIndex === 4) {
             // Switch category
             const currentIdx = allGroups.indexOf(selectedGroup);
@@ -277,6 +334,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             if (activeMenu === 'audio') max = 4 + audioTracks.length - 1;
             else if (activeMenu === 'subtitle') max = 4 + subtitleTracks.length; // 4 is "Off", 5+ are tracks
             else if (activeMenu === 'channels') max = 4 + 1 + categoryChannels.length - 1; // 4: Category, 5+: Channels
+            else if (activeMenu === 'sources') max = 6 + (channel?.urls || [url]).length - 1;
             setFocusIndex(prev => Math.min(max, prev + 1));
           }
           break;
@@ -295,6 +353,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               setActiveMenu('channels');
               setFocusIndex(4); // Start at category selector
             }
+            else if (focusIndex === 4) {
+              setActiveMenu('sources');
+              setFocusIndex(6 + currentUrlIndex);
+            }
           } else {
             if (activeMenu === 'channels') {
               if (focusIndex === 4) {
@@ -307,6 +369,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   setActiveMenu('none');
                   setFocusIndex(3);
                 }
+              }
+            } else if (activeMenu === 'sources') {
+              const itemIdx = focusIndex - 6;
+              if (itemIdx >= 0) {
+                setCurrentUrlIndex(itemIdx);
+                setHasError(false);
+                setActiveMenu('none');
+                setFocusIndex(4);
               }
             } else {
               const itemIdx = focusIndex - 4;
@@ -368,18 +438,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onError={handleVideoError}
         />
 
-        {/* Switching Source Indicator */}
+        {/* Loading Indicator */}
         <AnimatePresence>
-          {isSwitchingSource && (
+          {!isPlaying && !hasError && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-50"
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-50"
             >
               <div className="w-16 h-16 border-4 border-white/10 border-t-white rounded-full animate-spin mb-4" style={{ borderTopColor: themeColor }} />
-              <p className="text-white font-black uppercase tracking-widest text-sm">Kaynak Değiştiriliyor...</p>
-              <p className="text-zinc-500 text-xs mt-2">Yedek linke geçiliyor ({currentUrlIndex + 2}/{channel?.urls?.length})</p>
+              <p className="text-white font-black uppercase tracking-widest text-sm">Yükleniyor...</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Error Indicator */}
+        <AnimatePresence>
+          {hasError && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-50 p-8 text-center"
+            >
+              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+                <X className="w-10 h-10 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Yayın Hatası</h3>
+              <p className="text-zinc-400 max-w-md font-medium mb-8 text-sm">
+                Bu kanal şu an ulaşılamıyor. Lütfen daha sonra tekrar deneyin veya başka bir kaynak seçin.
+              </p>
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => {
+                    setHasError(false);
+                    setCurrentUrlIndex(0);
+                    setUseProxy(true);
+                  }}
+                  className="px-8 py-3 bg-white text-black font-black uppercase tracking-tighter rounded-xl hover:scale-105 transition-all"
+                >
+                  Yeniden Dene
+                </button>
+                <button 
+                  onClick={onClose}
+                  className="px-8 py-3 bg-zinc-800 text-white font-black uppercase tracking-tighter rounded-xl hover:scale-105 transition-all"
+                >
+                  Kapat
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -468,11 +575,71 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <List className="w-8 h-8" />
                     <span className="text-sm font-bold uppercase tracking-tighter">Kanallar</span>
                   </button>
+                  <button 
+                    onClick={() => setActiveMenu('sources')}
+                    onPointerDown={() => setFocusIndex(4)}
+                    className={cn(
+                      "p-3 rounded-full transition-all flex items-center gap-2",
+                      focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                    )}
+                  >
+                    <Link2 className="w-8 h-8" />
+                    <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
+                  </button>
                 </div>
               </div>
 
               {/* Menus */}
               <div className="flex justify-end items-end gap-8 mb-4">
+                {activeMenu === 'sources' && (
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="bg-zinc-900/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl w-80 shadow-2xl max-h-[70vh] flex flex-col"
+                  >
+                    <div className="mb-4 px-2 flex items-center justify-between">
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Yayın Kaynağı Seçin</span>
+                      <button 
+                        onClick={() => setUseProxy(!useProxy)}
+                        className={cn(
+                          "px-2 py-1 rounded text-[10px] font-bold uppercase transition-all",
+                          useProxy ? "bg-red-500 text-white" : "bg-zinc-800 text-zinc-400"
+                        )}
+                      >
+                        Proxy: {useProxy ? 'AÇIK' : 'KAPALI'}
+                      </button>
+                    </div>
+                    <div className="space-y-1 overflow-y-auto pr-2 scrollbar-hide">
+                      {(channel?.urls || [url]).map((u, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            setCurrentUrlIndex(idx);
+                            setHasError(false);
+                            setActiveMenu('none');
+                          }}
+                          onPointerDown={() => setFocusIndex(6 + idx)}
+                          className={cn(
+                            "w-full flex items-center gap-4 p-4 rounded-xl transition-all font-bold text-left",
+                            focusIndex === 6 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                            currentUrlIndex === idx && "text-red-500"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
+                            currentUrlIndex === idx ? "bg-red-500 text-white" : "bg-black/40 text-zinc-500"
+                          )}>
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <p className="text-sm">Kaynak #{idx + 1}</p>
+                            <p className="text-[10px] opacity-50 truncate w-40">{u.split('/')[2] || 'Sunucu'}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
                 {activeMenu === 'channels' && (
                   <motion.div 
                     initial={{ opacity: 0, x: 20 }}
@@ -609,55 +776,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       initial={{ opacity: 0, y: 40 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 40 }}
-                      className="bg-zinc-900/80 backdrop-blur-2xl p-6 rounded-3xl border border-white/10 shadow-2xl"
+                      className="bg-zinc-900/80 backdrop-blur-2xl p-4 rounded-2xl border border-white/10 shadow-2xl"
                     >
-                      <div className="flex flex-col gap-6">
+                      <div className="flex flex-col gap-4">
                         <div className="flex justify-between items-start">
-                          <div className="flex gap-6">
+                          <div className="flex gap-4">
                             {/* Channel Logo & Name */}
                             <div className="flex flex-col items-center gap-2">
-                              <div className="w-20 h-20 bg-black/40 rounded-2xl overflow-hidden border border-white/10 p-2 flex items-center justify-center">
+                              <div className="w-14 h-14 bg-black/40 rounded-xl overflow-hidden border border-white/10 p-1.5 flex items-center justify-center">
                                 {channel?.logo ? (
                                   <img src={channel.logo} alt="" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
                                 ) : (
-                                  <Tv className="w-12 h-12 text-zinc-600" />
+                                  <Tv className="w-8 h-8 text-zinc-600" />
                                 )}
                               </div>
                               <div className="text-center">
-                                <div className="text-zinc-500 text-[8px] font-black uppercase tracking-[0.2em] mb-0.5">KANAL</div>
-                                <div className="text-white font-black text-sm tracking-tighter truncate max-w-[120px]">{channel?.name}</div>
+                                <div className="text-zinc-500 text-[7px] font-black uppercase tracking-[0.2em] mb-0.5">KANAL</div>
+                                <div className="text-white font-black text-xs tracking-tighter truncate max-w-[100px]">{channel?.name}</div>
                               </div>
                             </div>
 
-                            <div className="h-24 w-px bg-white/10 self-center" />
+                            <div className="h-16 w-px bg-white/10 self-center" />
 
                             {/* Current Program Info */}
                             <div className="flex flex-col justify-center">
                               {currentProgram ? (
-                                <div className="space-y-2">
-                                  <div className="flex items-center gap-2 text-red-500 font-black text-[10px] uppercase tracking-widest">
-                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 text-red-500 font-black text-[9px] uppercase tracking-widest">
+                                    <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
                                     ŞİMDİ YAYINDA
                                   </div>
-                                  <h3 className="text-4xl font-black text-white tracking-tighter leading-none">
+                                  <h3 className="text-2xl font-black text-white tracking-tighter leading-none">
                                     {currentProgram.title}
                                   </h3>
-                                  <div className="flex items-center gap-4 text-zinc-400 font-bold">
-                                    <span className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg text-xs">
-                                      <Clock className="w-3.5 h-3.5" />
+                                  <div className="flex items-center gap-3 text-zinc-400 font-bold">
+                                    <span className="flex items-center gap-1.5 bg-white/5 px-2 py-0.5 rounded-lg text-[10px]">
+                                      <Clock className="w-3 h-3" />
                                       {formatTime(currentProgram.start)} - {formatTime(currentProgram.stop)}
                                     </span>
                                     {currentProgram.description && (
-                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-xl text-sm italic">
+                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
                                         {currentProgram.description}
                                       </span>
                                     )}
                                   </div>
                                 </div>
                               ) : (
-                                <div className="space-y-2">
-                                  <div className="text-zinc-500 font-black text-[10px] uppercase tracking-widest">YAYIN BİLGİSİ</div>
-                                  <h3 className="text-3xl font-black text-white/40 tracking-tighter italic">
+                                <div className="space-y-1">
+                                  <div className="text-zinc-500 font-black text-[9px] uppercase tracking-widest">YAYIN BİLGİSİ</div>
+                                  <h3 className="text-xl font-black text-white/40 tracking-tighter italic">
                                     Program bilgisi bulunamadı
                                   </h3>
                                 </div>
@@ -665,29 +832,39 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             </div>
                           </div>
 
-                          {nextProgram && (
-                            <div className="text-right hidden lg:block bg-white/5 p-4 rounded-2xl border border-white/5">
-                              <div className="text-zinc-500 font-black text-[10px] uppercase tracking-widest mb-2">SIRADAKİ</div>
-                              <div className="text-white font-black text-lg tracking-tight">{nextProgram.title}</div>
-                              <div className="text-zinc-400 font-bold text-sm flex items-center justify-end gap-1.5">
-                                <Clock className="w-3.5 h-3.5" />
-                                {formatTime(nextProgram.start)}
-                              </div>
+                          <div className="flex flex-col items-end gap-3">
+                            {/* Digital Clock */}
+                            <div className="bg-white/5 px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-2 backdrop-blur-md">
+                              <Clock className="w-4 h-4 text-red-500 animate-pulse" />
+                              <span className="text-xl font-black text-white tracking-tighter tabular-nums">
+                                {formatTime(currentTime)}
+                              </span>
                             </div>
-                          )}
+
+                            {nextProgram && (
+                              <div className="text-right hidden lg:block bg-white/5 p-3 rounded-xl border border-white/5">
+                                <div className="text-zinc-500 font-black text-[8px] uppercase tracking-widest mb-1">SIRADAKİ</div>
+                                <div className="text-white font-black text-base tracking-tight">{nextProgram.title}</div>
+                                <div className="text-zinc-400 font-bold text-xs flex items-center justify-end gap-1.5">
+                                  <Clock className="w-3 h-3" />
+                                  {formatTime(nextProgram.start)}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
                         {/* Progress Bar */}
                         {currentProgram && (
-                          <div className="space-y-2">
-                            <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                          <div className="space-y-1.5">
+                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                               <motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: `${programProgress}%` }}
-                                className="h-full bg-gradient-to-r from-red-600 to-red-500 shadow-[0_0_15px_rgba(220,38,38,0.4)]"
+                                className="h-full bg-gradient-to-r from-red-600 to-red-500 shadow-[0_0_10px_rgba(220,38,38,0.3)]"
                               />
                             </div>
-                            <div className="flex justify-between text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">
+                            <div className="flex justify-between text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">
                               <span className="flex items-center gap-1">
                                 <span className="text-zinc-600">BAŞLANGIÇ:</span> {formatTime(currentProgram.start)}
                               </span>
