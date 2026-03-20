@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Wand2 } from 'lucide-react';
-import { parseM3U, M3UChannel } from './utils/m3uParser';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User } from 'lucide-react';
+import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
-import { VeoAnimator } from './components/VeoAnimator';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -21,7 +20,7 @@ interface ChannelRowProps {
   onFocus: (row: number, col: number) => void;
   onToggleFavorite: (channelId: string) => void;
   onDeleteChannel: (channelId: string) => void;
-  onLongPress: (channelId: string) => void;
+  onLongPress: (channelId: string, category: string) => void;
   favorites: string[];
   rowIndex: number;
   activeRow: number;
@@ -87,7 +86,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   const handlePressStart = (channelId: string) => {
     setPressingId(channelId);
     longPressTimer.current = setTimeout(() => {
-      onLongPress?.(channelId);
+      onLongPress?.(channelId, title);
       setPressingId(null);
     }, 800);
   };
@@ -157,7 +156,21 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                 const badge = getCategoryBadge();
 
                 return (
-                  <div key={channel.id} className="flex flex-col gap-2 snap-start">
+                  <div key={channel.id} className={cn("flex flex-col gap-2 snap-start relative", title === 'Top 10' && "ml-16")}>
+                    {title === 'Top 10' && (
+                      <div className="absolute -left-20 bottom-0 z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
+                        <span 
+                          className="text-[180px] font-black leading-[0.7] text-black"
+                          style={{ 
+                            WebkitTextStroke: '4px #555',
+                            paintOrder: 'stroke fill',
+                            textShadow: '0 0 30px rgba(255,255,255,0.1)'
+                          }}
+                        >
+                          {channel.tvgNumber}
+                        </span>
+                      </div>
+                    )}
                     <motion.div
                       animate={{ 
                         scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
@@ -507,7 +520,7 @@ export default function App() {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
-  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
+  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
   const [brokenChannelIds, setBrokenChannelIds] = useState<Set<string>>(new Set());
   const [hasCheckedLinks, setHasCheckedLinks] = useState(() => {
@@ -530,6 +543,14 @@ export default function App() {
   const [profilePic, setProfilePic] = useState<string>(() => 
     localStorage.getItem('profile_pic') || PROFILE_PICS[0]
   );
+  const [customOrders, setCustomOrders] = useState<Record<string, string[]>>(() => {
+    const saved = localStorage.getItem('custom_orders');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('custom_orders', JSON.stringify(customOrders));
+  }, [customOrders]);
 
   const featuredChannel = useMemo(() => {
     if (channels.length === 0) return null;
@@ -540,15 +561,15 @@ export default function App() {
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
-  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu' | 'ai-animator'>('browse');
+  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu'>('browse');
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
-  const [showVeoAnimator, setShowVeoAnimator] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'content'>('tabs');
   const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
+  const [channelMenuCategory, setChannelMenuCategory] = useState<string | null>(null);
   const [channelMenuFocus, setChannelMenuFocus] = useState(0);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
@@ -696,27 +717,44 @@ export default function App() {
     
     // Add Favorites as the first group if it has items
     if (Array.isArray(favorites) && favorites.length > 0) {
-      const favoriteChannels = channels.filter(ch => favorites.includes(ch.id) && !brokenChannelIds.has(ch.id));
+      const favoriteChannels = channels
+        .filter(ch => favorites.includes(ch.id) && !brokenChannelIds.has(ch.id))
+        .sort((a, b) => favorites.indexOf(a.id) - favorites.indexOf(b.id));
       if (favoriteChannels.length > 0) {
         groups['Favorilerim'] = favoriteChannels;
       }
     }
 
+    // Add Top 10 as a group if it has items
+    const top10Channels = channels
+      .filter(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10 && !brokenChannelIds.has(ch.id))
+      .sort((a, b) => (a.tvgNumber || 0) - (b.tvgNumber || 0));
+    
+    if (top10Channels.length > 0) {
+      groups['Top 10'] = top10Channels;
+    }
+
     // Add Canlı as a group if it has items
     if (canliChannels.length > 0) {
-      const matched = channels.filter(ch => canliChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
+      const matched = channels
+        .filter(ch => canliChannels.includes(ch.id) && !brokenChannelIds.has(ch.id))
+        .sort((a, b) => canliChannels.indexOf(a.id) - canliChannels.indexOf(b.id));
       if (matched.length > 0) groups['Canlı'] = matched;
     }
 
     // Add Dizi as a group if it has items
     if (diziChannels.length > 0) {
-      const matched = channels.filter(ch => diziChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
+      const matched = channels
+        .filter(ch => diziChannels.includes(ch.id) && !brokenChannelIds.has(ch.id))
+        .sort((a, b) => diziChannels.indexOf(a.id) - diziChannels.indexOf(b.id));
       if (matched.length > 0) groups['Dizi'] = matched;
     }
 
     // Add Film as a group if it has items
     if (filmChannels.length > 0) {
-      const matched = channels.filter(ch => filmChannels.includes(ch.id) && !brokenChannelIds.has(ch.id));
+      const matched = channels
+        .filter(ch => filmChannels.includes(ch.id) && !brokenChannelIds.has(ch.id))
+        .sort((a, b) => filmChannels.indexOf(a.id) - filmChannels.indexOf(b.id));
       if (matched.length > 0) groups['Film'] = matched;
     }
 
@@ -735,6 +773,21 @@ export default function App() {
       groups[groupName].push(channel);
     });
 
+    // Apply custom order for M3U groups
+    Object.keys(groups).forEach(groupName => {
+      const order = customOrders[groupName];
+      if (order && order.length > 0) {
+        groups[groupName].sort((a, b) => {
+          const aIdx = order.indexOf(a.id);
+          const bIdx = order.indexOf(b.id);
+          if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+          if (aIdx !== -1) return -1;
+          if (bIdx !== -1) return 1;
+          return 0;
+        });
+      }
+    });
+
     if (broken.length > 0) {
       groups['Çalışmayanlar'] = broken;
     }
@@ -749,7 +802,7 @@ export default function App() {
         return !specialGroups.includes(group);
       })
       .sort((a, b) => {
-        const order = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        const order = ['Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
         const aIdx = order.indexOf(a[0]);
         const bIdx = order.indexOf(b[0]);
         
@@ -793,7 +846,15 @@ export default function App() {
     });
   };
 
-  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites') => {
+  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites' | 'top10') => {
+    if (type === 'top10') {
+      setVisibleCategories(prev => 
+        prev.includes('Top 10') 
+          ? prev.filter(c => c !== 'Top 10')
+          : [...prev, 'Top 10']
+      );
+      return;
+    }
     if (type === 'favorites') {
       setVisibleCategories(prev => 
         prev.includes('Favorilerim') 
@@ -823,6 +884,64 @@ export default function App() {
     });
   };
 
+  const moveChannel = (channelId: string, direction: 'left' | 'right', category: string) => {
+    if (category === 'Favorilerim') {
+      setFavorites(prev => {
+        const idx = prev.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newArr = [...prev];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
+        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+        return newArr;
+      });
+    } else if (category === 'Canlı') {
+      setCanliChannels(prev => {
+        const idx = prev.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newArr = [...prev];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
+        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+        return newArr;
+      });
+    } else if (category === 'Dizi') {
+      setDiziChannels(prev => {
+        const idx = prev.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newArr = [...prev];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
+        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+        return newArr;
+      });
+    } else if (category === 'Film') {
+      setFilmChannels(prev => {
+        const idx = prev.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newArr = [...prev];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
+        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+        return newArr;
+      });
+    } else {
+      // M3U groups
+      setCustomOrders(prev => {
+        const group = groupedChannels.find(([name]) => name === category);
+        if (!group) return prev;
+        const currentOrder = prev[category] || group[1].map(ch => ch.id);
+        const idx = currentOrder.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newOrder = [...currentOrder];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newOrder.length) return prev;
+        [newOrder[idx], newOrder[targetIdx]] = [newOrder[targetIdx], newOrder[idx]];
+        return { ...prev, [category]: newOrder };
+      });
+    }
+  };
+
   useEffect(() => {
     console.log('navContext changed to:', navContext);
   }, [navContext]);
@@ -830,7 +949,11 @@ export default function App() {
   const handleChannelSelect = (channel: M3UChannel) => {
     console.log('handleChannelSelect called for:', channel.name);
     setRecentlyWatched(prev => {
-      const filtered = prev.filter(ch => ch.id !== channel.id);
+      // Filter out if same ID OR any overlapping URL
+      const filtered = prev.filter(ch => 
+        ch.id !== channel.id && 
+        !ch.urls.some(url => channel.urls.includes(url))
+      );
       return [channel, ...filtered].slice(0, 20);
     });
     console.log('Setting currentChannel and navContext to player');
@@ -886,7 +1009,6 @@ export default function App() {
     if (!featuredChannel) return [];
     return [
       { id: 'play', label: 'Oynat', icon: Play, action: () => handleChannelSelect(featuredChannel) },
-      { id: 'animator', label: 'AI Animator', icon: Wand2, action: () => { setShowVeoAnimator(true); setNavContext('ai-animator'); } },
       { id: 'details', label: 'Detaylar', icon: Info, action: () => {} }
     ];
   }, [featuredChannel]);
@@ -917,12 +1039,20 @@ export default function App() {
     const hasLive = getCategoryChannelsCount('live') > 0;
     const hasMovies = getCategoryChannelsCount('movies') > 0;
     const hasSeries = getCategoryChannelsCount('series') > 0;
+    const hasTop10 = channels.some(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10);
 
     return [
       { id: 'search', label: 'Ara', icon: Search, action: () => {
         const searchInput = document.getElementById('hero-search-input');
         if (searchInput) searchInput.focus();
       }, isActive: true },
+      hasTop10 && {
+        id: 'top10',
+        label: 'Top 10',
+        icon: Tv,
+        action: () => toggleCategory('top10'),
+        isActive: visibleCategories.includes('Top 10')
+      },
       recentlyWatched.length > 0 && { 
         id: 'recent', 
         label: 'İzlemeye Devam Et', 
@@ -1287,15 +1417,6 @@ export default function App() {
         return;
       }
 
-      if (navContext === 'ai-animator') {
-        if (key === 'Escape' || key === 'Backspace') {
-          e.preventDefault();
-          setShowVeoAnimator(false);
-          setNavContext('browse');
-        }
-        return;
-      }
-
       if (navContext === 'exit-confirm') {
         switch (key) {
           case 'ArrowLeft':
@@ -1552,15 +1673,18 @@ export default function App() {
       }
 
       const content = await (successfulResponse as Response).text();
-      const parsed = parseM3U(content);
-      setChannels(parsed);
+      const { channels: parsedChannels, epgUrl: extractedEpgUrl } = parseM3U(content);
+      setChannels(parsedChannels);
       setHasCheckedLinks(false);
       setBrokenChannelIds(new Set());
 
-      // Load EPG if URL provided
-      if (epgUrl) {
+      // Use extracted EPG URL if provided in M3U header and no manual EPG URL is set
+      const finalEpgUrlToUse = epgUrl || extractedEpgUrl;
+
+      // Load EPG if URL provided or extracted
+      if (finalEpgUrlToUse) {
         try {
-          const urlsToTryEpg = resolveUrl(epgUrl);
+          const urlsToTryEpg = resolveUrl(finalEpgUrlToUse);
           let epg = null;
           for (const url of urlsToTryEpg) {
             try {
@@ -1568,6 +1692,7 @@ export default function App() {
               epg = await fetchAndParseEPG(finalEpgUrl);
               if (epg) {
                 localStorage.setItem('epg_url', url);
+                setEpgUrl(url);
                 break;
               }
             } catch (e) {
@@ -1580,7 +1705,7 @@ export default function App() {
         }
       }
 
-      if (parsed.length > 0) {
+      if (parsedChannels.length > 0) {
         // Save to localStorage
         localStorage.setItem('m3u_url', finalUrl);
         localStorage.removeItem('m3u_deleted');
@@ -1701,11 +1826,34 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      const parsed = parseM3U(content);
-      setChannels(parsed);
+      const { channels: parsedChannels, epgUrl: extractedEpgUrl } = parseM3U(content);
+      setChannels(parsedChannels);
       setHasCheckedLinks(false);
       setBrokenChannelIds(new Set());
-      if (parsed.length > 0) {
+
+      // Use extracted EPG URL if provided in M3U header
+      if (extractedEpgUrl) {
+        setEpgUrl(extractedEpgUrl);
+        localStorage.setItem('epg_url', extractedEpgUrl);
+        // Trigger EPG load
+        const loadEPG = async () => {
+          try {
+            const urlsToTryEpg = resolveUrl(extractedEpgUrl);
+            let epg = null;
+            for (const url of urlsToTryEpg) {
+              try {
+                const finalEpgUrl = getProxiedUrl(url);
+                epg = await fetchAndParseEPG(finalEpgUrl);
+                if (epg) break;
+              } catch (err) {}
+            }
+            if (epg) setEpgData(epg);
+          } catch (err) {}
+        };
+        loadEPG();
+      }
+
+      if (parsedChannels.length > 0) {
         setShowSuccess(true);
         setNavContext('browse');
         setTimeout(() => setShowSuccess(false), 3000);
@@ -2123,8 +2271,9 @@ export default function App() {
                   }}
                   onToggleFavorite={toggleFavorite}
                   onDeleteChannel={handleDeleteChannel}
-                  onLongPress={(id) => {
+                  onLongPress={(id, category) => {
                     setChannelMenuId(id);
+                    setChannelMenuCategory(category);
                     setNavContext('channel-menu');
                     setChannelMenuFocus(0);
                   }}
@@ -2180,18 +2329,27 @@ export default function App() {
                   { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart, active: favorites.includes(channelMenuId) },
                   { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
                   { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
-                  { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) }
+                  { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) },
+                  { id: 'move-left', label: 'Sola Taşı', icon: ChevronLeft },
+                  { id: 'move-right', label: 'Sağa Taşı', icon: ChevronRight }
                 ].map((opt, idx) => (
                   <button
                     key={opt.id}
                     onClick={() => {
                       if (opt.id === 'favorite') {
                         toggleFavorite(channelMenuId);
+                      } else if (opt.id === 'move-left') {
+                        moveChannel(channelMenuId, 'left', channelMenuCategory || '');
+                      } else if (opt.id === 'move-right') {
+                        moveChannel(channelMenuId, 'right', channelMenuCategory || '');
                       } else {
                         toggleManualCategory(channelMenuId, opt.id as any);
                       }
-                      setChannelMenuId(null);
-                      setNavContext('browse');
+                      
+                      if (opt.id !== 'move-left' && opt.id !== 'move-right') {
+                        setChannelMenuId(null);
+                        setNavContext('browse');
+                      }
                     }}
                     onPointerDown={() => {
                       setNavContext('channel-menu');
@@ -2205,7 +2363,7 @@ export default function App() {
                         : "bg-white/5 text-white hover:bg-white/10"
                     )}
                   >
-                    <opt.icon className={cn("w-6 h-6", opt.active && "fill-current text-red-500")} />
+                    <opt.icon className={cn("w-6 h-6", 'active' in opt && opt.active && "fill-current text-red-500")} />
                     <span className="text-xs font-bold">{opt.label}</span>
                   </button>
                 ))}
@@ -2218,14 +2376,7 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
-        {showVeoAnimator && (
-        <VeoAnimator 
-          onClose={() => setShowVeoAnimator(false)} 
-          themeColor={themeColor} 
-        />
-      )}
-
-      {showSettings && (
+        {showSettings && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2629,7 +2780,40 @@ export default function App() {
                             </button>
                           </div>
 
-
+                          <section className="space-y-4 pt-6 border-t border-white/5">
+                            <label className="text-zinc-400 text-xs font-black uppercase tracking-widest">Kategori Görünürlüğü</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              {[
+                                { id: 'top10', label: 'Top 10', icon: Tv },
+                                { id: 'favorites', label: 'Favorilerim', icon: Heart },
+                                { id: 'live', label: 'Canlı', icon: Tv },
+                                { id: 'movies', label: 'Film', icon: Play },
+                                { id: 'series', label: 'Dizi', icon: List },
+                                { id: 'recent', label: 'İzlemeye Devam Et', icon: Clock }
+                              ].map((cat, idx) => {
+                                const isVisible = visibleCategories.includes(cat.label);
+                                const focusIdx = 8 + idx;
+                                return (
+                                  <button
+                                    key={cat.id}
+                                    onClick={() => toggleCategory(cat.id as any)}
+                                    onPointerDown={() => { setSettingsArea('content'); setSettingsFocus(focusIdx); }}
+                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsFocus(focusIdx); }}
+                                    className={cn(
+                                      "flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm",
+                                      settingsArea === 'content' && settingsFocus === focusIdx 
+                                        ? "bg-white text-black scale-105 shadow-xl" 
+                                        : isVisible ? "bg-white/10 text-white" : "bg-white/5 text-zinc-500"
+                                    )}
+                                  >
+                                    <cat.icon className={cn("w-4 h-4", isVisible && ! (settingsArea === 'content' && settingsFocus === focusIdx) && "text-red-500")} style={{ color: isVisible && ! (settingsArea === 'content' && settingsFocus === focusIdx) ? themeColor : undefined }} />
+                                    <span>{cat.label}</span>
+                                    {isVisible && <Check className="w-3 h-3 ml-auto" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </section>
                         </div>
                       </section>
                     </motion.div>
@@ -2945,10 +3129,7 @@ export default function App() {
             setCurrentChannel(null);
             setNavContext('browse');
           }} 
-          onChannelSelect={(ch) => {
-            setCurrentChannel(ch);
-            setNavContext('player');
-          }}
+          onChannelSelect={handleChannelSelect}
         />
       </>
       )}

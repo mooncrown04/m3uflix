@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
-import { X, Settings, Volume2, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2 } from 'lucide-react';
+import * as dashjs from 'dashjs';
+import { X, Settings, Volume2, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
@@ -36,12 +37,55 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [currentSubtitleTrack, setCurrentSubtitleTrack] = useState<number>(-1);
   const [isPlaying, setIsPlaying] = useState(true);
   const [showControls, setShowControls] = useState(true);
-  const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels' | 'sources'>('none');
+  const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels' | 'sources' | 'details'>('none');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
-  const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Category Selector, 6+: Menu items
+  const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Details, 10: Category Selector, 11+: Menu items
   const [currentTime, setCurrentTime] = useState(new Date());
   const [hasError, setHasError] = useState(false);
   const [currentUrlIndex, setCurrentUrlIndex] = useState(0);
+  const [seekInfo, setSeekInfo] = useState<{ type: 'forward' | 'backward', amount: number } | null>(null);
+  const [seekStep, setSeekStep] = useState(10);
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const seekTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+
+  const resetControlsTimer = () => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    if (isPlaying && activeMenu === 'none') {
+      controlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    if (showControls) {
+      resetControlsTimer();
+    }
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
+  }, [showControls, isPlaying, activeMenu]);
+
+  const handleProgressBarSeek = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!progressBarRef.current || !videoRef.current || duration <= 0 || duration === Infinity) return;
+    
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const percentage = x / rect.width;
+    const newTime = percentage * duration;
+    
+    videoRef.current.currentTime = newTime;
+    setPlaybackTime(newTime);
+  };
 
   useEffect(() => {
     console.log('VideoPlayer focusIndex changed to:', focusIndex);
@@ -84,6 +128,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setHasError(false);
     setCurrentUrlIndex(0);
     setUseProxy(false);
+    setShowControls(true);
+    setIsPlaying(true);
+    setIsBuffering(true);
   }, [channel]);
 
   // All available groups
@@ -126,6 +173,47 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return () => clearInterval(timer);
   }, []);
 
+  const [isBuffering, setIsBuffering] = useState(true);
+  const [showPlayPauseIndicator, setShowPlayPauseIndicator] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleWaiting = () => setIsBuffering(true);
+    const handlePlaying = () => setIsBuffering(false);
+    const handleCanPlay = () => setIsBuffering(false);
+    const handleTimeUpdate = () => {
+      if (video) {
+        setPlaybackTime(video.currentTime);
+        setDuration(video.duration || 0);
+      }
+    };
+    const handleLoadedMetadata = () => {
+      if (video) setDuration(video.duration || 0);
+    };
+
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('playing', handlePlaying);
+    video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+    return () => {
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+    };
+  }, []);
+
+  useEffect(() => {
+    setShowPlayPauseIndicator(true);
+    const timer = setTimeout(() => setShowPlayPauseIndicator(false), 1000);
+    return () => clearTimeout(timer);
+  }, [isPlaying]);
+
   useEffect(() => {
     if (videoRef.current) {
       if (isPlaying) videoRef.current.play().catch(() => {});
@@ -134,18 +222,44 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [isPlaying]);
 
   const currentProgram = useMemo(() => {
-    if (!epgData || !channel?.tvgId) return null;
-    const programs = epgData.programs[channel.tvgId];
-    if (!programs) return null;
+    if (!epgData || !channel) return null;
+    
+    // Try matching by ID first (tvgId, tvgName, or channel attribute)
+    let epgId = channel.tvgId || channel.tvgName || channel.channel;
+    let programs = epgId ? epgData.programs[epgId] : null;
 
+    // Fallback: Try matching by channel name if no ID match
+    if (!programs) {
+      const foundId = Object.entries(epgData.channels).find(
+        ([_, name]) => (name as string).toLowerCase() === channel.name.toLowerCase()
+      )?.[0];
+      if (foundId) {
+        programs = epgData.programs[foundId];
+      }
+    }
+
+    if (!programs) return null;
     return programs.find(p => currentTime >= p.start && currentTime <= p.stop) || null;
   }, [epgData, channel, currentTime]);
 
   const nextProgram = useMemo(() => {
-    if (!epgData || !channel?.tvgId) return null;
-    const programs = epgData.programs[channel.tvgId];
-    if (!programs) return null;
+    if (!epgData || !channel) return null;
+    
+    // Try matching by ID first
+    let epgId = channel.tvgId || channel.tvgName || channel.channel;
+    let programs = epgId ? epgData.programs[epgId] : null;
 
+    // Fallback: Try matching by channel name
+    if (!programs) {
+      const foundId = Object.entries(epgData.channels).find(
+        ([_, name]) => (name as string).toLowerCase() === channel.name.toLowerCase()
+      )?.[0];
+      if (foundId) {
+        programs = epgData.programs[foundId];
+      }
+    }
+
+    if (!programs) return null;
     return programs.find(p => p.start > currentTime) || null;
   }, [epgData, channel, currentTime]);
 
@@ -161,66 +275,118 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatDuration = (ms: number) => {
+    const totalMinutes = Math.floor(Math.max(0, ms) / (1000 * 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0) {
+      return `${hours}sa ${minutes}dk`;
+    }
+    return `${minutes}dk`;
+  };
+
+  const formatPlaybackTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
   useEffect(() => {
     console.log('VideoPlayer initializing for URL:', currentUrl);
     const video = videoRef.current;
     if (!video) return;
 
     let hls: Hls | null = null;
+    let dash: dashjs.MediaPlayerClass | null = null;
+    const lowerUrl = currentUrl.toLowerCase();
+    const isHlsUrl = lowerUrl.includes('.m3u8') || lowerUrl.includes('m3u8');
+    const isDashUrl = lowerUrl.includes('.mpd') || lowerUrl.includes('mpd');
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    if (isHlsUrl) {
+      if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = currentUrl;
+        video.load();
+        if (isPlaying) video.play().catch(() => {});
+      } else if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 60,
+          xhrSetup: (xhr, url) => {
+            const proxyBase = customProxyUrl || '/api/proxy?url=';
+            const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
+            const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
+
+            if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
+              const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
+              xhr.open('GET', proxiedUrl, true);
+            }
+          }
+        });
+        hls.loadSource(currentUrl);
+        hls.attachMedia(video);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setAudioTracks(hls?.audioTracks || []);
+          setSubtitleTracks(hls?.subtitleTracks || []);
+          setCurrentAudioTrack(hls?.audioTrack || -1);
+          setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
+          if (isPlaying) video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            handleVideoError();
+          }
+        });
+
+        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+          setCurrentAudioTrack(data.id);
+        });
+
+        hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+          setCurrentSubtitleTrack(data.id);
+        });
+
+        setHlsInstance(hls);
+      }
+    } else if (isDashUrl) {
+      dash = dashjs.MediaPlayer().create();
+      dash.initialize(video, currentUrl, isPlaying);
+      
+      // Reset tracks as dash handled differently
+      setAudioTracks([]);
+      setSubtitleTracks([]);
+      setCurrentAudioTrack(-1);
+      setCurrentSubtitleTrack(-1);
+    } else {
+      // Native playback for MP4, WebM, Ogg, and potentially AVI/MKV if browser supports codecs
       video.src = currentUrl;
       video.load();
       if (isPlaying) video.play().catch(() => {});
-    } else if (Hls.isSupported()) {
-      hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 60,
-        xhrSetup: (xhr, url) => {
-          // If we are using the proxy for the manifest, we should also proxy segments
-          // But only if the segment URL is not already proxied and is an absolute URL
-          const proxyBase = customProxyUrl || '/api/proxy?url=';
-          const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
-          const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
-
-          if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
-            const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
-            xhr.open('GET', proxiedUrl, true);
-          }
-        }
-      });
-      hls.loadSource(currentUrl);
-      hls.attachMedia(video);
       
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setAudioTracks(hls?.audioTracks || []);
-        setSubtitleTracks(hls?.subtitleTracks || []);
-        setCurrentAudioTrack(hls?.audioTrack || -1);
-        setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
-        if (isPlaying) video.play().catch(() => {});
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          handleVideoError();
-        }
-      });
-
-      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
-        setCurrentAudioTrack(data.id);
-      });
-
-      hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
-        setCurrentSubtitleTrack(data.id);
-      });
-
-      setHlsInstance(hls);
+      // Reset tracks as native playback handles them differently or they might not be available via HLS API
+      setAudioTracks([]);
+      setSubtitleTracks([]);
+      setCurrentAudioTrack(-1);
+      setCurrentSubtitleTrack(-1);
     }
 
     return () => {
       if (hls) {
         hls.destroy();
+      }
+      if (dash) {
+        dash.destroy();
+      }
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
       }
     };
   }, [currentUrl]);
@@ -240,156 +406,252 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setHasError(false);
     } else {
       setHasError(true);
+      setIsPlaying(false);
+      setIsBuffering(false);
     }
   };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       let key = e.key;
+      setLastActivity(Date.now());
+
       // Normalize TV remote keys
       if (key === 'Select' || key === 'OK') key = 'Enter';
       if (key === 'Back' || key === 'GoBack' || key === 'XF86Back' || key === 'MediaStop') key = 'Backspace';
-      if (key === 'Up') key = 'ArrowUp';
-      if (key === 'Down') key = 'ArrowDown';
-      if (key === 'Left') key = 'ArrowLeft';
-      if (key === 'Right') key = 'ArrowRight';
+      if (key === 'Up' || key === 'ChannelUp') key = 'ArrowUp';
+      if (key === 'Down' || key === 'ChannelDown') key = 'ArrowDown';
+      if (key === 'Left' || key === 'MediaRewind') key = 'ArrowLeft';
+      if (key === 'Right' || key === 'MediaFastForward') key = 'ArrowRight';
       if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = ' ';
 
-      if (!showControls) {
-        if (key === 'ArrowUp') {
-          e.preventDefault();
-          const currentIdx = categoryChannels.findIndex(ch => ch.id === channel?.id);
-          const nextIdx = (currentIdx - 1 + categoryChannels.length) % categoryChannels.length;
-          const nextChannel = categoryChannels[nextIdx];
-          if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
-          return;
-        }
-        if (key === 'ArrowDown') {
-          e.preventDefault();
-          const currentIdx = categoryChannels.findIndex(ch => ch.id === channel?.id);
-          const nextIdx = (currentIdx + 1) % categoryChannels.length;
-          const nextChannel = categoryChannels[nextIdx];
-          if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
-          return;
-        }
+      // Global keys
+      if (key === ' ') {
+        e.preventDefault();
+        setIsPlaying(prev => !prev);
         setShowControls(true);
         return;
       }
 
-      switch (key) {
-        case ' ':
+      if (key === 'f' || key === 'F') {
+        e.preventDefault();
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(err => {
+            console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+          });
+        } else {
+          document.exitFullscreen();
+        }
+        return;
+      }
+
+      if (key === 'Escape' || key === 'Backspace') {
+        e.preventDefault();
+        if (activeMenu !== 'none') {
+          const prevMenu = activeMenu;
+          setActiveMenu('none');
+          // Return focus to the button that opened the menu
+          if (prevMenu === 'audio') setFocusIndex(1);
+          else if (prevMenu === 'subtitle') setFocusIndex(2);
+          else if (prevMenu === 'channels') setFocusIndex(3);
+          else if (prevMenu === 'sources') setFocusIndex(4);
+          else if (prevMenu === 'details') setFocusIndex(5);
+        } else if (showControls) {
+          setShowControls(false);
+        } else {
+          onClose?.();
+        }
+        return;
+      }
+
+      // Layer 2: Clean Screen (Controls are hidden)
+      if (!showControls) {
+        if (key === 'ArrowUp') {
           e.preventDefault();
-          setIsPlaying(prev => !prev);
-          break;
-        case 'f':
-        case 'F':
+          const list = categoryChannels.length > 0 ? categoryChannels : channels;
+          if (list.length > 0) {
+            const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+            const nextIdx = (currentIdx - 1 + list.length) % list.length;
+            const nextChannel = list[nextIdx];
+            if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+          }
+          return;
+        }
+        if (key === 'ArrowDown') {
           e.preventDefault();
-          if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(err => {
-              console.error(`Error attempting to enable full-screen mode: ${err.message}`);
+          const list = categoryChannels.length > 0 ? categoryChannels : channels;
+          if (list.length > 0) {
+            const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+            const nextIdx = (currentIdx + 1) % list.length;
+            const nextChannel = list[nextIdx];
+            if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+          }
+          return;
+        }
+        if (key === 'ArrowLeft') {
+          e.preventDefault();
+          setShowControls(true);
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - seekStep);
+            setSeekInfo(prev => {
+              const newAmount = (prev?.type === 'backward' ? prev.amount : 0) + seekStep;
+              return { type: 'backward', amount: newAmount };
             });
-          } else {
-            document.exitFullscreen();
+            if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+            seekTimerRef.current = setTimeout(() => setSeekInfo(null), 1000);
           }
-          break;
-        case 'Escape':
-        case 'Backspace':
-          if (activeMenu !== 'none') {
-            setActiveMenu('none');
-            if (activeMenu === 'audio') setFocusIndex(1);
-            else if (activeMenu === 'subtitle') setFocusIndex(2);
-            else if (activeMenu === 'channels') setFocusIndex(3);
-          } else {
-            onClose?.();
+          return;
+        }
+        if (key === 'ArrowRight') {
+          e.preventDefault();
+          setShowControls(true);
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.min(videoRef.current.duration || 0, videoRef.current.currentTime + seekStep);
+            setSeekInfo(prev => {
+              const newAmount = (prev?.type === 'forward' ? prev.amount : 0) + seekStep;
+              return { type: 'forward', amount: newAmount };
+            });
+            if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+            seekTimerRef.current = setTimeout(() => setSeekInfo(null), 1000);
           }
-          break;
-        case 'ArrowLeft':
-          if (activeMenu === 'none') {
-            setFocusIndex(prev => Math.max(0, prev - 1));
-          } else if (activeMenu === 'channels' && focusIndex === 4) {
-            // Switch category
-            const currentIdx = allGroups.indexOf(selectedGroup);
-            const nextIdx = (currentIdx - 1 + allGroups.length) % allGroups.length;
-            setSelectedGroup(allGroups[nextIdx]);
+          return;
+        }
+        
+        // Any other key shows controls
+        setShowControls(true);
+        return;
+      }
+
+      // Layer 1: Info Layer (Controls are visible)
+      if (activeMenu === 'none') {
+        if (key === 'ArrowLeft') {
+          e.preventDefault();
+          setFocusIndex(prev => Math.max(0, prev - 1));
+        } else if (key === 'ArrowRight') {
+          e.preventDefault();
+          setFocusIndex(prev => Math.min(5, prev + 1));
+        } else if (key === 'ArrowUp') {
+          e.preventDefault();
+          // Stay in Layer 1, do nothing
+        } else if (key === 'ArrowDown') {
+          e.preventDefault();
+          setShowControls(false);
+        } else if (key === 'Enter') {
+          e.preventDefault();
+          if (focusIndex === 0) onClose?.();
+          else if (focusIndex === 1) setActiveMenu('audio');
+          else if (focusIndex === 2) setActiveMenu('subtitle');
+          else if (focusIndex === 3) {
+            setActiveMenu('channels');
+            const currentIdx = categoryChannels.findIndex(ch => ch.id === channel?.id);
+            setFocusIndex(11 + (currentIdx >= 0 ? currentIdx : 0));
           }
-          break;
-        case 'ArrowRight':
-          if (activeMenu === 'none') {
-            setFocusIndex(prev => Math.min(4, prev + 1));
-          } else if (activeMenu === 'channels' && focusIndex === 4) {
-            // Switch category
-            const currentIdx = allGroups.indexOf(selectedGroup);
-            const nextIdx = (currentIdx + 1) % allGroups.length;
-            setSelectedGroup(allGroups[nextIdx]);
+          else if (focusIndex === 4) setActiveMenu('sources');
+          else if (focusIndex === 5) {
+            setActiveMenu('details');
+            setFocusIndex(50);
           }
-          break;
+        }
+        return;
+      }
+
+      // Menu navigation (Active Menu is open)
+      switch (key) {
         case 'ArrowUp':
-          if (activeMenu !== 'none') {
-            setFocusIndex(prev => Math.max(4, prev - 1));
+          e.preventDefault();
+          if (activeMenu === 'channels') {
+            if (focusIndex > 11) setFocusIndex(prev => prev - 1);
+            else if (focusIndex === 11) setFocusIndex(10);
+          } else if (activeMenu === 'audio') {
+            setFocusIndex(prev => Math.max(20, prev - 1));
+          } else if (activeMenu === 'subtitle') {
+            setFocusIndex(prev => Math.max(30, prev - 1));
+          } else if (activeMenu === 'sources') {
+            setFocusIndex(prev => Math.max(40, prev - 1));
+          } else if (activeMenu === 'details') {
+            // Only one interactive item in details for now
+            setFocusIndex(50);
           }
           break;
         case 'ArrowDown':
-          if (activeMenu !== 'none') {
-            let max = 4;
-            if (activeMenu === 'audio') max = 4 + audioTracks.length - 1;
-            else if (activeMenu === 'subtitle') max = 4 + subtitleTracks.length; // 4 is "Off", 5+ are tracks
-            else if (activeMenu === 'channels') max = 4 + 1 + categoryChannels.length - 1; // 4: Category, 5+: Channels
-            else if (activeMenu === 'sources') max = 6 + (channel?.urls || [url]).length - 1;
-            setFocusIndex(prev => Math.min(max, prev + 1));
+          e.preventDefault();
+          if (activeMenu === 'channels') {
+            if (focusIndex === 10) setFocusIndex(11);
+            else setFocusIndex(prev => Math.min(11 + categoryChannels.length - 1, prev + 1));
+          } else if (activeMenu === 'audio') {
+            setFocusIndex(prev => Math.min(20 + audioTracks.length - 1, prev + 1));
+          } else if (activeMenu === 'subtitle') {
+            setFocusIndex(prev => Math.min(30 + subtitleTracks.length, prev + 1));
+          } else if (activeMenu === 'sources') {
+            const urls = channel?.urls || [url];
+            setFocusIndex(prev => Math.min(40 + urls.length - 1, prev + 1));
+          } else if (activeMenu === 'details') {
+            setFocusIndex(50);
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (activeMenu === 'channels' && focusIndex === 10) {
+            const groups = ['Tümü', ...allGroups];
+            const currentIdx = groups.indexOf(selectedGroup || 'Tümü');
+            const nextIdx = (currentIdx - 1 + groups.length) % groups.length;
+            setSelectedGroup(groups[nextIdx] === 'Tümü' ? '' : groups[nextIdx]);
+          } else if (activeMenu === 'details' && focusIndex === 50) {
+            setSeekStep(prev => Math.max(5, prev - 5));
+          }
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (activeMenu === 'channels' && focusIndex === 10) {
+            const groups = ['Tümü', ...allGroups];
+            const currentIdx = groups.indexOf(selectedGroup || 'Tümü');
+            const nextIdx = (currentIdx + 1) % groups.length;
+            setSelectedGroup(groups[nextIdx] === 'Tümü' ? '' : groups[nextIdx]);
+          } else if (activeMenu === 'details' && focusIndex === 50) {
+            setSeekStep(prev => Math.min(60, prev + 5));
           }
           break;
         case 'Enter':
-          if (activeMenu === 'none') {
-            if (focusIndex === 0) onClose?.();
-            else if (focusIndex === 1) {
-              setActiveMenu('audio');
-              setFocusIndex(4 + (currentAudioTrack !== -1 ? audioTracks.findIndex(t => t.id === currentAudioTrack) : 0));
-            }
-            else if (focusIndex === 2) {
-              setActiveMenu('subtitle');
-              setFocusIndex(4 + (currentSubtitleTrack !== -1 ? subtitleTracks.findIndex(t => t.id === currentSubtitleTrack) : 0));
-            }
-            else if (focusIndex === 3) {
-              setActiveMenu('channels');
-              setFocusIndex(4); // Start at category selector
-            }
-            else if (focusIndex === 4) {
-              setActiveMenu('sources');
-              setFocusIndex(6 + currentUrlIndex);
-            }
-          } else {
-            if (activeMenu === 'channels') {
-              if (focusIndex === 4) {
-                // Category selector - handled by Left/Right
-              } else {
-                const itemIdx = focusIndex - 5;
-                const selected = categoryChannels[itemIdx];
-                if (selected && onChannelSelect) {
-                  onChannelSelect(selected);
-                  setActiveMenu('none');
-                  setFocusIndex(3);
-                }
-              }
-            } else if (activeMenu === 'sources') {
-              const itemIdx = focusIndex - 6;
-              if (itemIdx >= 0) {
-                setCurrentUrlIndex(itemIdx);
-                setHasError(false);
+          e.preventDefault();
+          if (activeMenu === 'channels') {
+            if (focusIndex >= 11) {
+              const channelIndex = focusIndex - 11;
+              if (categoryChannels[channelIndex] && onChannelSelect) {
+                onChannelSelect(categoryChannels[channelIndex]);
                 setActiveMenu('none');
-                setFocusIndex(4);
+                setFocusIndex(3); // Return focus to "Kanallar" button
               }
+            }
+          } else if (activeMenu === 'audio') {
+            const track = audioTracks[focusIndex - 20];
+            if (track && hlsInstance) {
+              hlsInstance.audioTrack = track.id;
+              setCurrentAudioTrack(track.id);
+            }
+            setActiveMenu('none');
+            setFocusIndex(1);
+          } else if (activeMenu === 'subtitle') {
+            if (focusIndex === 30) {
+              if (hlsInstance) hlsInstance.subtitleTrack = -1;
+              setCurrentSubtitleTrack(-1);
             } else {
-              const itemIdx = focusIndex - 4;
-              if (activeMenu === 'audio') {
-                if (hlsInstance) hlsInstance.audioTrack = audioTracks[itemIdx].id;
-                setActiveMenu('none');
-                setFocusIndex(1);
-              } else if (activeMenu === 'subtitle') {
-                if (hlsInstance) hlsInstance.subtitleTrack = (itemIdx === 0) ? -1 : subtitleTracks[itemIdx - 1].id;
-                setActiveMenu('none');
-                setFocusIndex(2);
+              const track = subtitleTracks[focusIndex - 31];
+              if (track && hlsInstance) {
+                hlsInstance.subtitleTrack = track.id;
+                setCurrentSubtitleTrack(track.id);
               }
             }
+            setActiveMenu('none');
+            setFocusIndex(2);
+          } else if (activeMenu === 'sources') {
+            const idx = focusIndex - 40;
+            const urls = channel?.urls || [url];
+            if (urls[idx]) {
+              setCurrentUrlIndex(idx);
+              setHasError(false);
+            }
+            setActiveMenu('none');
+            setFocusIndex(4);
           }
           break;
       }
@@ -397,37 +659,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showControls, activeMenu, focusIndex, audioTracks, subtitleTracks, hlsInstance, currentAudioTrack, currentSubtitleTrack, categoryChannels, onChannelSelect, channel, onClose]);
-
-  // Auto-show controls when channel changes
-  useEffect(() => {
-    if (channel) {
-      setShowControls(true);
-      const timer = setTimeout(() => {
-        if (activeMenu === 'none') setShowControls(false);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [channel, activeMenu]);
+  }, [showControls, activeMenu, focusIndex, audioTracks, subtitleTracks, hlsInstance, currentAudioTrack, currentSubtitleTrack, categoryChannels, onChannelSelect, channel, onClose, allGroups, selectedGroup]);
 
   // Auto-hide controls
   useEffect(() => {
-    if (showControls && activeMenu === 'none') {
-      const timer = setTimeout(() => setShowControls(false), 5000);
+    if (showControls && activeMenu === 'none' && isPlaying) {
+      const timer = setTimeout(() => setShowControls(false), 3000);
       return () => clearTimeout(timer);
     }
-  }, [showControls, activeMenu]);
+  }, [showControls, activeMenu, isPlaying, channel, lastActivity]);
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col group overflow-hidden" onMouseMove={() => setShowControls(true)} onPointerDown={() => setShowControls(true)}>
+    <div 
+      className="fixed inset-0 bg-black z-50 flex flex-col group overflow-hidden" 
+      onMouseMove={() => {
+        if (!showControls) setShowControls(true);
+        setLastActivity(Date.now());
+      }} 
+      onPointerDown={() => {
+        if (!showControls) setShowControls(true);
+        setLastActivity(Date.now());
+      }}
+    >
       <div 
         className="flex-1 flex items-center justify-center bg-black relative cursor-pointer"
         onClick={() => {
-          if (!showControls) {
-            setShowControls(true);
-          } else {
-            setIsPlaying(!isPlaying);
-          }
+          setIsPlaying(!isPlaying);
+          setShowControls(true);
         }}
       >
         <video
@@ -440,7 +698,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Loading Indicator */}
         <AnimatePresence>
-          {!isPlaying && !hasError && (
+          {isBuffering && !hasError && !seekInfo && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -460,55 +718,78 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md z-50 p-8 text-center"
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md z-50 p-8 text-center"
             >
-              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/30">
+              <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6 border border-red-500/50">
                 <X className="w-10 h-10 text-red-500" />
               </div>
-              <h3 className="text-2xl font-black text-white mb-2 uppercase tracking-tighter">Yayın Hatası</h3>
-              <p className="text-zinc-400 max-w-md font-medium mb-8 text-sm">
-                Bu kanal şu an ulaşılamıyor. Lütfen daha sonra tekrar deneyin veya başka bir kaynak seçin.
+              <h3 className="text-white font-black text-2xl mb-2 tracking-tighter uppercase italic">YAYIN HATASI</h3>
+              <p className="text-zinc-400 text-sm max-w-md font-medium leading-relaxed">
+                Bu kanal şu anda oynatılamıyor. Lütfen başka bir kaynak deneyin veya daha sonra tekrar kontrol edin.
               </p>
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => {
-                    setHasError(false);
-                    setCurrentUrlIndex(0);
-                    setUseProxy(true);
-                  }}
-                  className="px-8 py-3 bg-white text-black font-black uppercase tracking-tighter rounded-xl hover:scale-105 transition-all"
-                >
-                  Yeniden Dene
-                </button>
-                <button 
-                  onClick={onClose}
-                  className="px-8 py-3 bg-zinc-800 text-white font-black uppercase tracking-tighter rounded-xl hover:scale-105 transition-all"
-                >
-                  Kapat
-                </button>
+              <button 
+                onClick={() => {
+                  setHasError(false);
+                  setIsPlaying(true);
+                  setIsBuffering(true);
+                  setCurrentUrlIndex(0);
+                }}
+                className="mt-8 px-8 py-3 bg-white text-black font-black rounded-full hover:scale-105 transition-transform uppercase tracking-widest text-xs"
+              >
+                Yeniden Dene
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Play/Pause Indicator */}
+        <AnimatePresence>
+          {showPlayPauseIndicator && !seekInfo && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.5 }}
+              className="absolute inset-0 flex items-center justify-center pointer-events-none z-40"
+            >
+              <div className="bg-black/40 p-8 rounded-full backdrop-blur-md border border-white/10 shadow-2xl">
+                {isPlaying ? (
+                  <Play className="w-16 h-16 text-white fill-current" />
+                ) : (
+                  <Pause className="w-16 h-16 text-white fill-current" />
+                )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Play/Pause Indicator for Touch */}
+        {/* Seek Indicator */}
         <AnimatePresence>
-          {showControls && (
+          {seekInfo && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.5 }}
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              initial={{ opacity: 0, scale: 0.5, x: seekInfo.type === 'forward' ? 100 : -100 }}
+              animate={{ opacity: 1, scale: 1, x: 0 }}
+              exit={{ opacity: 0, scale: 0.5, x: seekInfo.type === 'forward' ? 150 : -150 }}
+              className={cn(
+                "absolute inset-0 flex items-center pointer-events-none z-50 px-20",
+                seekInfo.type === 'forward' ? "justify-end" : "justify-start"
+              )}
             >
-              <div className="bg-black/40 p-6 rounded-full backdrop-blur-sm">
-                {isPlaying ? (
-                  <Play className="w-12 h-12 text-white fill-current" />
-                ) : (
-                  <div className="flex gap-2">
-                    <div className="w-4 h-12 bg-white rounded-full" />
-                    <div className="w-4 h-12 bg-white rounded-full" />
-                  </div>
-                )}
+              <div className="bg-black/60 px-10 py-8 rounded-3xl backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col items-center gap-4">
+                <div className="bg-white/10 p-4 rounded-2xl">
+                  {seekInfo.type === 'forward' ? (
+                    <FastForward className="w-16 h-16 text-white fill-current" />
+                  ) : (
+                    <Rewind className="w-16 h-16 text-white fill-current" />
+                  )}
+                </div>
+                <div className="flex flex-col items-center">
+                  <span className="text-4xl font-black text-white tracking-tighter">
+                    {seekInfo.type === 'forward' ? '+' : '-'}{seekInfo.amount}s
+                  </span>
+                  <span className="text-xs font-bold text-white/50 uppercase tracking-widest">
+                    {seekInfo.type === 'forward' ? 'İLERİ SARILIYOR' : 'GERİ SARILIYOR'}
+                  </span>
+                </div>
               </div>
             </motion.div>
           )}
@@ -586,11 +867,95 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     <Link2 className="w-8 h-8" />
                     <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
                   </button>
+                  <button 
+                    onClick={() => setActiveMenu('details')}
+                    onPointerDown={() => setFocusIndex(5)}
+                    className={cn(
+                      "p-3 rounded-full transition-all flex items-center gap-2",
+                      focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                    )}
+                  >
+                    <Settings2 className="w-8 h-8" />
+                    <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
+                  </button>
                 </div>
               </div>
 
               {/* Menus */}
               <div className="flex justify-end items-end gap-8 mb-4">
+                {activeMenu === 'details' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-zinc-900/95 backdrop-blur-2xl border border-white/10 p-6 rounded-3xl w-96 shadow-2xl"
+                  >
+                    <div className="flex items-center gap-4 mb-6">
+                      <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
+                        <Settings2 className="w-8 h-8 text-red-500" />
+                      </div>
+                      <div>
+                        <h3 className="text-white font-black text-xl tracking-tighter">Kanal Detayları</h3>
+                        <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">M3U Bilgileri</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div 
+                        className={cn(
+                          "p-4 rounded-2xl transition-all border flex items-center justify-between",
+                          focusIndex === 50 ? "bg-white text-black scale-105 border-white" : "bg-white/5 text-white border-white/5"
+                        )}
+                      >
+                        <div className="flex flex-col">
+                          <p className="text-[8px] font-black uppercase tracking-widest mb-1 opacity-50">OYNATMA AYARI</p>
+                          <p className="font-bold text-sm">Hızlı Sarma Süresi</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <ChevronLeft className={cn("w-4 h-4", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
+                          <span className="text-xl font-black tabular-nums">{seekStep}s</span>
+                          <ChevronRight className={cn("w-4 h-4", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
+                        </div>
+                      </div>
+
+                      {channel?.genre && (
+                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">TÜR</p>
+                          <p className="text-white font-bold text-sm">{channel.genre}</p>
+                        </div>
+                      )}
+                      {channel?.actor && (
+                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">OYUNCULAR</p>
+                          <p className="text-white font-bold text-sm">{channel.actor}</p>
+                        </div>
+                      )}
+                      {channel?.year && (
+                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">YIL</p>
+                          <p className="text-white font-bold text-sm">{channel.year}</p>
+                        </div>
+                      )}
+                      {channel?.language && (
+                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">DİL</p>
+                          <p className="text-white font-bold text-sm">{channel.language}</p>
+                        </div>
+                      )}
+                      {channel?.description && (
+                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">AÇIKLAMA</p>
+                          <p className="text-white font-medium text-xs leading-relaxed opacity-80">{channel.description}</p>
+                        </div>
+                      )}
+                      {!channel?.genre && !channel?.actor && !channel?.year && !channel?.language && !channel?.description && (
+                        <div className="text-center py-8">
+                          <p className="text-zinc-500 italic text-sm">Bu kanal için ek bilgi bulunamadı.</p>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
                 {activeMenu === 'sources' && (
                   <motion.div 
                     initial={{ opacity: 0, x: 20 }}
@@ -618,10 +983,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             setHasError(false);
                             setActiveMenu('none');
                           }}
-                          onPointerDown={() => setFocusIndex(6 + idx)}
+                          onPointerDown={() => setFocusIndex(40 + idx)}
                           className={cn(
                             "w-full flex items-center gap-4 p-4 rounded-xl transition-all font-bold text-left",
-                            focusIndex === 6 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                            focusIndex === 40 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
                             currentUrlIndex === idx && "text-red-500"
                           )}
                         >
@@ -640,6 +1005,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </div>
                   </motion.div>
                 )}
+
                 {activeMenu === 'channels' && (
                   <motion.div 
                     initial={{ opacity: 0, x: 20 }}
@@ -654,12 +1020,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       <div 
                         className={cn(
                           "flex items-center justify-between p-3 rounded-xl transition-all border border-white/5",
-                          focusIndex === 4 ? "bg-white text-black scale-105" : "bg-black/40 text-white"
+                          focusIndex === 10 ? "bg-white text-black scale-105" : "bg-black/40 text-white"
                         )}
                       >
-                        <ChevronLeft className={cn("w-4 h-4", focusIndex === 4 ? "text-black" : "text-zinc-500")} />
+                        <ChevronLeft className={cn("w-4 h-4", focusIndex === 10 ? "text-black" : "text-zinc-500")} />
                         <span className="font-black uppercase tracking-tighter text-sm truncate px-2">{selectedGroup || 'Tümü'}</span>
-                        <ChevronRight className={cn("w-4 h-4", focusIndex === 4 ? "text-black" : "text-zinc-500")} />
+                        <ChevronRight className={cn("w-4 h-4", focusIndex === 10 ? "text-black" : "text-zinc-500")} />
                       </div>
                     </div>
 
@@ -671,10 +1037,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             if (onChannelSelect) onChannelSelect(ch);
                             setActiveMenu('none');
                           }}
-                          onPointerDown={() => setFocusIndex(5 + idx)}
+                          onPointerDown={() => setFocusIndex(11 + idx)}
                           className={cn(
                             "w-full flex items-center gap-3 p-3 rounded-xl transition-all font-bold text-left",
-                            focusIndex === 5 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                            focusIndex === 11 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
                             channel?.id === ch.id && "text-red-500"
                           )}
                         >
@@ -708,10 +1074,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             if (hlsInstance) hlsInstance.audioTrack = track.id;
                             setActiveMenu('none');
                           }}
-                          onPointerDown={() => setFocusIndex(4 + idx)}
+                          onPointerDown={() => setFocusIndex(20 + idx)}
                           className={cn(
                             "w-full flex items-center justify-between p-3 rounded-xl transition-all font-bold",
-                            focusIndex === 4 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                            focusIndex === 20 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
                             currentAudioTrack === track.id && "text-red-500"
                           )}
                         >
@@ -736,10 +1102,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           if (hlsInstance) hlsInstance.subtitleTrack = -1;
                           setActiveMenu('none');
                         }}
-                        onPointerDown={() => setFocusIndex(4)}
+                        onPointerDown={() => setFocusIndex(30)}
                         className={cn(
                           "w-full flex items-center justify-between p-3 rounded-xl transition-all font-bold",
-                          focusIndex === 4 ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                          focusIndex === 30 ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
                           currentSubtitleTrack === -1 && "text-red-500"
                         )}
                       >
@@ -753,10 +1119,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                             if (hlsInstance) hlsInstance.subtitleTrack = track.id;
                             setActiveMenu('none');
                           }}
-                          onPointerDown={() => setFocusIndex(4 + idx + 1)}
+                          onPointerDown={() => setFocusIndex(31 + idx)}
                           className={cn(
                             "w-full flex items-center justify-between p-3 rounded-xl transition-all font-bold",
-                            focusIndex === 4 + idx + 1 ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
+                            focusIndex === 31 + idx ? "bg-white text-black scale-105" : "text-white hover:bg-white/10",
                             currentSubtitleTrack === track.id && "text-red-500"
                           )}
                         >
@@ -779,6 +1145,52 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                       className="bg-zinc-900/80 backdrop-blur-2xl p-4 rounded-2xl border border-white/10 shadow-2xl"
                     >
                       <div className="flex flex-col gap-4">
+                        {/* Video Progress Bar (For VOD/Movies) */}
+                        {duration > 0 && duration !== Infinity && (
+                          <div className="space-y-2 mb-2">
+                            <div className="flex justify-between items-end px-1">
+                              <div className="flex flex-col">
+                                <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">OYNATILAN</span>
+                                <span className="text-white font-black text-lg tracking-tighter tabular-nums leading-none">
+                                  {formatPlaybackTime(playbackTime)}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-center">
+                                <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">KALAN</span>
+                                <span className="text-zinc-400 font-bold text-sm tracking-tight tabular-nums leading-none">
+                                  -{formatPlaybackTime(duration - playbackTime)}
+                                </span>
+                              </div>
+                              <div className="flex flex-col items-end">
+                                <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-0.5">TOPLAM SÜRE</span>
+                                <span className="text-white font-black text-lg tracking-tighter tabular-nums leading-none">
+                                  {formatPlaybackTime(duration)}
+                                </span>
+                              </div>
+                            </div>
+                            <div 
+                              ref={progressBarRef}
+                              onClick={handleProgressBarSeek}
+                              onTouchStart={handleProgressBarSeek}
+                              onTouchMove={handleProgressBarSeek}
+                              className="h-4 w-full flex items-center cursor-pointer group/seek relative"
+                            >
+                              <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 relative">
+                                <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${(playbackTime / duration) * 100}%` }}
+                                  className="h-full bg-white shadow-[0_0_15px_rgba(255,255,255,0.4)] relative z-10"
+                                />
+                              </div>
+                              {/* Hover/Touch handle */}
+                              <motion.div 
+                                animate={{ left: `${(playbackTime / duration) * 100}%` }}
+                                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-xl z-20"
+                                style={{ marginLeft: '-8px' }}
+                              />
+                            </div>
+                          </div>
+                        )}
                         <div className="flex justify-between items-start">
                           <div className="flex gap-4">
                             {/* Channel Logo & Name */}
@@ -857,6 +1269,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                         {/* Progress Bar */}
                         {currentProgram && (
                           <div className="space-y-1.5">
+                            <div className="flex justify-between text-[9px] font-black text-zinc-500 uppercase tracking-widest px-1">
+                              <div className="flex gap-4">
+                                <span className="flex items-center gap-1">
+                                  <span className="text-zinc-600">GEÇEN:</span>
+                                  <span className="text-white">{formatDuration(currentTime.getTime() - currentProgram.start.getTime())}</span>
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <span className="text-zinc-600">KALAN:</span>
+                                  <span className="text-white">{formatDuration(currentProgram.stop.getTime() - currentTime.getTime())}</span>
+                                </span>
+                              </div>
+                              <span className="flex items-center gap-1">
+                                <span className="text-zinc-600">TOPLAM:</span>
+                                <span className="text-white">{formatDuration(currentProgram.stop.getTime() - currentProgram.start.getTime())}</span>
+                              </span>
+                            </div>
                             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                               <motion.div 
                                 initial={{ width: 0 }}
