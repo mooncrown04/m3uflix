@@ -4,14 +4,25 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fetch from "node-fetch";
 import https from "https";
+import http from "http";
+
+// Disable SSL verification globally for the proxy to handle broken IPTV SSL configs
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Create an https agent that ignores SSL errors and hostname verification
+// Create agents that ignore SSL errors and hostname verification
 const httpsAgent = new https.Agent({
   rejectUnauthorized: false,
   checkServerIdentity: () => undefined,
+  keepAlive: true,
+  timeout: 30000,
+});
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  timeout: 30000,
 });
 
 async function startServer() {
@@ -50,7 +61,9 @@ async function startServer() {
       const response = await fetch(targetUrl, { 
         timeout: 30000,
         headers,
-        agent: targetUrl.startsWith('https') ? httpsAgent : undefined,
+        agent: (url: URL) => {
+          return url.protocol === 'https:' ? httpsAgent : httpAgent;
+        },
         redirect: 'follow'
       });
       
@@ -92,11 +105,28 @@ async function startServer() {
         res.status(502).json({ error: "Empty response body" });
       }
     } catch (error: any) {
-      console.error("Proxy error:", error.message || error);
+      const errorMessage = error.message || error;
+      console.error("Proxy error:", errorMessage);
+      
       if (!res.headersSent) {
-        res.status(502).json({ 
-          error: "Failed to fetch target URL",
-          details: error.message || "Unknown error"
+        // Provide more specific error messages for common IPTV failures
+        let status = 502;
+        let details = errorMessage;
+        
+        if (errorMessage.includes("ENOTFOUND")) {
+          details = "Sunucu adresi bulunamadı (DNS Hatası). Yayın adresi geçersiz veya sunucu kapalı olabilir.";
+        } else if (errorMessage.includes("ECONNREFUSED")) {
+          details = "Sunucu bağlantıyı reddetti. Yayın sunucusu kapalı veya belirtilen port erişime kapalı.";
+        } else if (errorMessage.includes("ETIMEDOUT")) {
+          details = "Sunucu yanıt vermedi (Zaman aşımı).";
+        } else if (errorMessage.includes("certificate") || errorMessage.includes("SSL")) {
+          details = "SSL/Sertifika hatası. Güvenli bağlantı kurulamadı.";
+        }
+
+        res.status(status).json({ 
+          error: "Yayın yüklenemedi",
+          details: details,
+          originalError: errorMessage
         });
       }
     }

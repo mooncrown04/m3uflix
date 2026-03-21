@@ -307,11 +307,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const isDashUrl = lowerUrl.includes('.mpd') || lowerUrl.includes('mpd');
 
     if (isHlsUrl) {
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = currentUrl;
-        video.load();
-        if (isPlaying) video.play().catch(() => {});
-      } else if (Hls.isSupported()) {
+      if (Hls.isSupported()) {
         hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
@@ -353,6 +349,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         });
 
         setHlsInstance(hls);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = currentUrl;
+        video.load();
+        if (isPlaying) video.play().catch(() => {});
+      } else {
+        handleVideoError();
       }
     } else if (isDashUrl) {
       dash = dashjs.MediaPlayer().create();
@@ -395,16 +397,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.error('Video error occurred for URL:', currentUrl);
     const urls = channel?.urls || [url];
     
-    // Try next URL
+    // 1. Try next URL if available
     if (currentUrlIndex < urls.length - 1) {
       setCurrentUrlIndex(prev => prev + 1);
       setHasError(false);
-    } else if (useProxy) {
-      // If all URLs failed with proxy, try without proxy starting from first URL
-      setUseProxy(false);
+    } 
+    // 2. If all URLs failed without proxy, try with proxy starting from first URL
+    else if (!useProxy && !Capacitor.isNativePlatform()) {
+      setUseProxy(true);
       setCurrentUrlIndex(0);
       setHasError(false);
-    } else {
+    }
+    // 3. If everything failed
+    else {
       setHasError(true);
       setIsPlaying(false);
       setIsBuffering(false);

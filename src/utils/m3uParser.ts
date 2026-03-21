@@ -73,7 +73,7 @@ export function parseM3U(content: string): M3UParseResult {
         }
       } else {
         channelMap.set(key, {
-          id: Math.random().toString(36).substr(2, 9),
+          id: btoa(encodeURIComponent(`${name}_${group}`).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16)))).replace(/[/+=]/g, '').substr(0, 12),
           name,
           logo: currentChannelInfo.logo,
           group,

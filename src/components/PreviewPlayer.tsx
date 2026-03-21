@@ -32,9 +32,7 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({ urls, customProxyU
 
     let hls: Hls | null = null;
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = proxiedUrl;
-    } else if (Hls.isSupported()) {
+    if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
         xhrSetup: (xhr, url) => {
@@ -50,6 +48,8 @@ export const PreviewPlayer: React.FC<PreviewPlayerProps> = ({ urls, customProxyU
       });
       hls.loadSource(proxiedUrl);
       hls.attachMedia(video);
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = proxiedUrl;
     }
 
     return () => {
