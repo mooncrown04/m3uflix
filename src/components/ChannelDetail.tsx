@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, X, Star, Users, Clock, Calendar, Film, Info } from 'lucide-react';
+import { Play, X, Star, Users, Clock, Calendar, Film, Info, Monitor } from 'lucide-react';
 import { M3UChannel } from '../utils/m3uParser';
 import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
 import { clsx, type ClassValue } from 'clsx';
@@ -16,11 +16,22 @@ interface ChannelDetailProps {
   onPlay: (channel: M3UChannel) => void;
   themeColor: string;
   uiMode: 'modern' | 'classic' | 'minimalist';
+  multiSessions?: Record<string, string[]>;
+  onToggleMultiChannel?: (channelId: string) => void;
 }
 
-export const ChannelDetail: React.FC<ChannelDetailProps> = ({ channel, onClose, onPlay, themeColor, uiMode }) => {
+export const ChannelDetail: React.FC<ChannelDetailProps> = ({ 
+  channel, 
+  onClose, 
+  onPlay, 
+  themeColor, 
+  uiMode,
+  multiSessions = {},
+  onToggleMultiChannel
+}) => {
   const [metadata, setMetadata] = useState<MediaMetadata | null>(null);
   const [loading, setLoading] = useState(true);
+  const isMulti = Object.values(multiSessions).some(ids => ids.includes(channel.id));
 
   useEffect(() => {
     const loadMetadata = async () => {
@@ -47,10 +58,10 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({ channel, onClose, 
           animate={{ y: 0, opacity: 1, scale: 1 }}
           exit={{ y: 50, opacity: 0, scale: 0.95 }}
           className={cn(
-            "w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-5xl shadow-2xl overflow-hidden flex flex-col md:flex-row relative",
-            uiMode === 'modern' && "bg-zinc-900/50 border border-white/10 sm:rounded-3xl backdrop-blur-xl",
-            uiMode === 'classic' && "bg-zinc-950 border border-zinc-800 sm:rounded-xl",
-            uiMode === 'minimalist' && "bg-black border border-white/5 sm:rounded-none"
+            "w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-5xl shadow-2xl overflow-hidden flex flex-col md:flex-row relative transition-all duration-500",
+            uiMode === 'modern' && "bg-zinc-900/60 border border-white/20 sm:rounded-[40px] backdrop-blur-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+            uiMode === 'classic' && "bg-zinc-950 border-4 border-zinc-800 sm:rounded-none shadow-none",
+            uiMode === 'minimalist' && "bg-black border-0 sm:rounded-none shadow-none"
           )}
           onClick={e => e.stopPropagation()}
         >
@@ -159,21 +170,35 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({ channel, onClose, 
               style={{ backgroundColor: themeColor }}
               className={cn(
                 "flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-5 text-white font-black text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all group",
-                uiMode === 'modern' && "rounded-2xl",
-                uiMode === 'classic' && "rounded-lg",
-                uiMode === 'minimalist' && "rounded-none"
+                uiMode === 'modern' && "rounded-full",
+                uiMode === 'classic' && "rounded-none border-4 border-white/20",
+                uiMode === 'minimalist' && "rounded-none border-0 bg-white text-black"
               )}
             >
-              <Play className="w-6 h-6 fill-current group-hover:scale-110 transition-transform" />
+              <Play className={cn("w-6 h-6 fill-current group-hover:scale-110 transition-transform", uiMode === 'minimalist' && "fill-black")} />
               Şimdi İzle
+            </button>
+
+            <button
+              onClick={() => onToggleMultiChannel?.(channel.id)}
+              className={cn(
+                "flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-5 font-black text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all border-2",
+                isMulti ? "bg-white text-black border-white" : "bg-transparent text-white border-white/20",
+                uiMode === 'modern' && "rounded-full",
+                uiMode === 'classic' && "rounded-none border-4 border-white/20",
+                uiMode === 'minimalist' && "rounded-none border-2 border-white"
+              )}
+            >
+              <Monitor className="w-6 h-6" />
+              {isMulti ? 'Multi Kanalda' : 'Multi Kanala Ekle'}
             </button>
             <button
               onClick={onClose}
               className={cn(
                 "px-8 py-5 text-white font-bold hover:bg-white/10 transition-all",
-                uiMode === 'modern' && "rounded-2xl bg-white/5 border border-white/10",
-                uiMode === 'classic' && "rounded-lg bg-zinc-900 border border-zinc-800",
-                uiMode === 'minimalist' && "rounded-none bg-transparent border border-white/20"
+                uiMode === 'modern' && "rounded-full bg-white/5 border border-white/10",
+                uiMode === 'classic' && "rounded-none bg-zinc-900 border-4 border-zinc-800",
+                uiMode === 'minimalist' && "rounded-none bg-transparent border-0 underline underline-offset-8"
               )}
             >
               Kapat

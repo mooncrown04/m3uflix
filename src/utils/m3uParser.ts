@@ -13,6 +13,9 @@ export interface M3UChannel {
   description?: string;
   year?: string;
   language?: string;
+  isMultiView?: boolean;
+  sessionName?: string;
+  sessionChannels?: string[];
 }
 
 export interface M3UParseResult {

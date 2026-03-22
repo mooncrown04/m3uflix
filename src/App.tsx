@@ -6,6 +6,7 @@ import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
 import { ChannelDetail } from './components/ChannelDetail';
+import { MultiPlayer } from './components/MultiPlayer';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -32,6 +33,10 @@ interface ChannelRowProps {
   onDeleteChannel: (channelId: string) => void;
   onLongPress: (channelId: string, category: string) => void;
   favorites: string[];
+  multiSessions?: Record<string, string[]>;
+  canliChannels?: string[];
+  filmChannels?: string[];
+  diziChannels?: string[];
   rowIndex: number;
   activeRow: number;
   activeCol: number;
@@ -54,6 +59,10 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   onDeleteChannel,
   onLongPress,
   favorites = [], 
+  multiSessions = {},
+  canliChannels = [],
+  filmChannels = [],
+  diziChannels = [],
   rowIndex, 
   activeRow, 
   activeCol, 
@@ -96,6 +105,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   }, [isActiveRow, activeCol, isCollapsed]);
 
   const handlePressStart = (channelId: string) => {
+    if (channelId === 'multi-view-session') return;
     setPressingId(channelId);
     longPressTimer.current = setTimeout(() => {
       onLongPress?.(channelId, title);
@@ -124,9 +134,9 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           }}
           className={cn(
             "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
-            uiMode === 'modern' && "rounded-full",
-            uiMode === 'classic' && "rounded-lg",
-            uiMode === 'minimalist' && "rounded-none border-b border-white/10 bg-transparent",
+            uiMode === 'modern' && "rounded-full backdrop-blur-md",
+            uiMode === 'classic' && "rounded-none border-l-4 border-white",
+            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
             isHeaderFocused ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
           )}
         >
@@ -158,28 +168,50 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                 const isFocused = isActiveRow && colIndex === activeCol;
                 const isPreviewing = isFocused && previewChannelId === channel.id;
                 const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
+                const isMulti = Object.values(multiSessions).some(ids => ids.includes(channel.id));
+                const isCanli = Array.isArray(canliChannels) && canliChannels.includes(channel.id);
+                const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
+                const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
                 const isPressing = pressingId === channel.id;
 
-                const getCategoryBadge = () => {
-                  if (title === 'İzlemeye Devam Et') return 'İ';
-                  const group = (channel.group || '').toLowerCase();
-                  if (group.includes('live') || group.includes('canlı') || group.includes('tv')) return 'C';
-                  if (group.includes('movie') || group.includes('film') || group.includes('sinema')) return 'F';
-                  if (group.includes('series') || group.includes('dizi') || group.includes('show')) return 'D';
-                  return null;
+                const getBadges = () => {
+                  const b = [];
+                  if (title === 'İzlemeye Devam Et') b.push('İ');
+                  if (isFavorite) b.push('F');
+                  if (isMulti) b.push('M');
+                  if (isCanli) b.push('C');
+                  if (isFilm) b.push('Fi');
+                  if (isDizi) b.push('D');
+                  return b;
                 };
-                const badge = getCategoryBadge();
+                const badges = getBadges();
 
                 return (
-                  <div key={channel.id} className={cn("flex flex-col gap-2 snap-start relative", title === 'Top 10' && "ml-16")}>
+                  <div 
+                    key={channel.id} 
+                    className={cn(
+                      "flex flex-col gap-2 snap-start relative flex-none", 
+                      title === 'Top 10' && "ml-16",
+                      deviceType === 'tv' 
+                        ? (orientation === 'landscape' ? "w-48 md:w-72" : "w-40 md:w-56")
+                        : deviceType === 'phone'
+                        ? (orientation === 'landscape' ? "w-32" : "w-24")
+                        : (orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44")
+                    )}
+                  >
                     {title === 'Top 10' && (
                       <div className="absolute -left-20 bottom-0 z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
                         <span 
-                          className="text-[180px] font-black leading-[0.7] text-black"
+                          className={cn(
+                            "text-[180px] font-black leading-[0.7]",
+                            uiMode === 'modern' && "text-black",
+                            uiMode === 'classic' && "text-zinc-800",
+                            uiMode === 'minimalist' && "text-transparent"
+                          )}
                           style={{ 
-                            WebkitTextStroke: '4px #555',
+                            WebkitTextStroke: uiMode === 'minimalist' ? '1px rgba(255,255,255,0.2)' : '4px #555',
                             paintOrder: 'stroke fill',
-                            textShadow: '0 0 30px rgba(255,255,255,0.1)'
+                            textShadow: uiMode === 'modern' ? '0 0 30px rgba(255,255,255,0.1)' : 'none'
                           }}
                         >
                           {channel.tvgNumber}
@@ -206,19 +238,15 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       onTouchEnd={handlePressEnd}
                       onMouseEnter={() => onFocus(rowIndex, colIndex)}
                       style={{ 
-                        boxShadow: isFocused ? `0 0 30px ${themeColor}4d` : undefined,
-                        borderColor: isFocused ? themeColor : 'transparent'
+                        boxShadow: isFocused ? (uiMode === 'modern' ? `0 0 30px ${themeColor}4d` : `0 0 15px ${themeColor}33`) : undefined,
+                        borderColor: isFocused ? themeColor : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
                       }}
                       className={cn(
-                        "relative flex-none bg-zinc-900 group/card transition-all duration-300 border-4 cursor-pointer",
-                        uiMode === 'modern' && "rounded-2xl",
-                        uiMode === 'classic' && "rounded-lg",
-                        uiMode === 'minimalist' && "rounded-none",
-                        deviceType === 'tv' 
-                          ? (orientation === 'landscape' ? "w-48 md:w-72 aspect-video" : "w-40 md:w-56 aspect-[2/3]")
-                          : deviceType === 'phone'
-                          ? (orientation === 'landscape' ? "w-32 aspect-video" : "w-24 aspect-[2/3]")
-                          : (orientation === 'landscape' ? "w-40 md:w-56 aspect-video" : "w-32 md:w-44 aspect-[2/3]")
+                        "relative w-full bg-zinc-900 group/card transition-all duration-300 border-4 cursor-pointer overflow-hidden",
+                        uiMode === 'modern' && "rounded-2xl border-white/10",
+                        uiMode === 'classic' && "rounded-lg border-zinc-800",
+                        uiMode === 'minimalist' && "rounded-none border-transparent",
+                        orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]"
                       )}
                     >
                   {isPressing && (
@@ -232,22 +260,15 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                   
                   {/* Badges Container */}
                   <div className="absolute top-2 left-2 z-40 flex flex-col gap-1.5">
-                    {isFavorite && (
+                    {badges.map((b, i) => (
                       <div 
-                        style={{ borderColor: themeColor }}
-                        className="w-5 h-5 rounded-full shadow-lg flex items-center justify-center border-2 bg-black/40 backdrop-blur-sm"
-                      >
-                        <div style={{ backgroundColor: themeColor }} className="w-1.5 h-1.5 rounded-full" />
-                      </div>
-                    )}
-                    {badge && (
-                      <div 
+                        key={i}
                         style={{ backgroundColor: themeColor }}
-                        className="text-[10px] font-black text-white px-2 py-0.5 rounded shadow-lg flex items-center justify-center min-w-[20px]"
+                        className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
                       >
-                        {badge}
+                        {b}
                       </div>
-                    )}
+                    ))}
                   </div>
 
                   <button
@@ -275,7 +296,27 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                     </div>
                   ) : (
                     <>
-                      {channel.logo ? (
+                      {channel.isMultiView ? (
+                        <div className="w-full h-full grid grid-cols-2 gap-0.5 bg-zinc-950 p-1">
+                          {(channel.sessionChannels || []).slice(0, 4).map((id: string) => {
+                            const ch = channels.find(c => c.id === id);
+                            return (
+                              <div key={id} className="w-full h-full bg-zinc-900 overflow-hidden">
+                                {ch?.logo ? (
+                                  <img src={ch.logo} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center"><Tv className="w-4 h-4 text-zinc-800" /></div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <div className="absolute inset-0 flex items-center justify-center z-10">
+                            <div className="bg-black/60 backdrop-blur-md p-3 rounded-full border border-white/20">
+                              <Monitor className="w-8 h-8 text-white" />
+                            </div>
+                          </div>
+                        </div>
+                      ) : channel.logo ? (
                         <img 
                           src={channel.logo} 
                           alt={channel.name} 
@@ -495,6 +536,8 @@ const PROFILE_PICS = [
   'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/e70b1333850498.56ba69ac32ae3.png'
 ];
 
+const MULTI_CATEGORIES = ['HABER', 'SPOR', 'ULUSAL', 'SİNEMA', 'BELGESEL'];
+
 export default function App() {
   const [channels, setChannels] = useState<M3UChannel[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -540,6 +583,61 @@ export default function App() {
     const saved = localStorage.getItem('favorites');
     return saved ? JSON.parse(saved) : [];
   });
+
+  useEffect(() => {
+    localStorage.setItem('favorites', JSON.stringify(favorites));
+  }, [favorites]);
+
+  const [multiSessions, setMultiSessions] = useState<Record<string, string[]>>(() => {
+    const saved = localStorage.getItem('multi_sessions');
+    if (saved) return JSON.parse(saved);
+    
+    // Migration from old multiChannels
+    const oldMulti = localStorage.getItem('multi_channels');
+    if (oldMulti) {
+      return { 'Multi Kanal': JSON.parse(oldMulti) };
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('multi_sessions', JSON.stringify(multiSessions));
+  }, [multiSessions]);
+
+  const toggleMultiChannel = (channelId: string, sessionName: string = 'Multi Kanal') => {
+    setMultiSessions(prev => {
+      const current = { ...prev };
+      if (!current[sessionName]) current[sessionName] = [];
+      
+      if (current[sessionName].includes(channelId)) {
+        current[sessionName] = current[sessionName].filter(id => id !== channelId);
+        if (current[sessionName].length === 0) {
+          delete current[sessionName];
+        }
+      } else {
+        // Find if it's already in another session of the same category (e.g. HABER 2)
+        // But for now let's just allow adding to the chosen one.
+        // Auto-split logic: if sessionName is one of MULTI_CATEGORIES, 
+        // find the first one that has space or create a new one.
+        
+        let targetSession = sessionName;
+        let sessionList = current[targetSession] || [];
+        
+        if (sessionList.length >= 9) {
+          // Find next available session name like "HABER 2"
+          let counter = 2;
+          while (current[`${sessionName} ${counter}`] && current[`${sessionName} ${counter}`].length >= 9) {
+            counter++;
+          }
+          targetSession = `${sessionName} ${counter}`;
+          if (!current[targetSession]) current[targetSession] = [];
+        }
+        
+        current[targetSession] = [...current[targetSession], channelId];
+      }
+      return current;
+    });
+  };
   const [canliChannels, setCanliChannels] = useState<string[]>(() => {
     const saved = localStorage.getItem('canli_channels');
     return saved ? JSON.parse(saved) : [];
@@ -552,11 +650,26 @@ export default function App() {
     const saved = localStorage.getItem('film_channels');
     return saved ? JSON.parse(saved) : [];
   });
+
+  useEffect(() => {
+    localStorage.setItem('canli_channels', JSON.stringify(canliChannels));
+  }, [canliChannels]);
+
+  useEffect(() => {
+    localStorage.setItem('dizi_channels', JSON.stringify(diziChannels));
+  }, [diziChannels]);
+
+  useEffect(() => {
+    localStorage.setItem('film_channels', JSON.stringify(filmChannels));
+  }, [filmChannels]);
+
+  const [isMultiPlayerOpen, setIsMultiPlayerOpen] = useState(false);
+  const [multiPlayerChannels, setMultiPlayerChannels] = useState<M3UChannel[]>([]);
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
-  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
+  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Multi Kanal', 'Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
   const [brokenChannelIds, setBrokenChannelIds] = useState<Set<string>>(new Set());
   const [hasCheckedLinks, setHasCheckedLinks] = useState(() => {
@@ -609,6 +722,7 @@ export default function App() {
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
   const [channelMenuCategory, setChannelMenuCategory] = useState<string | null>(null);
   const [channelMenuFocus, setChannelMenuFocus] = useState(0);
+  const [multiSessionMenuOpen, setMultiSessionMenuOpen] = useState(false);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
 
@@ -807,6 +921,32 @@ export default function App() {
     const groups: Record<string, M3UChannel[]> = {};
     const broken: M3UChannel[] = [];
     
+    // Add Multi Kanal as a group if it has items
+    Object.entries(multiSessions).forEach(([sessionName, sessionChannelIds]) => {
+      if (sessionChannelIds.length > 0) {
+        const matched = channels
+          .filter(ch => sessionChannelIds.includes(ch.id) && !brokenChannelIds.has(ch.id))
+          .sort((a, b) => sessionChannelIds.indexOf(a.id) - sessionChannelIds.indexOf(b.id));
+        
+        if (matched.length > 0) {
+          // Create a virtual channel that represents the multi-view session
+          const multiViewChannel: M3UChannel = {
+            id: `multi-view-session-${sessionName}`,
+            name: `${sessionName} Oturumu`,
+            group: 'Multi Kanal',
+            logo: matched[0]?.logo || '',
+            urls: matched.map(ch => ch.urls[0]),
+            description: `${matched.length} kanal bir arada izlemek için tıklayın`,
+            isMultiView: true,
+            sessionName: sessionName,
+            sessionChannels: sessionChannelIds
+          };
+          if (!groups['Multi Kanal']) groups['Multi Kanal'] = [];
+          groups['Multi Kanal'].push(multiViewChannel);
+        }
+      }
+    });
+
     // Add Favorites as the first group if it has items
     if (Array.isArray(favorites) && favorites.length > 0) {
       const favoriteChannels = channels
@@ -890,11 +1030,11 @@ export default function App() {
           return visibleCategories.includes(group) || group === 'Çalışmayanlar';
         }
         // Varsayılan olarak özel grupları gizle, M3U gruplarını göster
-        const specialGroups = ['Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar'];
+        const specialGroups = ['Multi Kanal', 'Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar'];
         return !specialGroups.includes(group);
       })
       .sort((a, b) => {
-        const order = ['Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        const order = ['Multi Kanal', 'Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
         const aIdx = order.indexOf(a[0]);
         const bIdx = order.indexOf(b[0]);
         
@@ -907,14 +1047,20 @@ export default function App() {
         
         return b[1].length - a[1].length;
       });
-  }, [channels, searchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds]);
+  }, [channels, searchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds, multiSessions]);
 
-  const toggleManualCategory = (channelId: string, type: 'canli' | 'dizi' | 'film') => {
-    const setters = {
+  const toggleManualCategory = (channelId: string, type: 'canli' | 'dizi' | 'film' | 'multi', sessionName?: string) => {
+    const setters: Record<string, React.Dispatch<React.SetStateAction<string[]>>> = {
       canli: setCanliChannels,
       dizi: setDiziChannels,
       film: setFilmChannels
     };
+    
+    if (type === 'multi') {
+      toggleMultiChannel(channelId, sessionName);
+      return;
+    }
+
     setters[type](prev => {
       const current = Array.isArray(prev) ? prev : [];
       return current.includes(channelId) 
@@ -938,7 +1084,15 @@ export default function App() {
     });
   };
 
-  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites' | 'top10') => {
+  const toggleCategory = (type: 'live' | 'movies' | 'series' | 'mixed' | 'recent' | 'favorites' | 'top10' | 'multi') => {
+    if (type === 'multi') {
+      setVisibleCategories(prev => 
+        prev.includes('Multi Kanal') 
+          ? prev.filter(c => c !== 'Multi Kanal')
+          : [...prev, 'Multi Kanal']
+      );
+      return;
+    }
     if (type === 'top10') {
       setVisibleCategories(prev => 
         prev.includes('Top 10') 
@@ -1017,6 +1171,16 @@ export default function App() {
         [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
         return newArr;
       });
+    } else if (category === 'Multi Kanal') {
+      setMultiChannels(prev => {
+        const idx = prev.indexOf(channelId);
+        if (idx === -1) return prev;
+        const newArr = [...prev];
+        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
+        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+        return newArr;
+      });
     } else {
       // M3U groups
       setCustomOrders(prev => {
@@ -1040,6 +1204,17 @@ export default function App() {
 
   const handleChannelSelect = (channel: M3UChannel) => {
     console.log('handleChannelSelect called for:', channel.name);
+
+    if (channel.isMultiView) {
+      const sessionChannelIds = channel.sessionChannels || [];
+      const matched = channels.filter(ch => sessionChannelIds.includes(ch.id));
+      if (matched.length > 0) {
+        setMultiPlayerChannels(matched);
+        setIsMultiPlayerOpen(true);
+        setNavContext('player');
+      }
+      return;
+    }
     
     // Check if it's a VOD content (Movie or Series)
     const isVOD = channel.group?.toLowerCase().includes('film') || 
@@ -1197,9 +1372,16 @@ export default function App() {
         icon: List,
         action: () => toggleCategory('series'),
         isActive: isCategoryActive('series')
+      },
+      Object.keys(multiSessions).length > 0 && {
+        id: 'multi',
+        label: 'Multi Kanal',
+        icon: Monitor,
+        action: () => toggleCategory('multi'),
+        isActive: visibleCategories.includes('Multi Kanal')
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
-  }, [featuredChannel, recentlyWatched.length, favorites.length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length]);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length]);
 
   // Remote Control Navigation
   const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
@@ -1314,7 +1496,7 @@ export default function App() {
       }
 
       if (navContext === 'channel-menu') {
-        const options = ['favorite', 'canli', 'film', 'dizi', 'move-left', 'move-right'];
+        const options = ['favorite', 'canli', 'film', 'dizi', 'multi', 'move-left', 'move-right'];
         switch (key) {
           case 'ArrowLeft':
             e.preventDefault();
@@ -2054,7 +2236,9 @@ export default function App() {
       {/* Navbar */}
       <nav className={cn(
         "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
-        scrolled || channels.length > 0 ? "bg-black h-16 md:h-16" : "bg-gradient-to-b from-black/80 to-transparent h-20 md:h-24"
+        uiMode === 'modern' && (scrolled || channels.length > 0 ? "bg-black/80 backdrop-blur-xl h-16" : "bg-gradient-to-b from-black/80 to-transparent h-20 md:h-24"),
+        uiMode === 'classic' && (scrolled || channels.length > 0 ? "bg-zinc-950 border-b border-zinc-800 h-16" : "bg-black h-20"),
+        uiMode === 'minimalist' && (scrolled || channels.length > 0 ? "bg-black/40 h-16" : "bg-transparent h-20")
       )}>
         <div className="flex items-center gap-8">
           <Logo uiMode={uiMode} />
@@ -2416,7 +2600,7 @@ export default function App() {
                                 style={{ 
                                   backgroundColor: isFocused 
                                     ? 'white' 
-                                    : (btn.isActive ? themeColor : 'transparent'),
+                                    : (btn.isActive ? themeColor : 'rgba(255,255,255,0.1)'),
                                   color: isFocused ? 'black' : (btn.isActive ? 'white' : 'white'),
                                   borderColor: isFocused ? 'transparent' : (btn.isActive ? 'transparent' : 'rgba(255,255,255,0.2)')
                                 }}
@@ -2459,6 +2643,10 @@ export default function App() {
                     setChannelMenuFocus(0);
                   }}
                   favorites={favorites}
+                  multiSessions={multiSessions}
+                  canliChannels={canliChannels}
+                  filmChannels={filmChannels}
+                  diziChannels={diziChannels}
                   rowIndex={idx}
                   activeRow={activeRow}
                   activeCol={activeCol}
@@ -2505,51 +2693,100 @@ export default function App() {
               className="bg-zinc-900 border border-white/10 rounded-2xl p-6 max-w-lg w-full shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              <h3 className="text-xl font-bold mb-6 text-center">Seçenekler</h3>
-              <div className="flex flex-wrap justify-center gap-4">
-                {[
-                  { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart, active: favorites.includes(channelMenuId) },
-                  { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
-                  { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
-                  { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) },
-                  { id: 'move-left', label: 'Sola Taşı', icon: ChevronLeft },
-                  { id: 'move-right', label: 'Sağa Taşı', icon: ChevronRight }
-                ].map((opt, idx) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      if (opt.id === 'favorite') {
-                        toggleFavorite(channelMenuId);
-                      } else if (opt.id === 'move-left') {
-                        moveChannel(channelMenuId, 'left', channelMenuCategory || '');
-                      } else if (opt.id === 'move-right') {
-                        moveChannel(channelMenuId, 'right', channelMenuCategory || '');
-                      } else {
-                        toggleManualCategory(channelMenuId, opt.id as any);
-                      }
-                      
-                      if (opt.id !== 'move-left' && opt.id !== 'move-right') {
+              <h3 className="text-xl font-bold mb-6 text-center">
+                {multiSessionMenuOpen ? 'Kategori Seçin' : 'Seçenekler'}
+              </h3>
+              
+              {!multiSessionMenuOpen ? (
+                <div className="flex flex-wrap justify-center gap-4">
+                  {[
+                    { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart, active: favorites.includes(channelMenuId) },
+                    { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
+                    { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
+                    { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) },
+                    { id: 'multi', label: 'Multi Kanal', icon: Monitor, active: Object.values(multiSessions).some(ids => ids.includes(channelMenuId)) },
+                    { id: 'move-left', label: 'Sola Taşı', icon: ChevronLeft },
+                    { id: 'move-right', label: 'Sağa Taşı', icon: ChevronRight }
+                  ].map((opt, idx) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        if (opt.id === 'favorite') {
+                          toggleFavorite(channelMenuId);
+                        } else if (opt.id === 'move-left') {
+                          moveChannel(channelMenuId, 'left', channelMenuCategory || '');
+                        } else if (opt.id === 'move-right') {
+                          moveChannel(channelMenuId, 'right', channelMenuCategory || '');
+                        } else if (opt.id === 'multi') {
+                          setMultiSessionMenuOpen(true);
+                          setChannelMenuFocus(0);
+                          return;
+                        } else {
+                          toggleManualCategory(channelMenuId, opt.id as any);
+                        }
+                        
+                        if (opt.id !== 'move-left' && opt.id !== 'move-right') {
+                          setChannelMenuId(null);
+                          setNavContext('browse');
+                        }
+                      }}
+                      onPointerDown={() => {
+                        setNavContext('channel-menu');
+                        setChannelMenuFocus(idx);
+                      }}
+                      onMouseEnter={() => setChannelMenuFocus(idx)}
+                      className={cn(
+                        "flex flex-col items-center gap-3 p-4 rounded-xl transition-all min-w-[100px]",
+                        channelMenuFocus === idx 
+                          ? "bg-white text-black scale-110 shadow-xl" 
+                          : "bg-white/5 text-white hover:bg-white/10"
+                      )}
+                    >
+                      <opt.icon className={cn("w-6 h-6", 'active' in opt && opt.active && "fill-current text-red-500")} />
+                      <span className="text-xs font-bold">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap justify-center gap-4">
+                  {MULTI_CATEGORIES.map((cat, idx) => (
+                    <button
+                      key={cat}
+                      onClick={() => {
+                        toggleManualCategory(channelMenuId, 'multi', cat);
+                        setMultiSessionMenuOpen(false);
                         setChannelMenuId(null);
                         setNavContext('browse');
-                      }
-                    }}
-                    onPointerDown={() => {
-                      setNavContext('channel-menu');
-                      setChannelMenuFocus(idx);
-                    }}
-                    onMouseEnter={() => setChannelMenuFocus(idx)}
+                      }}
+                      onPointerDown={() => setChannelMenuFocus(idx)}
+                      onMouseEnter={() => setChannelMenuFocus(idx)}
+                      className={cn(
+                        "flex flex-col items-center gap-3 p-4 rounded-xl transition-all min-w-[100px]",
+                        channelMenuFocus === idx 
+                          ? "bg-white text-black scale-110 shadow-xl" 
+                          : "bg-white/5 text-white hover:bg-white/10"
+                      )}
+                    >
+                      <Monitor className="w-6 h-6" />
+                      <span className="text-xs font-bold">{cat}</span>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setMultiSessionMenuOpen(false)}
+                    onPointerDown={() => setChannelMenuFocus(MULTI_CATEGORIES.length)}
+                    onMouseEnter={() => setChannelMenuFocus(MULTI_CATEGORIES.length)}
                     className={cn(
                       "flex flex-col items-center gap-3 p-4 rounded-xl transition-all min-w-[100px]",
-                      channelMenuFocus === idx 
-                        ? "bg-white text-black scale-110 shadow-xl" 
+                      channelMenuFocus === MULTI_CATEGORIES.length 
+                        ? "bg-red-600 text-white scale-110 shadow-xl" 
                         : "bg-white/5 text-white hover:bg-white/10"
                     )}
                   >
-                    <opt.icon className={cn("w-6 h-6", 'active' in opt && opt.active && "fill-current text-red-500")} />
-                    <span className="text-xs font-bold">{opt.label}</span>
+                    <X className="w-6 h-6" />
+                    <span className="text-xs font-bold">Vazgeç</span>
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
               <div className="mt-8 pt-6 border-t border-white/5 text-center">
                 <p className="text-zinc-500 text-sm">Seçmek için Enter'a, kapatmak için Geri'ye basın</p>
               </div>
@@ -3649,6 +3886,8 @@ export default function App() {
               setNavContext('player');
               setChannelForDetail(null);
             }}
+            multiSessions={multiSessions}
+            onToggleMultiChannel={(id) => toggleManualCategory(id, 'multi')}
           />
         )}
       </AnimatePresence>
@@ -3733,6 +3972,24 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Multi Player */}
+      {isMultiPlayerOpen && (
+        <MultiPlayer
+          channels={multiPlayerChannels}
+          themeColor={themeColor}
+          customProxyUrl={customProxyUrl}
+          onClose={() => {
+            setIsMultiPlayerOpen(false);
+            setNavContext('browse');
+          }}
+          onSingleView={(channel) => {
+            setIsMultiPlayerOpen(false);
+            setCurrentChannel(channel);
+            setNavContext('player');
+          }}
+        />
+      )}
 
       {/* Video Player */}
       {currentChannel && (
