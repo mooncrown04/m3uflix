@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
-import { X, Settings, Volume2, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind } from 'lucide-react';
+import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
@@ -15,8 +15,12 @@ interface VideoPlayerProps {
   epgData?: EPGData | null;
   onClose?: () => void;
   onChannelSelect?: (channel: M3UChannel) => void;
+  onToggleMini?: () => void;
   themeColor?: string;
   customProxyUrl?: string;
+  isMini?: boolean;
+  startTime?: number;
+  onProgressUpdate?: (seconds: number, duration: number) => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -26,8 +30,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   epgData, 
   onClose, 
   onChannelSelect,
+  onToggleMini,
   themeColor = '#ef4444',
-  customProxyUrl
+  customProxyUrl,
+  isMini = false,
+  startTime = 0,
+  onProgressUpdate
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
@@ -47,6 +55,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [seekStep, setSeekStep] = useState(10);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
   const seekTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,6 +96,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     videoRef.current.currentTime = newTime;
     setPlaybackTime(newTime);
   };
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+      videoRef.current.muted = isMuted;
+    }
+  }, [volume, isMuted]);
+
+  useEffect(() => {
+    if (videoRef.current && startTime > 0) {
+      videoRef.current.currentTime = startTime;
+    }
+  }, [startTime]);
+
+  // Periodically report progress
+  useEffect(() => {
+    if (!videoRef.current || !isPlaying || !onProgressUpdate) return;
+    
+    const interval = setInterval(() => {
+      if (videoRef.current) {
+        onProgressUpdate(videoRef.current.currentTime, videoRef.current.duration);
+      }
+    }, 5000); // Update every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [isPlaying, onProgressUpdate]);
 
   useEffect(() => {
     console.log('VideoPlayer focusIndex changed to:', focusIndex);
@@ -175,6 +211,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const [isBuffering, setIsBuffering] = useState(true);
   const [showPlayPauseIndicator, setShowPlayPauseIndicator] = useState(false);
+  const [isPipSupported, setIsPipSupported] = useState(false);
+
+  useEffect(() => {
+    setIsPipSupported(document.pictureInPictureEnabled);
+  }, []);
+
+  const togglePip = async () => {
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await videoRef.current.requestPictureInPicture();
+      }
+    } catch (error) {
+      console.error('PIP error:', error);
+    }
+  };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -418,6 +472,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isMini) return; // Disable global shortcuts in mini mode to allow main app navigation
+      
       let key = e.key;
       setLastActivity(Date.now());
 
@@ -428,6 +484,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (key === 'Down' || key === 'ChannelDown') key = 'ArrowDown';
       if (key === 'Left' || key === 'MediaRewind') key = 'ArrowLeft';
       if (key === 'Right' || key === 'MediaFastForward') key = 'ArrowRight';
+      if (key === 'Tab') {
+        e.preventDefault();
+        key = e.shiftKey ? 'ArrowLeft' : 'ArrowRight';
+      }
+      if (key === 'VolumeUp') {
+        e.preventDefault();
+        setVolume(prev => Math.min(1, prev + 0.1));
+        setIsMuted(false);
+        setShowControls(true);
+        return;
+      }
+      if (key === 'VolumeDown') {
+        e.preventDefault();
+        setVolume(prev => Math.max(0, prev - 0.1));
+        setShowControls(true);
+        return;
+      }
+      if (key === 'VolumeMute' || key === 'm' || key === 'M') {
+        e.preventDefault();
+        setIsMuted(prev => !prev);
+        setShowControls(true);
+        return;
+      }
       if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = ' ';
 
       // Global keys
@@ -435,6 +514,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         e.preventDefault();
         setIsPlaying(prev => !prev);
         setShowControls(true);
+        return;
+      }
+
+      if (key === 'p' || key === 'P') {
+        e.preventDefault();
+        onToggleMini?.();
         return;
       }
 
@@ -534,7 +619,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setFocusIndex(prev => Math.max(0, prev - 1));
         } else if (key === 'ArrowRight') {
           e.preventDefault();
-          setFocusIndex(prev => Math.min(5, prev + 1));
+          setFocusIndex(prev => Math.min(6, prev + 1));
         } else if (key === 'ArrowUp') {
           e.preventDefault();
           // Stay in Layer 1, do nothing
@@ -544,15 +629,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         } else if (key === 'Enter') {
           e.preventDefault();
           if (focusIndex === 0) onClose?.();
-          else if (focusIndex === 1) setActiveMenu('audio');
-          else if (focusIndex === 2) setActiveMenu('subtitle');
-          else if (focusIndex === 3) {
+          else if (focusIndex === 1) onToggleMini?.();
+          else if (focusIndex === 2) setActiveMenu('audio');
+          else if (focusIndex === 3) setActiveMenu('subtitle');
+          else if (focusIndex === 4) {
             setActiveMenu('channels');
             const currentIdx = categoryChannels.findIndex(ch => ch.id === channel?.id);
             setFocusIndex(11 + (currentIdx >= 0 ? currentIdx : 0));
           }
-          else if (focusIndex === 4) setActiveMenu('sources');
-          else if (focusIndex === 5) {
+          else if (focusIndex === 5) setActiveMenu('sources');
+          else if (focusIndex === 6) {
             setActiveMenu('details');
             setFocusIndex(50);
           }
@@ -676,7 +762,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   return (
     <div 
-      className="fixed inset-0 bg-black z-50 flex flex-col group overflow-hidden" 
+      className={cn(
+        "bg-black flex flex-col group overflow-hidden",
+        isMini ? "w-full h-full" : "fixed inset-0 z-50"
+      )}
       onMouseMove={() => {
         if (!showControls) setShowControls(true);
         setLastActivity(Date.now());
@@ -698,7 +787,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           className="w-full h-full max-h-screen object-contain"
           autoPlay
           playsInline
+          muted={isMuted}
           onError={handleVideoError}
+          onVolumeChange={(e) => {
+            const video = e.currentTarget;
+            setVolume(video.volume);
+            setIsMuted(video.muted);
+          }}
         />
 
         {/* Loading Indicator */}
@@ -708,10 +803,79 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-50"
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 z-50"
             >
-              <div className="w-16 h-16 border-4 border-white/10 border-t-white rounded-full animate-spin mb-4" style={{ borderTopColor: themeColor }} />
-              <p className="text-white font-black uppercase tracking-widest text-sm">Yükleniyor...</p>
+              <div className="relative flex items-center justify-center">
+                {/* Ripple Effect */}
+                <motion.div
+                  animate={{
+                    scale: [1, 1.5, 2],
+                    opacity: [0.5, 0.2, 0],
+                  }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    ease: "easeOut",
+                  }}
+                  className="absolute w-24 h-24 rounded-full border-2 border-white/20"
+                  style={{ borderColor: `${themeColor}40` }}
+                />
+                <motion.div
+                  animate={{
+                    scale: [1, 1.3, 1.6],
+                    opacity: [0.3, 0.1, 0],
+                  }}
+                  transition={{
+                    duration: 2,
+                    repeat: Infinity,
+                    ease: "easeOut",
+                    delay: 0.5,
+                  }}
+                  className="absolute w-24 h-24 rounded-full border-2 border-white/10"
+                  style={{ borderColor: `${themeColor}20` }}
+                />
+                
+                {/* Central Icon Container */}
+                <div className="relative z-10 bg-black/40 p-6 rounded-3xl border border-white/10 backdrop-blur-md shadow-2xl">
+                  <div className="relative">
+                    <Tv className="w-12 h-12 text-white opacity-20" />
+                    <motion.div
+                      animate={{
+                        height: ["0%", "100%", "0%"],
+                        top: ["0%", "0%", "100%"],
+                      }}
+                      transition={{
+                        duration: 1.5,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                      }}
+                      className="absolute left-0 right-0 w-full bg-white/40 blur-[2px]"
+                      style={{ backgroundColor: themeColor }}
+                    />
+                    <Tv className="absolute inset-0 w-12 h-12 text-white" />
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-8 flex flex-col items-center gap-2">
+                <p className="text-white font-black uppercase tracking-[0.3em] text-[10px] italic opacity-80">
+                  Yayın Hazırlanıyor
+                </p>
+                <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
+                  <motion.div
+                    animate={{
+                      x: ["-100%", "100%"],
+                    }}
+                    transition={{
+                      duration: 1,
+                      repeat: Infinity,
+                      ease: "linear",
+                    }}
+                    className="w-full h-full bg-white"
+                    style={{ backgroundColor: themeColor }}
+                  />
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -788,7 +952,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   )}
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className="text-4xl font-black text-white tracking-tighter">
+                  <span className="text-4xl font-black text-white tracking-tighter" style={{ color: themeColor }}>
                     {seekInfo.type === 'forward' ? '+' : '-'}{seekInfo.amount}s
                   </span>
                   <span className="text-xs font-bold text-white/50 uppercase tracking-widest">
@@ -800,9 +964,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           )}
         </AnimatePresence>
 
+        {/* Volume Indicator */}
+        <AnimatePresence>
+          {(showControls || isMuted) && (
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="absolute top-1/2 right-8 -translate-y-1/2 z-50 flex flex-col items-center gap-4 bg-black/40 backdrop-blur-2xl p-4 rounded-full border border-white/10 shadow-2xl"
+            >
+              <div className="h-48 w-1.5 bg-white/10 rounded-full relative overflow-hidden">
+                <motion.div 
+                  className="absolute bottom-0 left-0 right-0 rounded-full"
+                  style={{ backgroundColor: themeColor }}
+                  initial={false}
+                  animate={{ height: `${isMuted ? 0 : volume * 100}%` }}
+                />
+              </div>
+              <div className="text-white">
+                {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Custom Controls Overlay */}
         <AnimatePresence>
-          {showControls && (
+          {showControls && !isMini && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -822,6 +1010,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   >
                     <X className="w-8 h-8" />
                   </button>
+                  {onToggleMini && (
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleMini();
+                      }}
+                      onPointerDown={() => setFocusIndex(1)}
+                      className={cn(
+                        "p-3 rounded-full transition-all",
+                        focusIndex === 1 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      )}
+                      title="Mini Oynatıcı (P)"
+                    >
+                      <Monitor className="w-8 h-8" />
+                    </button>
+                  )}
                   <h2 className="text-2xl font-bold text-white drop-shadow-lg">
                     {channel?.name || "Canlı Yayın"}
                   </h2>
@@ -830,10 +1034,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <div className="flex items-center gap-4">
                   <button 
                     onClick={() => setActiveMenu('audio')}
-                    onPointerDown={() => setFocusIndex(1)}
+                    onPointerDown={() => setFocusIndex(2)}
                     className={cn(
                       "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 1 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                     )}
                   >
                     <Volume2 className="w-8 h-8" />
@@ -841,10 +1045,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   <button 
                     onClick={() => setActiveMenu('subtitle')}
-                    onPointerDown={() => setFocusIndex(2)}
+                    onPointerDown={() => setFocusIndex(3)}
                     className={cn(
                       "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                     )}
                   >
                     <Languages className="w-8 h-8" />
@@ -852,10 +1056,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   <button 
                     onClick={() => setActiveMenu('channels')}
-                    onPointerDown={() => setFocusIndex(3)}
+                    onPointerDown={() => setFocusIndex(4)}
                     className={cn(
                       "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                     )}
                   >
                     <List className="w-8 h-8" />
@@ -863,10 +1067,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   <button 
                     onClick={() => setActiveMenu('sources')}
-                    onPointerDown={() => setFocusIndex(4)}
+                    onPointerDown={() => setFocusIndex(5)}
                     className={cn(
                       "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                     )}
                   >
                     <Link2 className="w-8 h-8" />
@@ -874,15 +1078,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                   <button 
                     onClick={() => setActiveMenu('details')}
-                    onPointerDown={() => setFocusIndex(5)}
+                    onPointerDown={() => setFocusIndex(6)}
                     className={cn(
                       "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      focusIndex === 6 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                     )}
                   >
                     <Settings2 className="w-8 h-8" />
                     <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
                   </button>
+                  {isPipSupported && (
+                    <button 
+                      onClick={togglePip}
+                      onPointerDown={() => setFocusIndex(7)}
+                      className={cn(
+                        "p-3 rounded-full transition-all flex items-center gap-2",
+                        focusIndex === 7 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                      )}
+                    >
+                      <Monitor className="w-8 h-8" />
+                      <span className="text-sm font-bold uppercase tracking-tighter">PIP</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1142,7 +1359,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               {/* EPG Info Bottom Bar */}
               <div className="mt-auto">
                 <AnimatePresence mode="wait">
-                  {showControls && (
+                  {showControls && !isMini && (
                     <motion.div 
                       initial={{ opacity: 0, y: 40 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -1311,6 +1528,39 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Mini Controls Overlay */}
+        <AnimatePresence>
+          {showControls && isMini && channel && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-20 flex flex-col justify-end p-4 bg-gradient-to-t from-black/60 to-transparent pointer-events-none"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/10 rounded-lg overflow-hidden border border-white/10">
+                    {channel.logo ? (
+                      <img 
+                        src={channel.logo} 
+                        alt={channel.name} 
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <Tv className="w-6 h-6 text-zinc-600" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold truncate max-w-[150px]">{channel.name}</h3>
+                    <p className="text-[10px] text-zinc-400">Canlı Yayın</p>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}

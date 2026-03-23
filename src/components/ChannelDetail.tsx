@@ -18,6 +18,9 @@ interface ChannelDetailProps {
   uiMode: 'modern' | 'classic' | 'minimalist';
   multiSessions?: Record<string, string[]>;
   onToggleMultiChannel?: (channelId: string) => void;
+  activeFocus?: number;
+  onFocusChange?: (index: number) => void;
+  playbackProgress?: Record<string, { currentTime: number; duration: number }>;
 }
 
 export const ChannelDetail: React.FC<ChannelDetailProps> = ({ 
@@ -27,11 +30,14 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
   themeColor, 
   uiMode,
   multiSessions = {},
-  onToggleMultiChannel
+  onToggleMultiChannel,
+  activeFocus = 0,
+  onFocusChange,
+  playbackProgress = {}
 }) => {
   const [metadata, setMetadata] = useState<MediaMetadata | null>(null);
   const [loading, setLoading] = useState(true);
-  const isMulti = Object.values(multiSessions).some(ids => ids.includes(channel.id));
+  const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
 
   useEffect(() => {
     const loadMetadata = async () => {
@@ -65,6 +71,12 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
           )}
           onClick={e => e.stopPropagation()}
         >
+        {uiMode === 'modern' && (
+          <div 
+            className="absolute -top-48 -right-48 w-96 h-96 rounded-full blur-[120px] opacity-30 animate-pulse"
+            style={{ backgroundColor: themeColor }}
+          />
+        )}
         {/* Close Button */}
         <button
           onClick={onClose}
@@ -164,45 +176,103 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
           </div>
 
           {/* Actions */}
-          <div className="mt-12 flex items-center gap-4">
-            <button
-              onClick={() => onPlay(channel)}
-              style={{ backgroundColor: themeColor }}
-              className={cn(
-                "flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-5 text-white font-black text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all group",
-                uiMode === 'modern' && "rounded-full",
-                uiMode === 'classic' && "rounded-none border-4 border-white/20",
-                uiMode === 'minimalist' && "rounded-none border-0 bg-white text-black"
-              )}
-            >
-              <Play className={cn("w-6 h-6 fill-current group-hover:scale-110 transition-transform", uiMode === 'minimalist' && "fill-black")} />
-              Şimdi İzle
-            </button>
+          <div className="mt-12 flex flex-col gap-6">
+            {playbackProgress[channel.id] && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-white/40">
+                  <span>İzleme İlerlemesi</span>
+                  <span>%{Math.round((playbackProgress[channel.id].currentTime / playbackProgress[channel.id].duration) * 100)}</span>
+                </div>
+                <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full transition-all duration-500"
+                    style={{ 
+                      width: `${(playbackProgress[channel.id].currentTime / playbackProgress[channel.id].duration) * 100}%`,
+                      backgroundColor: themeColor
+                    }}
+                  />
+                </div>
+              </div>
+            )}
 
-            <button
-              onClick={() => onToggleMultiChannel?.(channel.id)}
-              className={cn(
-                "flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-5 font-black text-lg shadow-2xl hover:scale-105 active:scale-95 transition-all border-2",
-                isMulti ? "bg-white text-black border-white" : "bg-transparent text-white border-white/20",
-                uiMode === 'modern' && "rounded-full",
-                uiMode === 'classic' && "rounded-none border-4 border-white/20",
-                uiMode === 'minimalist' && "rounded-none border-2 border-white"
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => onPlay(channel)}
+                onMouseEnter={() => onFocusChange?.(0)}
+                style={{ 
+                  backgroundColor: activeFocus === 0 ? themeColor : (uiMode === 'minimalist' ? 'white' : themeColor),
+                  transform: activeFocus === 0 ? 'scale(1.05)' : 'scale(1)'
+                }}
+                className={cn(
+                  "flex-1 md:flex-none flex items-center justify-center gap-3 px-10 py-5 text-white font-black text-lg shadow-2xl active:scale-95 transition-all group",
+                  uiMode === 'modern' && "rounded-full",
+                  uiMode === 'classic' && "rounded-none border-4 border-white/20",
+                  uiMode === 'minimalist' && "rounded-none border-0 text-black",
+                  activeFocus === 0 && "ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                )}
+              >
+                <Play className={cn("w-6 h-6 fill-current group-hover:scale-110 transition-transform", uiMode === 'minimalist' && "fill-black")} />
+                {playbackProgress[channel.id] ? 'Kaldığın Yerden Devam Et' : 'Şimdi İzle'}
+              </button>
+
+              {playbackProgress[channel.id] && (
+                <button
+                  onClick={() => {
+                    // Reset progress and play
+                    // Actually, we can just play from 0
+                    onPlay({ ...channel, urls: [channel.urls[0]] }); // This is a hack to force start from 0 if we handle it in App.tsx
+                    // Better: pass a flag to onPlay or just handle it in App.tsx
+                  }}
+                  // For now, let's just add a "Baştan İzle" button if needed, 
+                  // but "Şimdi İzle" will act as "Resume" if progress exists.
+                  // Let's add "Baştan İzle"
+                  onMouseEnter={() => onFocusChange?.(3)}
+                  className={cn(
+                    "px-6 py-5 text-white/60 font-bold hover:text-white transition-all",
+                    activeFocus === 3 && "text-white underline underline-offset-8"
+                  )}
+                >
+                  Baştan İzle
+                </button>
               )}
-            >
-              <Monitor className="w-6 h-6" />
-              {isMulti ? 'Multi Kanalda' : 'Multi Kanala Ekle'}
-            </button>
-            <button
-              onClick={onClose}
-              className={cn(
-                "px-8 py-5 text-white font-bold hover:bg-white/10 transition-all",
-                uiMode === 'modern' && "rounded-full bg-white/5 border border-white/10",
-                uiMode === 'classic' && "rounded-none bg-zinc-900 border-4 border-zinc-800",
-                uiMode === 'minimalist' && "rounded-none bg-transparent border-0 underline underline-offset-8"
-              )}
-            >
-              Kapat
-            </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => onToggleMultiChannel?.(channel.id)}
+                onMouseEnter={() => onFocusChange?.(1)}
+                style={{
+                  transform: activeFocus === 1 ? 'scale(1.05)' : 'scale(1)'
+                }}
+                className={cn(
+                  "flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-5 font-black text-lg shadow-2xl active:scale-95 transition-all border-2",
+                  isMulti ? "bg-white text-black border-white" : "bg-transparent text-white border-white/20",
+                  uiMode === 'modern' && "rounded-full",
+                  uiMode === 'classic' && "rounded-none border-4 border-white/20",
+                  uiMode === 'minimalist' && "rounded-none border-2 border-white",
+                  activeFocus === 1 && "ring-4 ring-white/20 bg-white text-black border-white shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                )}
+              >
+                <Monitor className="w-6 h-6" />
+                {isMulti ? 'Multi Kanalda' : 'Multi Kanala Ekle'}
+              </button>
+              <button
+                onClick={onClose}
+                onMouseEnter={() => onFocusChange?.(2)}
+                style={{
+                  transform: activeFocus === 2 ? 'scale(1.05)' : 'scale(1)'
+                }}
+                className={cn(
+                  "px-8 py-5 text-white font-bold transition-all",
+                  uiMode === 'modern' && "rounded-full bg-white/5 border border-white/10",
+                  uiMode === 'classic' && "rounded-none bg-zinc-900 border-4 border-zinc-800",
+                  uiMode === 'minimalist' && "rounded-none bg-transparent border-0 underline underline-offset-8",
+                  activeFocus === 2 && "bg-white text-black border-white ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                )}
+              >
+                Kapat
+              </button>
+            </div>
           </div>
         </div>
       </motion.div>

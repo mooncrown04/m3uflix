@@ -146,6 +146,11 @@ export const MultiPlayer: React.FC<MultiPlayerProps> = ({
         handleSelect(activeChannelIndex);
       }
 
+      if (key === 'Tab') {
+        e.preventDefault();
+        key = e.shiftKey ? 'ArrowLeft' : 'ArrowRight';
+      }
+
       if (key === 'ArrowLeft') {
         setActiveChannelIndex(prev => (prev - 1 + channels.length) % channels.length);
         okPressCount.current = 0;

@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
+import { EPGGrid } from './components/EPGGrid';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
 import { ChannelDetail } from './components/ChannelDetail';
 import { MultiPlayer } from './components/MultiPlayer';
 import { motion, AnimatePresence } from 'motion/react';
+import { getDominantColor } from './utils/colorExtractor';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -46,8 +48,10 @@ interface ChannelRowProps {
   deviceType: 'pc' | 'tv' | 'tablet' | 'phone';
   isCollapsed: boolean;
   onToggleCollapse: () => void;
+  onToggleMini?: (channel: M3UChannel) => void;
   customProxyUrl?: string;
   uiMode: UIMode;
+  playbackProgress?: Record<string, { currentTime: number; duration: number }>;
 }
 
 const ChannelRow: React.FC<ChannelRowProps> = ({ 
@@ -58,6 +62,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   onToggleFavorite, 
   onDeleteChannel,
   onLongPress,
+  onToggleMini,
   favorites = [], 
   multiSessions = {},
   canliChannels = [],
@@ -73,7 +78,8 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   isCollapsed,
   onToggleCollapse,
   customProxyUrl,
-  uiMode
+  uiMode,
+  playbackProgress = {}
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -134,7 +140,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           }}
           className={cn(
             "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
-            uiMode === 'modern' && "rounded-full backdrop-blur-md",
+            uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
             uiMode === 'classic' && "rounded-none border-l-4 border-white",
             uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
             isHeaderFocused ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
@@ -168,7 +174,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                 const isFocused = isActiveRow && colIndex === activeCol;
                 const isPreviewing = isFocused && previewChannelId === channel.id;
                 const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
-                const isMulti = Object.values(multiSessions).some(ids => ids.includes(channel.id));
+                const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
                 const isCanli = Array.isArray(canliChannels) && canliChannels.includes(channel.id);
                 const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
                 const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
@@ -243,12 +249,56 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                       }}
                       className={cn(
                         "relative w-full bg-zinc-900 group/card transition-all duration-300 border-4 cursor-pointer overflow-hidden",
-                        uiMode === 'modern' && "rounded-2xl border-white/10",
+                        uiMode === 'modern' && "rounded-2xl border-white/10 bg-white/5 backdrop-blur-xl",
                         uiMode === 'classic' && "rounded-lg border-zinc-800",
                         uiMode === 'minimalist' && "rounded-none border-transparent",
-                        orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]"
+                        orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]",
+                        isFocused && uiMode === 'modern' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]"
                       )}
                     >
+                      {isFocused && uiMode === 'modern' && (
+                        <div 
+                          className="absolute inset-0 blur-2xl opacity-20 pointer-events-none"
+                          style={{ backgroundColor: themeColor }}
+                        />
+                      )}
+                      {/* Playback Progress Bar */}
+                      {playbackProgress[channel.id] && (
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-[70]">
+                          <div 
+                            className="h-full transition-all duration-300"
+                            style={{ 
+                              width: `${(playbackProgress[channel.id].currentTime / playbackProgress[channel.id].duration) * 100}%`,
+                              backgroundColor: themeColor
+                            }}
+                          />
+                        </div>
+                      )}
+                      {/* PiP Button */}
+                      {(isFocused || deviceType !== 'tv') && (
+                        <div 
+                          className={cn(
+                            "absolute bottom-2 right-2 z-[60] transition-all duration-300",
+                            isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
+                          )}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onToggleMini?.(channel);
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onPointerUp={(e) => e.stopPropagation()}
+                            onMouseUp={(e) => e.stopPropagation()}
+                            className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer z-[100]"
+                            title="Picture in Picture (P)"
+                          >
+                            <Monitor className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                   {isPressing && (
                     <motion.div 
                       initial={{ width: 0 }}
@@ -376,7 +426,13 @@ const Logo = ({ uiMode }: { uiMode: UIMode }) => {
   }, []);
 
   return (
-    <div className="relative h-10 flex items-center overflow-hidden">
+    <div className="relative h-10 flex items-center overflow-hidden group">
+      {uiMode === 'modern' && (
+        <div 
+          className="absolute inset-0 blur-xl opacity-30 group-hover:opacity-60 transition-opacity"
+          style={{ backgroundColor: 'var(--theme-color)' }}
+        />
+      )}
       <AnimatePresence mode="wait">
         {!isAltLogo ? (
           <motion.div
@@ -539,6 +595,23 @@ const PROFILE_PICS = [
 const MULTI_CATEGORIES = ['HABER', 'SPOR', 'ULUSAL', 'SİNEMA', 'BELGESEL'];
 
 export default function App() {
+  const [playbackProgress, setPlaybackProgress] = useState<Record<string, { currentTime: number; duration: number }>>(() => {
+    const saved = localStorage.getItem('playbackProgress');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  useEffect(() => {
+    localStorage.setItem('playbackProgress', JSON.stringify(playbackProgress));
+  }, [playbackProgress]);
+
+  const updateProgress = (channelId: string, currentTime: number, duration: number) => {
+    if (!duration || duration < 10) return; // Don't save for live streams or very short clips
+    setPlaybackProgress(prev => ({
+      ...prev,
+      [channelId]: { currentTime, duration }
+    }));
+  };
+
   const [channels, setChannels] = useState<M3UChannel[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentChannel, setCurrentChannel] = useState<M3UChannel | null>(null);
@@ -607,34 +680,34 @@ export default function App() {
   const toggleMultiChannel = (channelId: string, sessionName: string = 'Multi Kanal') => {
     setMultiSessions(prev => {
       const current = { ...prev };
-      if (!current[sessionName]) current[sessionName] = [];
       
-      if (current[sessionName].includes(channelId)) {
-        current[sessionName] = current[sessionName].filter(id => id !== channelId);
-        if (current[sessionName].length === 0) {
-          delete current[sessionName];
-        }
-      } else {
-        // Find if it's already in another session of the same category (e.g. HABER 2)
-        // But for now let's just allow adding to the chosen one.
-        // Auto-split logic: if sessionName is one of MULTI_CATEGORIES, 
-        // find the first one that has space or create a new one.
-        
-        let targetSession = sessionName;
-        let sessionList = current[targetSession] || [];
-        
-        if (sessionList.length >= 9) {
-          // Find next available session name like "HABER 2"
-          let counter = 2;
-          while (current[`${sessionName} ${counter}`] && current[`${sessionName} ${counter}`].length >= 9) {
-            counter++;
+      // Check if channel is already in ANY session of this category
+      // If it is, remove it.
+      let found = false;
+      Object.keys(current).forEach(key => {
+        if (key === sessionName || key.startsWith(`${sessionName} `)) {
+          if (current[key].includes(channelId)) {
+            current[key] = current[key].filter(id => id !== channelId);
+            if (current[key].length === 0) delete current[key];
+            found = true;
           }
+        }
+      });
+
+      if (!found) {
+        // Find the first session of this category that has space (< 9)
+        let targetSession = sessionName;
+        let counter = 1;
+        
+        while (current[targetSession] && current[targetSession].length >= 9) {
+          counter++;
           targetSession = `${sessionName} ${counter}`;
-          if (!current[targetSession]) current[targetSession] = [];
         }
         
+        if (!current[targetSession]) current[targetSession] = [];
         current[targetSession] = [...current[targetSession], channelId];
       }
+      
       return current;
     });
   };
@@ -714,8 +787,11 @@ export default function App() {
   const [channelForDetail, setChannelForDetail] = useState<M3UChannel | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
+  const [detailFocus, setDetailFocus] = useState(0); // 0: Play, 1: Multi, 2: Close
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [settingsSection, setSettingsSection] = useState(0);
+  const [showEPGGrid, setShowEPGGrid] = useState(false);
+  const [isMiniPlayer, setIsMiniPlayer] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
   const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
@@ -786,6 +862,25 @@ export default function App() {
     localStorage.setItem('ui_mode', uiMode);
   }, [uiMode]);
 
+  // Dynamic Theme Logic for Modern Mode
+  useEffect(() => {
+    if (uiMode !== 'modern') return;
+
+    const updateThemeFromImage = async (url: string | undefined) => {
+      if (!url) return;
+      const color = await getDominantColor(url);
+      if (color) {
+        setThemeColor(color);
+      }
+    };
+
+    if (navContext === 'player' && currentChannel) {
+      updateThemeFromImage(currentChannel.logo);
+    } else if (featuredChannel) {
+      updateThemeFromImage(featuredChannel.logo);
+    }
+  }, [uiMode, featuredChannel, currentChannel, navContext]);
+
   useEffect(() => {
     document.documentElement.style.setProperty('--theme-color', themeColor);
     localStorage.setItem('theme_color', themeColor);
@@ -807,8 +902,8 @@ export default function App() {
 
   const uiClasses = useMemo(() => ({
     container: cn(
-      "min-h-screen text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-500",
-      uiMode === 'modern' && "bg-[#141414]",
+      "min-h-screen text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-1000 relative",
+      uiMode === 'modern' && "bg-[#0a0a0a]",
       uiMode === 'classic' && "bg-[#0a0a0a]",
       uiMode === 'minimalist' && "bg-black",
       deviceType === 'tv' && "text-lg",
@@ -899,6 +994,15 @@ export default function App() {
   }, [channels.length]);
 
   const handleDeleteChannel = (channelId: string) => {
+    if (channelId.startsWith('multi-view-session-')) {
+      const sessionName = channelId.replace('multi-view-session-', '');
+      setMultiSessions(prev => {
+        const next = { ...prev };
+        delete next[sessionName];
+        return next;
+      });
+      return;
+    }
     setChannels(prev => prev.filter(ch => ch.id !== channelId));
     setFavorites(prev => prev.filter(id => id !== channelId));
     setCanliChannels(prev => prev.filter(id => id !== channelId));
@@ -921,28 +1025,33 @@ export default function App() {
     const groups: Record<string, M3UChannel[]> = {};
     const broken: M3UChannel[] = [];
     
-    // Add Multi Kanal as a group if it has items
+    // Add Multi Kanal sessions by category
     Object.entries(multiSessions).forEach(([sessionName, sessionChannelIds]) => {
-      if (sessionChannelIds.length > 0) {
+      const ids = sessionChannelIds as string[];
+      if (ids.length > 0) {
         const matched = channels
-          .filter(ch => sessionChannelIds.includes(ch.id) && !brokenChannelIds.has(ch.id))
-          .sort((a, b) => sessionChannelIds.indexOf(a.id) - sessionChannelIds.indexOf(b.id));
+          .filter(ch => ids.includes(ch.id) && !brokenChannelIds.has(ch.id))
+          .sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
         
         if (matched.length > 0) {
-          // Create a virtual channel that represents the multi-view session
+          // Determine the base category (e.g., "HABER" from "HABER 2")
+          const baseCategory = MULTI_CATEGORIES.find(cat => sessionName.startsWith(cat)) || 'Multi Kanal';
+          const groupTitle = `${baseCategory} (Multi)`;
+          
           const multiViewChannel: M3UChannel = {
             id: `multi-view-session-${sessionName}`,
-            name: `${sessionName} Oturumu`,
-            group: 'Multi Kanal',
+            name: sessionName,
+            group: groupTitle,
             logo: matched[0]?.logo || '',
             urls: matched.map(ch => ch.urls[0]),
             description: `${matched.length} kanal bir arada izlemek için tıklayın`,
             isMultiView: true,
             sessionName: sessionName,
-            sessionChannels: sessionChannelIds
+            sessionChannels: ids
           };
-          if (!groups['Multi Kanal']) groups['Multi Kanal'] = [];
-          groups['Multi Kanal'].push(multiViewChannel);
+          
+          if (!groups[groupTitle]) groups[groupTitle] = [];
+          groups[groupTitle].push(multiViewChannel);
         }
       }
     });
@@ -1027,20 +1136,26 @@ export default function App() {
     return Object.entries(groups)
       .filter(([group]) => {
         if (visibleCategories.length > 0) {
-          return visibleCategories.includes(group) || group === 'Çalışmayanlar';
+          return visibleCategories.includes(group) || group === 'Çalışmayanlar' || (visibleCategories.includes('Multi Kanal') && group.endsWith(' (Multi)'));
         }
         // Varsayılan olarak özel grupları gizle, M3U gruplarını göster
         const specialGroups = ['Multi Kanal', 'Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar'];
-        return !specialGroups.includes(group);
+        return !specialGroups.includes(group) && !group.endsWith(' (Multi)');
       })
       .sort((a, b) => {
         const order = ['Multi Kanal', 'Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
-        const aIdx = order.indexOf(a[0]);
-        const bIdx = order.indexOf(b[0]);
         
-        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-        if (aIdx !== -1) return -1;
-        if (bIdx !== -1) return 1;
+        const getOrderIndex = (name: string) => {
+          const idx = order.indexOf(name);
+          if (idx !== -1) return idx;
+          if (name.endsWith(' (Multi)')) return -1; // Put multi groups at the very top
+          return 100;
+        };
+        
+        const aIdx = getOrderIndex(a[0]);
+        const bIdx = getOrderIndex(b[0]);
+        
+        if (aIdx !== 100 || bIdx !== 100) return aIdx - bIdx;
         
         if (a[0] === 'Çalışmayanlar') return 1;
         if (b[0] === 'Çalışmayanlar') return -1;
@@ -1171,15 +1286,27 @@ export default function App() {
         [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
         return newArr;
       });
-    } else if (category === 'Multi Kanal') {
-      setMultiChannels(prev => {
-        const idx = prev.indexOf(channelId);
-        if (idx === -1) return prev;
-        const newArr = [...prev];
-        const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
-        if (targetIdx < 0 || targetIdx >= newArr.length) return prev;
-        [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
-        return newArr;
+    } else if (category.endsWith(' (Multi)')) {
+      setMultiSessions(prev => {
+        const next = { ...prev };
+        // Find the session that contains this channel
+        const sessionName = Object.keys(next).find(key => {
+          const groupTitle = `${MULTI_CATEGORIES.find(cat => key.startsWith(cat)) || 'Multi Kanal'} (Multi)`;
+          return groupTitle === category && next[key].includes(channelId);
+        });
+        
+        if (sessionName) {
+          const idx = next[sessionName].indexOf(channelId);
+          if (idx !== -1) {
+            const newArr = [...next[sessionName]];
+            const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+            if (targetIdx >= 0 && targetIdx < newArr.length) {
+              [newArr[idx], newArr[targetIdx]] = [newArr[targetIdx], newArr[idx]];
+              next[sessionName] = newArr;
+            }
+          }
+        }
+        return next;
       });
     } else {
       // M3U groups
@@ -1204,6 +1331,19 @@ export default function App() {
 
   const handleChannelSelect = (channel: M3UChannel) => {
     console.log('handleChannelSelect called for:', channel.name);
+    
+    // If we are already in mini player mode, and selecting the SAME channel, 
+    // maybe we want to go full screen? 
+    // But the user says clicking the PiP button opens full screen.
+    // So we must ensure that if we WANT PiP, we don't call this.
+    
+    if (isMiniPlayer) {
+      setIsMiniPlayer(false);
+      setNavContext('player');
+      return;
+    }
+
+    setIsMiniPlayer(false);
 
     if (channel.isMultiView) {
       const sessionChannelIds = channel.sessionChannels || [];
@@ -1379,9 +1519,49 @@ export default function App() {
         icon: Monitor,
         action: () => toggleCategory('multi'),
         isActive: visibleCategories.includes('Multi Kanal')
+      },
+      {
+        id: 'epg',
+        label: 'Yayın Akışı',
+        icon: Bell,
+        action: () => setShowEPGGrid(true),
+        isActive: false
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
   }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length]);
+
+  // EPG Reminders check
+  useEffect(() => {
+    const checkReminders = () => {
+      const saved = localStorage.getItem('epg_reminders');
+      if (!saved) return;
+      const reminders = JSON.parse(saved);
+      const now = new Date();
+      
+      reminders.forEach((reminderId: string) => {
+        const [channelId, startTimeStr] = reminderId.split('-');
+        const startTime = new Date(parseInt(startTimeStr));
+        
+        // Notify 1 minute before
+        const diff = startTime.getTime() - now.getTime();
+        if (diff > 0 && diff <= 60000) {
+          const channel = channels.find(ch => ch.id === channelId);
+          if (channel) {
+            // Show a simple alert for now as we are in an iframe
+            // In a production app, we would use a proper toast system
+            console.log(`Hatırlatıcı: ${channel.name} yayını başlamak üzere!`);
+            
+            // Remove reminder after notification
+            const newReminders = reminders.filter((r: string) => r !== reminderId);
+            localStorage.setItem('epg_reminders', JSON.stringify(newReminders));
+          }
+        }
+      });
+    };
+
+    const timer = setInterval(checkReminders, 30000);
+    return () => clearInterval(timer);
+  }, [channels]);
 
   // Remote Control Navigation
   const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
@@ -1389,6 +1569,33 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (showEPGGrid) return;
+      
+      // Toggle Mini Player with 'M' key
+      if (e.key.toLowerCase() === 'm' && currentChannel && navContext !== 'player') {
+        e.preventDefault();
+        setIsMiniPlayer(!isMiniPlayer);
+        if (isMiniPlayer) setCurrentChannel(null);
+        return;
+      }
+
+      // Toggle Mini Player with 'P' key on focused channel
+      if (e.key.toLowerCase() === 'p' && navContext === 'browse' && activeRow >= 0 && activeCol >= 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
+        if (selectedChannel) {
+          if (isMiniPlayer && currentChannel?.id === selectedChannel.id) {
+            setIsMiniPlayer(false);
+            setCurrentChannel(null);
+          } else {
+            setCurrentChannel(selectedChannel);
+            setIsMiniPlayer(true);
+          }
+          return;
+        }
+      }
+
       console.log('App handleKeyDown:', e.key, 'navContext:', navContext);
       if (navContext === 'player') return;
 
@@ -1400,6 +1607,10 @@ export default function App() {
       if (key === 'Down') key = 'ArrowDown';
       if (key === 'Left') key = 'ArrowLeft';
       if (key === 'Right') key = 'ArrowRight';
+      if (key === 'Tab') {
+        e.preventDefault();
+        key = e.shiftKey ? 'ArrowLeft' : 'ArrowRight';
+      }
       if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = 'Enter';
 
       // Detect long press for Enter/OK
@@ -1419,6 +1630,12 @@ export default function App() {
       if (key === 'Escape' || key === 'Backspace') {
         // Prevent default backspace behavior in inputs unless they are focused
         if (key === 'Backspace' && (document.activeElement?.tagName === 'INPUT')) {
+          return;
+        }
+
+        if (isMiniPlayer) {
+          setIsMiniPlayer(false);
+          setCurrentChannel(null);
           return;
         }
 
@@ -1536,9 +1753,17 @@ export default function App() {
 
       if (navContext === 'channel-detail') {
         switch (key) {
+          case 'ArrowLeft':
+            e.preventDefault();
+            setDetailFocus(prev => Math.max(0, prev - 1));
+            break;
+          case 'ArrowRight':
+            e.preventDefault();
+            setDetailFocus(prev => Math.min(2, prev + 1));
+            break;
           case 'Enter':
             e.preventDefault();
-            if (channelForDetail) {
+            if (detailFocus === 0 && channelForDetail) {
               // Force play by bypassing the VOD check in handleChannelSelect
               setRecentlyWatched(prev => {
                 const filtered = prev.filter(ch => 
@@ -1550,6 +1775,11 @@ export default function App() {
               setCurrentChannel(channelForDetail);
               setNavContext('player');
               setChannelForDetail(null);
+            } else if (detailFocus === 1 && channelForDetail) {
+              toggleManualCategory(channelForDetail.id, 'multi');
+            } else if (detailFocus === 2) {
+              setChannelForDetail(null);
+              setNavContext('browse');
             }
             break;
           case 'Escape':
@@ -2233,6 +2463,33 @@ export default function App() {
 
   return (
     <div className={uiClasses.container}>
+      {/* Dynamic Background Glow for Modern Mode */}
+      {uiMode === 'modern' && (
+        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+          <motion.div 
+            animate={{ 
+              backgroundColor: themeColor,
+              opacity: [0.05, 0.12, 0.05],
+              scale: [1, 1.2, 1],
+              x: [0, 50, 0],
+              y: [0, 30, 0]
+            }}
+            transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+            className="absolute -top-[10%] -left-[10%] w-[70%] h-[70%] rounded-full blur-[180px]"
+          />
+          <motion.div 
+            animate={{ 
+              backgroundColor: themeColor,
+              opacity: [0.03, 0.1, 0.03],
+              scale: [1.2, 1, 1.2],
+              x: [0, -50, 0],
+              y: [0, -30, 0]
+            }}
+            transition={{ duration: 15, repeat: Infinity, ease: "linear", delay: 2 }}
+            className="absolute -bottom-[10%] -right-[10%] w-[60%] h-[60%] rounded-full blur-[180px]"
+          />
+        </div>
+      )}
       {/* Navbar */}
       <nav className={cn(
         "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
@@ -2456,6 +2713,12 @@ export default function App() {
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent" />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent" />
+                  {uiMode === 'modern' && (
+                    <div 
+                      className="absolute -top-24 -right-24 w-96 h-96 rounded-full blur-[120px] opacity-20 animate-pulse"
+                      style={{ backgroundColor: themeColor }}
+                    />
+                  )}
                 </div>
 
                 <div className={cn("absolute left-4 md:left-12 max-w-2xl space-y-4 sm:space-y-6 transition-all duration-500", searchQuery ? "bottom-8" : "bottom-[20%] sm:bottom-[35%]")}>
@@ -2657,6 +2920,15 @@ export default function App() {
                   uiMode={uiMode}
                   isCollapsed={collapsedRows.has(group)}
                   customProxyUrl={customProxyUrl}
+                  onToggleMini={(channel) => {
+                    if (isMiniPlayer && currentChannel?.id === channel.id) {
+                      setIsMiniPlayer(false);
+                      setCurrentChannel(null);
+                    } else {
+                      setCurrentChannel(channel);
+                      setIsMiniPlayer(true);
+                    }
+                  }}
                   onToggleCollapse={() => {
                     setCollapsedRows(prev => {
                       const next = new Set(prev);
@@ -2665,6 +2937,7 @@ export default function App() {
                       return next;
                     });
                   }}
+                  playbackProgress={playbackProgress}
                 />
               ))}
             </div>
@@ -2672,6 +2945,83 @@ export default function App() {
         )}
       </div>
     </main>
+
+      {/* EPG Grid Overlay */}
+      <AnimatePresence>
+        {showEPGGrid && (
+          <EPGGrid
+            channels={channels}
+            epgData={epgData}
+            onClose={() => setShowEPGGrid(false)}
+            onPlay={handleChannelSelect}
+            themeColor={themeColor}
+            uiMode={uiMode}
+            customProxyUrl={customProxyUrl}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Mini Player (Floating PIP) */}
+      <AnimatePresence>
+        {isMiniPlayer && currentChannel && (
+          <motion.div
+            drag
+            dragMomentum={false}
+            initial={{ opacity: 0, scale: 0.5, x: 100, y: 100 }}
+            animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            className="fixed bottom-8 right-8 w-80 aspect-video z-[150] bg-black rounded-2xl shadow-2xl border-2 border-white/20 overflow-hidden cursor-move group"
+          >
+            <VideoPlayer
+              url={currentChannel.urls?.[0] || currentChannel.url}
+              channel={currentChannel}
+              channels={channels}
+              epgData={epgData}
+              themeColor={themeColor}
+              customProxyUrl={customProxyUrl}
+              onClose={() => {
+                setIsMiniPlayer(false);
+                setCurrentChannel(null);
+              }}
+              isMini={true}
+            />
+            <div className="absolute top-2 right-2 opacity-100 flex gap-2 z-[200]">
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsMiniPlayer(false);
+                  setNavContext('player');
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onMouseUp={(e) => e.stopPropagation()}
+                className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black transition-all border border-white/10 shadow-lg pointer-events-auto cursor-pointer"
+                title="Tam Ekran"
+              >
+                <FastForward className="w-4 h-4" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsMiniPlayer(false);
+                  setCurrentChannel(null);
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerUp={(e) => e.stopPropagation()}
+                onMouseUp={(e) => e.stopPropagation()}
+                className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-500 transition-all border border-white/10 shadow-lg pointer-events-auto cursor-pointer"
+                title="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Channel Context Menu Overlay */}
       <AnimatePresence>
@@ -2690,9 +3040,26 @@ export default function App() {
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
-              className="bg-zinc-900 border border-white/10 rounded-2xl p-6 max-w-lg w-full shadow-2xl"
+              className={cn(
+                "p-8 max-w-lg w-full shadow-2xl relative overflow-hidden",
+                uiMode === 'modern' && "bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+                uiMode === 'classic' && "bg-zinc-900 border border-white/10 rounded-2xl",
+                uiMode === 'minimalist' && "bg-black border-0 rounded-none"
+              )}
               onClick={e => e.stopPropagation()}
             >
+              {uiMode === 'modern' && (
+                <>
+                  <div 
+                    className="absolute -top-24 -left-24 w-48 h-48 rounded-full blur-[80px] opacity-20"
+                    style={{ backgroundColor: themeColor }}
+                  />
+                  <div 
+                    className="absolute -bottom-24 -right-24 w-48 h-48 rounded-full blur-[80px] opacity-10"
+                    style={{ backgroundColor: themeColor }}
+                  />
+                </>
+              )}
               <h3 className="text-xl font-bold mb-6 text-center">
                 {multiSessionMenuOpen ? 'Kategori Seçin' : 'Seçenekler'}
               </h3>
@@ -2704,7 +3071,7 @@ export default function App() {
                     { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
                     { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
                     { id: 'dizi', label: 'Dizi', icon: List, active: diziChannels.includes(channelMenuId) },
-                    { id: 'multi', label: 'Multi Kanal', icon: Monitor, active: Object.values(multiSessions).some(ids => ids.includes(channelMenuId)) },
+                    { id: 'multi', label: 'Multi Kanal', icon: Monitor, active: Object.values(multiSessions).some((ids: any) => Array.isArray(ids) && ids.includes(channelMenuId)) },
                     { id: 'move-left', label: 'Sola Taşı', icon: ChevronLeft },
                     { id: 'move-right', label: 'Sağa Taşı', icon: ChevronRight }
                   ].map((opt, idx) => (
@@ -2808,11 +3175,17 @@ export default function App() {
               exit={{ y: 50, opacity: 0 }}
               className={cn(
                 "w-full h-full sm:h-[600px] sm:max-h-[90vh] sm:max-w-4xl shadow-2xl flex flex-col md:flex-row overflow-hidden",
-                uiMode === 'modern' && "bg-zinc-900 border-0 sm:border border-white/10 sm:rounded-2xl",
-                uiMode === 'classic' && "bg-black border-0 sm:border border-zinc-800 sm:rounded-lg",
+                uiMode === 'modern' && "bg-white/5 backdrop-blur-3xl border border-white/20 sm:rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+                uiMode === 'classic' && "bg-zinc-900 border-0 sm:border border-white/10 sm:rounded-2xl",
                 uiMode === 'minimalist' && "bg-black border-0 sm:border border-white/5 sm:rounded-none"
               )}
             >
+              {uiMode === 'modern' && (
+                <div 
+                  className="absolute -top-48 -left-48 w-96 h-96 rounded-full blur-[120px] opacity-20 animate-pulse"
+                  style={{ backgroundColor: themeColor }}
+                />
+              )}
               {/* Sidebar Tabs */}
               <div 
                 ref={settingsSidebarRef}
@@ -2854,7 +3227,7 @@ export default function App() {
                     className={cn(
                       "relative flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg font-bold transition-all whitespace-nowrap overflow-hidden",
                       activeSettingsTab === tab.id 
-                        ? "bg-white text-black scale-105 shadow-lg" 
+                        ? (uiMode === 'modern' ? "bg-white/20 text-white scale-105 shadow-lg backdrop-blur-md border border-white/20" : "bg-white text-black scale-105 shadow-lg")
                         : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
                       settingsArea === 'tabs' && sidebarFocus === tab.id && "ring-4 ring-white ring-offset-2 ring-offset-black z-10"
                     )}
@@ -2981,7 +3354,13 @@ export default function App() {
                                   settingsArea === 'content' && settingsFocus === i && "ring-4 ring-white scale-125 z-10 opacity-100 settings-focused"
                                 )}
                                 title={c.name}
-                              />
+                              >
+                                {themeColor === c.color && (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <div className="w-2 h-2 bg-white rounded-full animate-ping" />
+                                  </div>
+                                )}
+                              </button>
                               <span className={cn(
                                 "text-[10px] font-black uppercase tracking-widest transition-all",
                                 themeColor === c.color ? "text-white" : "text-zinc-500",
@@ -3869,6 +4248,8 @@ export default function App() {
             channel={channelForDetail}
             themeColor={themeColor}
             uiMode={uiMode}
+            activeFocus={detailFocus}
+            onFocusChange={setDetailFocus}
             onClose={() => {
               setChannelForDetail(null);
               setNavContext('browse');
@@ -3888,6 +4269,7 @@ export default function App() {
             }}
             multiSessions={multiSessions}
             onToggleMultiChannel={(id) => toggleManualCategory(id, 'multi')}
+            playbackProgress={playbackProgress}
           />
         )}
       </AnimatePresence>
@@ -3922,8 +4304,19 @@ export default function App() {
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-900 border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl text-center space-y-8"
+              className={cn(
+                "p-8 max-w-md w-full shadow-2xl text-center space-y-8 relative overflow-hidden",
+                uiMode === 'modern' && "bg-white/10 backdrop-blur-3xl border border-white/20 rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+                uiMode === 'classic' && "bg-zinc-900 border border-white/10 rounded-3xl",
+                uiMode === 'minimalist' && "bg-black border-0 rounded-none"
+              )}
             >
+              {uiMode === 'modern' && (
+                <div 
+                  className="absolute -top-24 -right-24 w-48 h-48 rounded-full blur-[80px] opacity-20"
+                  style={{ backgroundColor: themeColor }}
+                />
+              )}
               <div className="w-20 h-20 bg-red-600/10 rounded-full flex items-center justify-center mx-auto border border-red-600/20">
                 <X className="w-10 h-10 text-red-600" />
               </div>
@@ -3992,7 +4385,7 @@ export default function App() {
       )}
 
       {/* Video Player */}
-      {currentChannel && (
+      {currentChannel && !isMiniPlayer && (
         <>
           {console.log('Rendering VideoPlayer for:', currentChannel.name)}
           <VideoPlayer 
@@ -4002,11 +4395,17 @@ export default function App() {
           epgData={epgData}
           themeColor={themeColor}
           customProxyUrl={customProxyUrl}
+          startTime={playbackProgress[currentChannel.id]?.currentTime || 0}
+          onProgressUpdate={(seconds, duration) => updateProgress(currentChannel.id, seconds, duration)}
           onClose={() => {
             setCurrentChannel(null);
             setNavContext('browse');
           }} 
           onChannelSelect={handleChannelSelect}
+          onToggleMini={() => {
+            setIsMiniPlayer(true);
+            setNavContext('browse');
+          }}
         />
       </>
       )}
