@@ -449,7 +449,7 @@ export const EPGGrid: React.FC<EPGGridProps> = ({
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
             className="fixed bottom-8 right-8 w-80 aspect-video rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl z-[300] bg-black"
           >
-            <PreviewPlayer urls={hoveredChannel.urls || [hoveredChannel.url]} customProxyUrl={customProxyUrl} />
+            <PreviewPlayer urls={hoveredChannel.urls || []} customProxyUrl={customProxyUrl} />
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
             <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-white/10 p-1 flex items-center justify-center">
