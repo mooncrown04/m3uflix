@@ -15,7 +15,7 @@ interface ChannelDetailProps {
   onClose: () => void;
   onPlay: (channel: M3UChannel) => void;
   themeColor: string;
-  uiMode: 'modern' | 'classic' | 'minimalist';
+  uiMode: 'modern' | 'classic' | 'minimalist' | 'bento';
   multiSessions?: Record<string, string[]>;
   onToggleMultiChannel?: (channelId: string) => void;
   activeFocus?: number;

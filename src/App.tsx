@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, CloudRain, CloudLightning, Snowflake, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { EPGGrid } from './components/EPGGrid';
@@ -10,828 +10,15 @@ import { ChannelDetail } from './components/ChannelDetail';
 import { MultiPlayer } from './components/MultiPlayer';
 import { motion, AnimatePresence } from 'motion/react';
 import { getDominantColor } from './utils/colorExtractor';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import { FixedSizeList as List } from 'react-window';
 
-const useContainerWidth = (ref: React.RefObject<HTMLDivElement | null>) => {
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    if (!ref.current) return;
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setWidth(entry.contentRect.width);
-      }
-    });
-
-    observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [ref]);
-
-  return width;
-};
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-interface Playlist {
-  id: string;
-  name: string;
-  url: string;
-  epgUrl?: string;
-}
-
-type UIMode = 'modern' | 'classic' | 'minimalist';
-
-interface ChannelRowProps {
-  title: string;
-  channels: M3UChannel[];
-  onSelect: (channel: M3UChannel) => void;
-  onFocus: (row: number, col: number) => void;
-  onToggleFavorite: (channelId: string) => void;
-  onDeleteChannel: (channelId: string) => void;
-  onLongPress: (channelId: string, category: string) => void;
-  favorites: string[];
-  multiSessions?: Record<string, string[]>;
-  canliChannels?: string[];
-  filmChannels?: string[];
-  diziChannels?: string[];
-  rowIndex: number;
-  activeRow: number;
-  activeCol: number;
-  orientation: 'landscape' | 'portrait';
-  previewChannelId: string | null;
-  themeColor: string;
-  deviceType: 'pc' | 'tv' | 'tablet' | 'phone';
-  isCollapsed: boolean;
-  onToggleCollapse: () => void;
-  onToggleMini?: (channel: M3UChannel) => void;
-  customProxyUrl?: string;
-  uiMode: UIMode;
-  playbackProgress?: Record<string, { currentTime: number; duration: number }>;
-  epgData?: EPGData | null;
-  now: Date;
-  isGrid?: boolean;
-}
-
-interface ChannelCardProps {
-  channel: M3UChannel;
-  colIndex: number;
-  rowIndex: number;
-  activeRow: number;
-  activeCol: number;
-  previewChannelId: string | null;
-  favorites: string[];
-  multiSessions: Record<string, string[]>;
-  canliChannels: string[];
-  filmChannels: string[];
-  diziChannels: string[];
-  pressingId: string | null;
-  title: string;
-  themeColor: string;
-  deviceType: 'pc' | 'tv' | 'tablet' | 'phone';
-  orientation: 'landscape' | 'portrait';
-  uiMode: UIMode;
-  playbackProgress: Record<string, { currentTime: number; duration: number }>;
-  epgData: EPGData | null;
-  now: Date;
-  onFocus: (row: number, col: number) => void;
-  onSelect: (channel: M3UChannel) => void;
-  onDeleteChannel: (channelId: string) => void;
-  onToggleMini?: (channel: M3UChannel) => void;
-  handlePressStart: (channelId: string) => void;
-  handlePressEnd: () => void;
-  customProxyUrl?: string;
-  style?: React.CSSProperties;
-  channels: M3UChannel[];
-}
-
-const ChannelCard: React.FC<ChannelCardProps> = ({
-  channel,
-  colIndex,
-  rowIndex,
-  activeRow,
-  activeCol,
-  previewChannelId,
-  favorites,
-  multiSessions,
-  canliChannels,
-  filmChannels,
-  diziChannels,
-  pressingId,
-  title,
-  themeColor,
-  deviceType,
-  orientation,
-  uiMode,
-  playbackProgress,
-  epgData,
-  now,
-  onFocus,
-  onSelect,
-  onDeleteChannel,
-  onToggleMini,
-  handlePressStart,
-  handlePressEnd,
-  customProxyUrl,
-  style,
-  channels
-}) => {
-  const isFocused = rowIndex === activeRow && colIndex === activeCol;
-  const isPreviewing = isFocused && previewChannelId === channel.id;
-  const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
-  const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
-  const isCanli = Array.isArray(canliChannels) && canliChannels.includes(channel.id);
-  const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
-  const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
-  const isPressing = pressingId === channel.id;
-
-  // Find current EPG program
-  const currentProgram = useMemo(() => {
-    if (!epgData || !epgData.programs) return null;
-    
-    // Try to match by tvg-id or channel name
-    const channelId = channel.tvgId || channel.name;
-    const programs = epgData.programs[channelId] || [];
-    
-    return programs.find(p => now >= p.start && now <= p.stop);
-  }, [epgData, channel.tvgId, channel.name, now]);
-
-  const progress = useMemo(() => {
-    if (!currentProgram) return 0;
-    const nowTime = now.getTime();
-    const start = currentProgram.start.getTime();
-    const stop = currentProgram.stop.getTime();
-    const total = stop - start;
-    const elapsed = nowTime - start;
-    return Math.max(0, Math.min(100, (elapsed / total) * 100));
-  }, [currentProgram, now]);
-
-  const getBadges = () => {
-    const b = [];
-    if (title === 'İzlemeye Devam Et') b.push('İ');
-    if (isFavorite) b.push('F');
-    if (isMulti) b.push('M');
-    if (isCanli) b.push('C');
-    if (isFilm) b.push('Fi');
-    if (isDizi) b.push('D');
-    return b;
-  };
-  const badges = getBadges();
-
-  return (
-    <div 
-      style={style}
-      className={cn(
-        "flex flex-col gap-2 snap-start relative", 
-        title === 'Top 10' && "pl-16",
-        deviceType === 'tv' 
-          ? (orientation === 'landscape' ? "w-48 md:w-72" : "w-40 md:w-56")
-          : deviceType === 'phone'
-          ? (orientation === 'landscape' ? "w-32" : "w-24")
-          : (orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44")
-      )}
-    >
-      {title === 'Top 10' && (
-        <div className="absolute left-[-24px] bottom-[-10px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
-          <span 
-            className={cn(
-              "text-[220px] font-black leading-[0.7] tracking-tighter",
-              uiMode === 'modern' && "text-black",
-              uiMode === 'classic' && "text-zinc-800",
-              uiMode === 'minimalist' && "text-transparent"
-            )}
-            style={{ 
-              WebkitTextStroke: uiMode === 'minimalist' ? '1px rgba(255,255,255,0.2)' : (uiMode === 'modern' ? '2px rgba(255,255,255,0.4)' : '4px #555'),
-              paintOrder: 'stroke fill',
-              textShadow: uiMode === 'modern' ? `0 0 40px ${themeColor}4d` : 'none',
-              backgroundImage: uiMode === 'modern' ? `linear-gradient(to bottom, #000, #111)` : 'none',
-              WebkitBackgroundClip: uiMode === 'modern' ? 'text' : 'none'
-            }}
-          >
-            {channel.tvgNumber}
-          </span>
-        </div>
-      )}
-      <motion.div
-        animate={{ 
-          scale: isFocused ? (isPressing ? 1.05 : 1.15) : 1,
-          zIndex: isFocused ? 30 : 10,
-          y: isFocused ? -10 : 0
-        }}
-        transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-        onClick={() => {
-          onFocus(rowIndex, colIndex);
-          onSelect(channel);
-        }}
-        onPointerDown={() => onFocus(rowIndex, colIndex)}
-        onMouseDown={() => handlePressStart(channel.id)}
-        onMouseUp={handlePressEnd}
-        onMouseLeave={handlePressEnd}
-        onTouchStart={() => handlePressStart(channel.id)}
-        onTouchEnd={handlePressEnd}
-        onMouseEnter={() => onFocus(rowIndex, colIndex)}
-        style={{ 
-          boxShadow: isFocused ? (uiMode === 'modern' ? `0 0 30px ${themeColor}4d` : `0 0 15px ${themeColor}33`) : undefined,
-          borderColor: isFocused ? themeColor : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
-        }}
-        className={cn(
-          "relative w-full bg-zinc-900 group/card transition-all duration-300 border-4 cursor-pointer overflow-hidden",
-          uiMode === 'modern' && "rounded-2xl border-white/10 bg-white/5 backdrop-blur-xl",
-          uiMode === 'classic' && "rounded-lg border-zinc-800",
-          uiMode === 'minimalist' && "rounded-none border-transparent",
-          orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]",
-          isFocused && uiMode === 'modern' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]"
-        )}
-      >
-        {isFocused && uiMode === 'modern' && (
-          <div 
-            className="absolute inset-0 blur-2xl opacity-20 pointer-events-none"
-            style={{ backgroundColor: themeColor }}
-          />
-        )}
-        {playbackProgress[channel.id] && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-[70]">
-            <div 
-              className="h-full transition-all duration-300"
-              style={{ 
-                width: `${(playbackProgress[channel.id].currentTime / playbackProgress[channel.id].duration) * 100}%`,
-                backgroundColor: themeColor
-              }}
-            />
-          </div>
-        )}
-        {(isFocused || deviceType !== 'tv') && (
-          <div 
-            className={cn(
-              "absolute bottom-2 right-2 z-[60] transition-all duration-300",
-              isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
-            )}
-          >
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleMini?.(channel);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-              className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer z-[100]"
-              title="Picture in Picture (P)"
-            >
-              <Monitor className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        {isPressing && (
-          <motion.div 
-            initial={{ width: 0 }}
-            animate={{ width: '100%' }}
-            transition={{ duration: 0.8, ease: "linear" }}
-            className="absolute bottom-0 left-0 h-1.5 bg-white z-50"
-          />
-        )}
-        <div className="absolute top-2 left-2 z-40 flex flex-col gap-1.5">
-          {badges.map((b, i) => (
-            <div 
-              key={i}
-              style={{ backgroundColor: themeColor }}
-              className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
-            >
-              {b}
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDeleteChannel(channel.id);
-          }}
-          className={cn(
-            "absolute top-2 right-2 z-40 w-6 h-6 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center transition-all hover:bg-red-600 group/delete",
-            isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50"
-          )}
-        >
-          <X className="w-3.5 h-3.5 text-white group-hover/delete:scale-110 transition-transform" />
-        </button>
-        {isPreviewing ? (
-          <div className="w-full h-full bg-black pointer-events-none">
-            <PreviewPlayer urls={channel.urls} customProxyUrl={customProxyUrl} />
-            <div 
-              style={{ backgroundColor: themeColor }}
-              className="absolute top-2 right-2 text-[8px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 animate-pulse text-white"
-            >
-              <div className="w-1 h-1 bg-white rounded-full" />
-              CANLI ÖNİZLEME
-            </div>
-          </div>
-        ) : (
-          <>
-            {channel.isMultiView ? (
-              <div className="w-full h-full grid grid-cols-2 gap-0.5 bg-zinc-950 p-1">
-                {(channel.sessionChannels || []).slice(0, 4).map((id: string) => {
-                  const ch = channels.find(c => c.id === id);
-                  return (
-                    <div key={id} className="w-full h-full bg-zinc-900 overflow-hidden">
-                      {ch?.logo ? (
-                        <img src={ch.logo} alt="" className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center"><Tv className="w-4 h-4 text-zinc-800" /></div>
-                      )}
-                    </div>
-                  );
-                })}
-                <div className="absolute inset-0 flex items-center justify-center z-10">
-                  <div className="bg-black/60 backdrop-blur-md p-3 rounded-full border border-white/20">
-                    <Monitor className="w-8 h-8 text-white" />
-                  </div>
-                </div>
-              </div>
-            ) : channel.logo ? (
-              <img 
-                src={channel.logo} 
-                alt={channel.name} 
-                className="w-full h-full object-cover"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=101010&color=fff&size=512`;
-                }}
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-                <Tv className="w-8 h-8 text-zinc-700" />
-              </div>
-            )}
-          </>
-        )}
-
-        {/* EPG Info Overlay */}
-        {currentProgram && (
-          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-[60]">
-            <div className="text-[10px] font-bold text-white truncate mb-1">
-              {currentProgram.title}
-            </div>
-            <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                className="h-full"
-                style={{ backgroundColor: themeColor }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Play Icon Overlay (if no EPG) */}
-        {!currentProgram && (
-          <div className={cn(
-            "absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3 transition-opacity duration-300",
-            isFocused ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"
-          )}>
-            <div className="flex items-center gap-2">
-              <div className="bg-white p-1 rounded-full">
-                <Play className="w-2 h-2 text-black fill-current" />
-              </div>
-              <span className="text-[10px] text-zinc-400 uppercase tracking-tighter">Şimdi İzle</span>
-            </div>
-          </div>
-        )}
-      </motion.div>
-      <div className="mt-1">
-        <p className={cn(
-          "text-xs font-medium truncate transition-all duration-300",
-          orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44",
-          isFocused ? "text-white font-bold translate-y-[-5px]" : "text-zinc-400"
-        )}>
-          {channel.name}
-        </p>
-        {currentProgram && (
-          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
-            {currentProgram.title}
-          </p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const ChannelRow: React.FC<ChannelRowProps> = ({ 
-  title, 
-  channels, 
-  onSelect, 
-  onFocus, 
-  onToggleFavorite, 
-  onDeleteChannel,
-  onLongPress,
-  onToggleMini,
-  favorites = [], 
-  multiSessions = {},
-  canliChannels = [],
-  filmChannels = [],
-  diziChannels = [],
-  rowIndex, 
-  activeRow, 
-  activeCol, 
-  orientation, 
-  previewChannelId, 
-  themeColor,
-  deviceType,
-  isCollapsed,
-  onToggleCollapse,
-  customProxyUrl,
-  uiMode,
-  playbackProgress = {},
-  epgData,
-  now,
-  isGrid = false
-}) => {
-  const listRef = useRef<any>(null);
-  const rowRef = useRef<HTMLDivElement>(null);
-  const listContainerRef = useRef<HTMLDivElement>(null);
-  const containerWidth = useContainerWidth(listContainerRef);
-  const isActiveRow = rowIndex === activeRow;
-  const isHeaderFocused = isActiveRow && activeCol === -1;
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
-  const [pressingId, setPressingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isActiveRow && rowRef.current) {
-      rowRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
-      });
-    }
-  }, [isActiveRow]);
-
-  useEffect(() => {
-    if (isActiveRow && !isCollapsed && listRef.current && activeCol >= 0) {
-      listRef.current.scrollToItem(activeCol, 'center');
-    }
-  }, [isActiveRow, activeCol, isCollapsed]);
-
-  const handlePressStart = (channelId: string) => {
-    if (channelId === 'multi-view-session') return;
-    setPressingId(channelId);
-    longPressTimer.current = setTimeout(() => {
-      onLongPress?.(channelId, title);
-      setPressingId(null);
-    }, 800);
-  };
-
-  const handlePressEnd = () => {
-    setPressingId(null);
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-  };
-
-  const getItemWidth = () => {
-    const isMd = typeof window !== 'undefined' && window.innerWidth >= 768;
-    if (deviceType === 'tv') {
-      return orientation === 'landscape' ? (isMd ? 288 : 192) : (isMd ? 224 : 160);
-    }
-    if (deviceType === 'phone') {
-      return orientation === 'landscape' ? 128 : 96;
-    }
-    return orientation === 'landscape' ? (isMd ? 224 : 160) : (isMd ? 176 : 128);
-  };
-
-  const itemWidth = getItemWidth();
-  const gap = 16;
-  const top10Offset = title === 'Top 10' ? 64 : 0;
-  const itemSize = itemWidth + gap + top10Offset;
-  const listHeight = orientation === 'landscape' ? (itemWidth * 9/16 + 80) : (itemWidth * 3/2 + 80);
-
-  if (isGrid) {
-    return (
-      <div ref={rowRef} className="space-y-6 group/row relative px-4 md:px-12">
-        <div className="flex items-center">
-          <div 
-            style={{ 
-              backgroundColor: themeColor,
-              color: 'white',
-              borderColor: 'white'
-            }}
-            className={cn(
-              "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border",
-              uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
-              uiMode === 'classic' && "rounded-none border-l-4 border-white",
-              uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold"
-            )}
-          >
-            <div className="w-2 h-2 rounded-full mr-3 animate-pulse bg-white" />
-            <span className="mr-3">{title}</span>
-            <span className="ml-2 text-[10px] opacity-50">({channels.length})</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 md:gap-6">
-          {channels.map((channel, idx) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              colIndex={idx}
-              rowIndex={rowIndex}
-              activeRow={activeRow}
-              activeCol={activeCol}
-              previewChannelId={previewChannelId}
-              favorites={favorites}
-              multiSessions={multiSessions}
-              canliChannels={canliChannels}
-              filmChannels={filmChannels}
-              diziChannels={diziChannels}
-              pressingId={pressingId}
-              title={title}
-              themeColor={themeColor}
-              deviceType={deviceType}
-              orientation={orientation}
-              uiMode={uiMode}
-              playbackProgress={playbackProgress}
-              epgData={epgData}
-              now={now}
-              onFocus={onFocus}
-              onSelect={onSelect}
-              onDeleteChannel={onDeleteChannel}
-              onToggleMini={onToggleMini}
-              handlePressStart={handlePressStart}
-              handlePressEnd={handlePressEnd}
-              customProxyUrl={customProxyUrl}
-              channels={channels}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={rowRef} className="space-y-2 group/row relative">
-      <div className="px-4 md:px-12 flex items-center">
-        <div 
-          onClick={onToggleCollapse}
-          onPointerDown={() => onFocus(rowIndex, -1)}
-          style={{ 
-            backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
-            color: 'white',
-            borderColor: isHeaderFocused ? 'white' : 'transparent'
-          }}
-          className={cn(
-            "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
-            uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
-            uiMode === 'classic' && "rounded-none border-l-4 border-white",
-            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
-            isHeaderFocused ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
-          )}
-        >
-          <div className={cn(
-            "w-2 h-2 rounded-full mr-3 animate-pulse",
-            isHeaderFocused ? "bg-white" : "bg-white/20"
-          )} />
-          <span className="mr-3">{title}</span>
-          {!isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          <span className="ml-2 text-[10px] opacity-50">({channels.length})</span>
-        </div>
-      </div>
-      
-      <AnimatePresence>
-        {!isCollapsed && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="relative overflow-hidden"
-          >
-            <div ref={listContainerRef} className="px-4 md:px-12 pt-4 pb-4">
-              <List
-                ref={listRef}
-                height={listHeight}
-                itemCount={channels.length}
-                itemSize={itemSize}
-                layout="horizontal"
-                width={containerWidth || (typeof window !== 'undefined' ? window.innerWidth : 1200)}
-                className="scrollbar-hide"
-                style={{ overflowY: 'hidden' }}
-              >
-                {({ index, style }: { index: number; style: React.CSSProperties }) => (
-                  <ChannelCard
-                    key={channels[index].id}
-                    channel={channels[index]}
-                    colIndex={index}
-                    rowIndex={rowIndex}
-                    activeRow={activeRow}
-                    activeCol={activeCol}
-                    previewChannelId={previewChannelId}
-                    favorites={favorites}
-                    multiSessions={multiSessions}
-                    canliChannels={canliChannels}
-                    filmChannels={filmChannels}
-                    diziChannels={diziChannels}
-                    pressingId={pressingId}
-                    title={title}
-                    themeColor={themeColor}
-                    deviceType={deviceType}
-                    orientation={orientation}
-                    uiMode={uiMode}
-                    playbackProgress={playbackProgress}
-                    epgData={epgData}
-                    now={now}
-                    onFocus={onFocus}
-                    onSelect={onSelect}
-                    onDeleteChannel={onDeleteChannel}
-                    onToggleMini={onToggleMini}
-                    handlePressStart={handlePressStart}
-                    handlePressEnd={handlePressEnd}
-                    customProxyUrl={customProxyUrl}
-                    style={{
-                      ...style,
-                      width: itemWidth + top10Offset,
-                      paddingRight: gap
-                    }}
-                    channels={channels}
-                  />
-                )}
-              </List>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const Logo = ({ uiMode }: { uiMode: UIMode }) => {
-  const [isAltLogo, setIsAltLogo] = useState(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setIsAltLogo(true);
-      setTimeout(() => setIsAltLogo(false), 10000); // Show for 10 seconds
-    }, 60000); // Every minute
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <div className="relative h-10 flex items-center overflow-hidden group">
-      {uiMode === 'modern' && (
-        <div 
-          className="absolute inset-0 blur-xl opacity-30 group-hover:opacity-60 transition-opacity"
-          style={{ backgroundColor: 'var(--theme-color)' }}
-        />
-      )}
-      <AnimatePresence mode="wait">
-        {!isAltLogo ? (
-          <motion.div
-            key="m3uflix"
-            initial={{ opacity: 0, scaleX: 0, letterSpacing: "-0.5em", filter: 'blur(10px)' }}
-            animate={{ opacity: 1, scaleX: 1, letterSpacing: "0em", filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scaleX: 1.2, letterSpacing: "0.2em", filter: 'blur(10px)' }}
-            transition={{ duration: 2, ease: "circOut" }}
-            className="flex items-center gap-2 origin-left"
-          >
-            <Tv style={{ color: 'var(--theme-color)' }} className="w-8 h-8 md:w-10 md:h-10 fill-current" />
-            <span style={{ color: 'var(--theme-color)' }} className="font-black text-2xl md:text-3xl tracking-tighter uppercase italic">M3UFLIX</span>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="mooncrown"
-            initial={{ opacity: 0, scaleX: 0, letterSpacing: "-0.5em", filter: 'blur(10px)' }}
-            animate={{ opacity: 1, scaleX: 1, letterSpacing: "0em", filter: 'blur(0px)' }}
-            exit={{ opacity: 0, scaleX: 1.2, letterSpacing: "0.2em", filter: 'blur(10px)' }}
-            transition={{ duration: 2, ease: "circOut" }}
-            className={cn(
-              "flex items-center gap-2 origin-left",
-              uiMode === 'minimalist' && "gap-1"
-            )}
-          >
-            {uiMode !== 'minimalist' && <Tv className="text-yellow-400 w-8 h-8 md:w-10 md:h-10 fill-current" />}
-            <span className={cn(
-              "font-black text-2xl md:text-3xl tracking-tighter uppercase italic flex",
-              uiMode === 'minimalist' && "not-italic tracking-normal font-bold"
-            )}>
-              <span className="text-yellow-400">MoOnCrOwN</span>
-              <span style={{ color: 'var(--theme-color)' }}>3FLİX</span>
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const WeatherWidget = ({ city, themeColor }: { city: string, themeColor: string }) => {
-  const [weather, setWeather] = useState<{ temp: number, code: number, isDay: number } | null>(null);
-
-  useEffect(() => {
-    const fetchWeather = async () => {
-      try {
-        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
-        const geoData = await geoRes.json();
-        if (geoData.results && geoData.results.length > 0) {
-          const { latitude, longitude } = geoData.results[0];
-          const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
-          const weatherData = await weatherRes.json();
-          setWeather({
-            temp: Math.round(weatherData.current_weather.temperature),
-            code: weatherData.current_weather.weathercode,
-            isDay: weatherData.current_weather.is_day
-          });
-        }
-      } catch (err) {
-        console.error('Weather fetch failed:', err);
-      }
-    };
-
-    fetchWeather();
-    const interval = setInterval(fetchWeather, 1800000);
-    return () => clearInterval(interval);
-  }, [city]);
-
-  const getEmoji = (code: number, isDay: number) => {
-    const isNight = isDay === 0;
-    
-    if (isNight) {
-      // Gece için en estetik tekli emojiler
-      if (code === 0) return '🌙'; // Açık Gece
-      if (code >= 1 && code <= 3) return '☁️'; // Bulutlu Gece
-      if (code >= 45 && code <= 48) return '🌫️'; // Sisli
-      if (code >= 51 && code <= 67) return '🌧️'; // Yağmurlu
-      if (code >= 71 && code <= 77) return '🌨️'; // Karlı
-      if (code >= 80 && code <= 82) return '🌧️'; // Sağanak
-      if (code >= 95 && code <= 99) return '⛈️'; // Fırtına
-      return '🌙';
-    } else {
-      // Gündüz için güneşli/entegre emojiler
-      if (code === 0) return '☀️'; // Açık
-      if (code >= 1 && code <= 3) return '🌤️'; // Az Bulutlu
-      if (code >= 45 && code <= 48) return '🌫️'; // Sisli
-      if (code >= 51 && code <= 67) return '🌦️'; // Yağmurlu
-      if (code >= 71 && code <= 77) return '🌨️'; // Karlı
-      if (code >= 80 && code <= 82) return '🌦️'; // Sağanak
-      if (code >= 95 && code <= 99) return '⛈️'; // Fırtına
-      return '☀️';
-    }
-  };
-
-  if (!weather) return null;
-
-  return (
-    <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md mr-4">
-      <span className="text-xl">{getEmoji(weather.code, weather.isDay)}</span>
-      <div className="flex flex-col leading-none">
-        <span style={{ color: themeColor }} className="text-sm font-black italic">{weather.temp}°C</span>
-        <span className="text-[8px] font-bold text-zinc-400 uppercase tracking-wider">{city}</span>
-      </div>
-    </div>
-  );
-};
-
-const DigitalClock = ({ themeColor }: { themeColor: string }) => {
-  const [time, setTime] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('tr-TR', { hour12: false });
-  };
-
-  const formatDate = (date: Date) => {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}.${month}.${year}`;
-  };
-
-  const getDayName = (date: Date) => {
-    return date.toLocaleDateString('tr-TR', { weekday: 'long' });
-  };
-
-  return (
-    <div className="hidden sm:flex flex-col items-end justify-center leading-none mr-2 select-none">
-      <div 
-        style={{ color: themeColor }}
-        className="text-2xl font-black italic tracking-tighter drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] animate-pulse"
-      >
-        {formatTime(time)}
-      </div>
-      <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-[0.2em] mt-0.5 opacity-80">
-        {formatDate(time)}
-      </div>
-      <div className="text-[10px] font-black text-white uppercase tracking-widest mt-1 drop-shadow-lg">
-        {getDayName(time)}
-      </div>
-    </div>
-  );
-};
+import { BentoDashboard } from './components/Layout/BentoDashboard';
+import { Playlist, UIMode } from './types';
+import { cn, useContainerWidth } from './lib/utils';
+import { ChannelRow } from './components/Channel/ChannelRow';
+import { Logo } from './components/Layout/Logo';
+import { WeatherWidget } from './components/Layout/WeatherWidget';
+import { DigitalClock } from './components/Layout/DigitalClock';
 
 const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
 
@@ -901,7 +88,7 @@ export default function App() {
     return DEFAULT_M3U_URL;
   });
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
-  const [uiMode, setUiMode] = useState<UIMode>(() => (localStorage.getItem('ui_mode') as UIMode) || 'modern');
+  const [uiMode, setUiMode] = useState<UIMode>(() => (localStorage.getItem('ui_mode') as UIMode) || 'bento');
   const [mixColor1, setMixColor1] = useState<string>(() => localStorage.getItem('mix_color_1') || '#dc2626');
   const [mixColor2, setMixColor2] = useState<string>(() => localStorage.getItem('mix_color_2') || '#2563eb');
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -994,7 +181,15 @@ export default function App() {
     const saved = localStorage.getItem('recently_watched');
     return saved ? JSON.parse(saved) : [];
   });
-  const [visibleCategories, setVisibleCategories] = useState<string[]>(['Multi Kanal', 'Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar']);
+  const [visibleCategories, setVisibleCategories] = useState<string[]>(() => {
+    const saved = localStorage.getItem('visible_categories');
+    return saved ? JSON.parse(saved) : ['Top 10'];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('visible_categories', JSON.stringify(visibleCategories));
+  }, [visibleCategories]);
+
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
   const [brokenChannelIds, setBrokenChannelIds] = useState<Set<string>>(new Set());
   const [hasCheckedLinks, setHasCheckedLinks] = useState(() => {
@@ -1053,6 +248,38 @@ export default function App() {
   const [showEPGGrid, setShowEPGGrid] = useState(false);
   const [isMiniPlayer, setIsMiniPlayer] = useState(false);
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
+  const [activeTab, setActiveTab] = useState('Tümü');
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+
+  const checkScroll = () => {
+    // Placeholder for scroll check logic
+  };
+
+  const selectCategory = (category: string) => {
+    const categoryMap: Record<string, string> = {
+      'top10': 'Top 10',
+      'recent': 'İzlemeye Devam Et',
+      'favorites': 'Favorilerim',
+      'live': 'Canlı',
+      'movies': 'Film',
+      'series': 'Dizi'
+    };
+    
+    const targetTab = categoryMap[category] || category;
+    
+    if (visibleCategories.includes(targetTab) || targetTab === 'Tümü') {
+      setActiveTab(targetTab);
+      setActiveRow(0);
+      setActiveCol(0);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setVisibleCategories(prev => 
+        prev.includes(targetTab) 
+          ? prev.filter(c => c !== targetTab) 
+          : [...prev, targetTab]
+      );
+    }
+  };
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
   const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
@@ -1061,6 +288,21 @@ export default function App() {
   const [multiSessionMenuOpen, setMultiSessionMenuOpen] = useState(false);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll settings content
+  useEffect(() => {
+    if (showSettings && settingsArea === 'content') {
+      const focused = document.querySelector('.settings-focused');
+      if (focused && settingsContentRef.current) {
+        focused.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    } else if (showSettings && settingsArea === 'sections') {
+      const activeSection = document.querySelector('[data-section-active="true"]');
+      if (activeSection && settingsContentRef.current) {
+        activeSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [settingsFocus, settingsSection, settingsArea, showSettings, activeSettingsTab]);
 
   // Screen size detection for responsive focus and layout
   useEffect(() => {
@@ -1097,16 +339,16 @@ export default function App() {
 
   useEffect(() => {
     if (showSettings && settingsSidebarRef.current) {
-      const activeTabElement = settingsSidebarRef.current.querySelector(`[data-tab-id="${activeSettingsTab}"]`);
-      if (activeTabElement) {
-        activeTabElement.scrollIntoView({
+      const focusedElement = settingsSidebarRef.current.querySelector(`[data-sidebar-focus="${sidebarFocus}"]`);
+      if (focusedElement) {
+        focusedElement.scrollIntoView({
           behavior: 'smooth',
           block: 'center',
           inline: 'center'
         });
       }
     }
-  }, [activeSettingsTab, showSettings]);
+  }, [sidebarFocus, showSettings]);
 
   useEffect(() => {
     if (settingsContentRef.current) {
@@ -1431,6 +673,12 @@ export default function App() {
       addGroup('İzlemeye Devam Et', recentlyWatched.filter(ch => !brokenChannelIds.has(ch.id)));
     }
 
+    // Add Yayın Akışı as a group if it has items and is visible
+    const epgChannels = channels.filter(ch => epgData[ch.id] && epgData[ch.id].length > 0 && !brokenChannelIds.has(ch.id));
+    if (epgChannels.length > 0) {
+      addGroup('Yayın Akışı', epgChannels.slice(0, 50)); // Limit to 50 for performance
+    }
+
     filtered.forEach(channel => {
       if (brokenChannelIds.has(channel.id)) {
         broken.push(channel);
@@ -1482,16 +730,16 @@ export default function App() {
           return visibleCategories.includes(group) || group === 'Çalışmayanlar' || (visibleCategories.includes('Multi Kanal') && group.endsWith(' (Multi)'));
         }
         // Varsayılan olarak özel grupları gizle, M3U gruplarını göster
-        const specialGroups = ['Multi Kanal', 'Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar'];
+        const specialGroups = ['Multi Kanal', 'Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar', 'Yayın Akışı'];
         return !specialGroups.includes(group) && !group.endsWith(' (Multi)');
       })
       .sort((a, b) => {
-        const order = ['Multi Kanal', 'Favorilerim', 'Top 10', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et'];
+        const order = ['İzlemeye Devam Et', 'Top 10', 'Multi Kanal', 'Favorilerim', 'Canlı', 'Film', 'Dizi', 'Yayın Akışı'];
         
         const getOrderIndex = (name: string) => {
           const idx = order.indexOf(name);
           if (idx !== -1) return idx;
-          if (name.endsWith(' (Multi)')) return -1; // Put multi groups at the very top
+          if (name.endsWith(' (Multi)')) return 2; // Multi Kanal is at index 2
           return 100;
         };
         
@@ -1564,7 +812,8 @@ export default function App() {
       recent: 'İzlemeye Devam Et',
       live: 'Canlı',
       movies: 'Film',
-      series: 'Dizi'
+      series: 'Dizi',
+      epg: 'Yayın Akışı'
     };
     const target = labels[category] || category;
     setVisibleCategories(prev => 
@@ -1808,70 +1057,71 @@ export default function App() {
     const hasMovies = getCategoryChannelsCount('movies') > 0;
     const hasSeries = getCategoryChannelsCount('series') > 0;
     const hasTop10 = channels.some(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10);
+    const hasEPG = Object.keys(epgData).length > 0;
 
     return [
       { id: 'search', label: 'Ara', icon: Search, action: () => {
         const searchInput = document.getElementById('hero-search-input');
         if (searchInput) searchInput.focus();
       }, isActive: true },
-      hasTop10 && {
-        id: 'top10',
-        label: 'Top 10',
-        icon: Tv,
-        action: () => selectCategory('top10'),
-        isActive: activeTab === 'Top 10'
-      },
       recentlyWatched.length > 0 && { 
         id: 'recent', 
         label: 'İzlemeye Devam Et', 
         icon: Clock, 
-        action: () => selectCategory('recent'),
-        isActive: activeTab === 'İzlemeye Devam Et'
+        action: () => toggleCategory('recent'),
+        isActive: visibleCategories.includes('İzlemeye Devam Et')
       },
-      favorites.length > 0 && { 
-        id: 'favorites', 
-        label: 'Favorilerim', 
-        icon: Heart, 
-        action: () => selectCategory('favorites'),
-        isActive: activeTab === 'Favorilerim'
-      },
-      hasLive && {
-        id: 'live',
-        label: 'Canlı',
+      hasTop10 && {
+        id: 'top10',
+        label: 'Top 10',
         icon: Tv,
-        action: () => toggleCategory('live'),
-        isActive: isCategoryActive('live')
-      },
-      hasMovies && {
-        id: 'movies',
-        label: 'Film',
-        icon: Play,
-        action: () => toggleCategory('movies'),
-        isActive: isCategoryActive('movies')
-      },
-      hasSeries && {
-        id: 'series',
-        label: 'Dizi',
-        icon: ListIcon,
-        action: () => toggleCategory('series'),
-        isActive: isCategoryActive('series')
+        action: () => toggleCategory('top10'),
+        isActive: visibleCategories.includes('Top 10')
       },
       Object.keys(multiSessions).length > 0 && {
         id: 'multi',
         label: 'Multi Kanal',
         icon: Monitor,
         action: () => toggleCategory('multi'),
-        isActive: isCategoryActive('multi')
+        isActive: visibleCategories.includes('Multi Kanal')
       },
-      {
+      favorites.length > 0 && { 
+        id: 'favorites', 
+        label: 'Favorilerim', 
+        icon: Heart, 
+        action: () => toggleCategory('favorites'),
+        isActive: visibleCategories.includes('Favorilerim')
+      },
+      hasLive && {
+        id: 'live',
+        label: 'Canlı',
+        icon: Tv,
+        action: () => toggleCategory('live'),
+        isActive: visibleCategories.includes('Canlı')
+      },
+      hasMovies && {
+        id: 'movies',
+        label: 'Film',
+        icon: Play,
+        action: () => toggleCategory('movies'),
+        isActive: visibleCategories.includes('Film')
+      },
+      hasSeries && {
+        id: 'series',
+        label: 'Dizi',
+        icon: ListIcon,
+        action: () => toggleCategory('series'),
+        isActive: visibleCategories.includes('Dizi')
+      },
+      hasEPG && {
         id: 'epg',
         label: 'Yayın Akışı',
         icon: Bell,
-        action: () => setShowEPGGrid(true),
-        isActive: false
+        action: () => toggleCategory('epg'),
+        isActive: visibleCategories.includes('Yayın Akışı')
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
-  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab]);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData]);
 
   // EPG Reminders check
   useEffect(() => {
@@ -2047,8 +1297,11 @@ export default function App() {
             } else if (activeRow === 4) {
               setShowSettings(true);
               setNavContext('settings');
+              setSettingsArea('content');
+              setSidebarFocus(0);
+              setActiveSettingsTab(0);
+              setSettingsSection(0);
               setSettingsFocus(0);
-              setActiveSettingsTab(1);
             }
             break;
         }
@@ -2158,13 +1411,15 @@ export default function App() {
                 else if (settingsSection === 1) setSettingsFocus(20);
                 else if (settingsSection === 2) setSettingsFocus(13);
                 else if (settingsSection === 3) setSettingsFocus(15);
+                else if (settingsSection === 4) setSettingsFocus(17);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) setSettingsFocus(0);
                 else if (settingsSection === 1) setSettingsFocus(1);
                 else if (settingsSection === 2) setSettingsFocus(4);
                 else if (settingsSection === 3) setSettingsFocus(6);
                 else if (settingsSection === 4) setSettingsFocus(8);
-                else if (settingsSection === 5) setSettingsFocus(14);
+                else if (settingsSection === 5) setSettingsFocus(20);
+                else if (settingsSection === 6) setSettingsFocus(14);
               } else if (activeSettingsTab === 2) {
                 if (settingsSection === 0) setSettingsFocus(0);
                 else if (settingsSection === 1) setSettingsFocus(1);
@@ -2204,10 +1459,41 @@ export default function App() {
 
           case 'ArrowRight':
             e.preventDefault();
-            if (settingsArea === 'content') {
+            if (settingsArea === 'tabs') {
+              if (sidebarFocus < 3) {
+                setSettingsArea('sections');
+                setSettingsSection(0);
+              }
+            } else if (settingsArea === 'sections') {
+              setSettingsArea('content');
+              // Initialize focus based on section
+              if (activeSettingsTab === 0) {
+                if (settingsSection === 0) setSettingsFocus(0);
+                else if (settingsSection === 1) setSettingsFocus(20);
+                else if (settingsSection === 2) setSettingsFocus(13);
+                else if (settingsSection === 3) setSettingsFocus(15);
+                else if (settingsSection === 4) setSettingsFocus(17);
+              } else if (activeSettingsTab === 1) {
+                if (settingsSection === 0) setSettingsFocus(0);
+                else if (settingsSection === 1) setSettingsFocus(1);
+                else if (settingsSection === 2) setSettingsFocus(4);
+                else if (settingsSection === 3) setSettingsFocus(6);
+                else if (settingsSection === 4) setSettingsFocus(8);
+                else if (settingsSection === 5) setSettingsFocus(20);
+                else if (settingsSection === 6) setSettingsFocus(14);
+              } else if (activeSettingsTab === 2) {
+                if (settingsSection === 0) setSettingsFocus(0);
+                else if (settingsSection === 1) setSettingsFocus(1);
+                else if (settingsSection === 2) setSettingsFocus(2);
+                else if (settingsSection === 3) setSettingsFocus(3);
+                else if (settingsSection === 4) setSettingsFocus(11);
+                else if (settingsSection === 5) setSettingsFocus(15);
+                else if (settingsSection === 6) setSettingsFocus(16);
+              }
+            } else if (settingsArea === 'content') {
               if (activeSettingsTab === 0) {
                 if (settingsSection === 0 && settingsFocus < 12) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 1 && settingsFocus < 22) setSettingsFocus(prev => prev + 1);
+                else if (settingsSection === 1 && settingsFocus < 23) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
                 else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
               } else if (activeSettingsTab === 1) {
@@ -2229,24 +1515,11 @@ export default function App() {
           case 'ArrowLeft':
             e.preventDefault();
             if (settingsArea === 'content') {
-              if (activeSettingsTab === 0) {
-                if (settingsSection === 0 && settingsFocus > 0) setSettingsFocus(prev => prev - 1);
-                else if (settingsSection === 1 && settingsFocus > 20) setSettingsFocus(prev => prev - 1);
-                else if (settingsSection === 2 && settingsFocus === 14) setSettingsFocus(13);
-                else if (settingsSection === 3 && settingsFocus === 16) setSettingsFocus(15);
-              } else if (activeSettingsTab === 1) {
-                if (settingsSection === 1 && settingsFocus === 2) setSettingsFocus(1);
-                else if (settingsSection === 2 && settingsFocus === 5) setSettingsFocus(4);
-                else if (settingsSection === 3 && settingsFocus === 7) setSettingsFocus(6);
-                else if (settingsSection === 4 && settingsFocus > 8) setSettingsFocus(prev => prev - 1);
-                else if (settingsSection === 5) {
-                  if (settingsFocus === 21) setSettingsFocus(20);
-                  else if (settingsFocus >= 30 && settingsFocus % 2 !== 0) setSettingsFocus(prev => prev - 1);
-                }
-              } else if (activeSettingsTab === 2) {
-                if (settingsSection === 3 && settingsFocus > 3) setSettingsFocus(prev => prev - 1);
-                else if (settingsSection === 4 && settingsFocus > 11) setSettingsFocus(prev => prev - 1);
-              }
+              setSettingsArea('sections');
+            } else if (settingsArea === 'sections') {
+              setSettingsArea('tabs');
+            } else if (settingsArea === 'tabs') {
+              // Stay in tabs
             }
             break;
 
@@ -2257,7 +1530,7 @@ export default function App() {
               setSidebarFocus(nextFocus);
               if (nextFocus < 3) setActiveSettingsTab(nextFocus);
             } else if (settingsArea === 'sections') {
-              const maxSections = activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6;
+              const maxSections = activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6;
               setSettingsSection(prev => (prev + 1) % (maxSections + 1));
             } else if (settingsArea === 'content') {
               if (activeSettingsTab === 0) {
@@ -2265,7 +1538,8 @@ export default function App() {
                   if (settingsFocus <= 8) setSettingsFocus(prev => prev + 4);
                   else if (settingsFocus < 12) setSettingsFocus(12);
                 } else if (settingsSection === 1) {
-                  // No vertical movement in UI Mode row
+                  if (settingsFocus <= 20) setSettingsFocus(prev => prev + 3);
+                  else if (settingsFocus < 23) setSettingsFocus(23);
                 } else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
                 else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
               } else if (activeSettingsTab === 1) {
@@ -2290,7 +1564,7 @@ export default function App() {
               setSidebarFocus(nextFocus);
               if (nextFocus < 3) setActiveSettingsTab(nextFocus);
             } else if (settingsArea === 'sections') {
-              const maxSections = activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6;
+              const maxSections = activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6;
               setSettingsSection(prev => (prev - 1 + (maxSections + 1)) % (maxSections + 1));
             } else if (settingsArea === 'content') {
               if (activeSettingsTab === 0) {
@@ -2298,7 +1572,7 @@ export default function App() {
                   if (settingsFocus >= 4 && settingsFocus <= 11) setSettingsFocus(prev => prev - 4);
                   else if (settingsFocus === 12) setSettingsFocus(8);
                 } else if (settingsSection === 1) {
-                  // No vertical movement in UI Mode row
+                  if (settingsFocus >= 23) setSettingsFocus(prev => prev - 3);
                 } else if (settingsSection === 2 && settingsFocus === 14) setSettingsFocus(13);
                 else if (settingsSection === 3 && settingsFocus === 16) setSettingsFocus(15);
               } else if (activeSettingsTab === 1) {
@@ -2453,6 +1727,10 @@ export default function App() {
             if (activeRow === -4) {
               setShowSettings(true);
               setNavContext('settings');
+              setSettingsArea('content');
+              setSidebarFocus(0);
+              setActiveSettingsTab(0);
+              setSettingsSection(0);
               setSettingsFocus(0);
             } else if (activeRow === -3) {
               const button = primaryHeroButtons[activeCol];
@@ -2855,8 +2133,12 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-4 md:gap-6">
-          <WeatherWidget city={weatherCity} themeColor={themeColor} />
-          <DigitalClock themeColor={themeColor} />
+          <div className="hidden md:block">
+            <WeatherWidget city={weatherCity} themeColor={themeColor} />
+          </div>
+          <div className="hidden sm:block">
+            <DigitalClock themeColor={themeColor} />
+          </div>
           {isCheckingLinks && (
             <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
               <div className="w-3 h-3 border-2 border-white/10 border-t-white rounded-full animate-spin" style={{ borderTopColor: themeColor }} />
@@ -2868,6 +2150,10 @@ export default function App() {
               onClick={() => {
                 setShowSettings(true);
                 setNavContext('settings');
+                setSettingsArea('content');
+                setSidebarFocus(0);
+                setActiveSettingsTab(0);
+                setSettingsSection(0);
                 setSettingsFocus(0);
               }}
               onPointerDown={() => {
@@ -2906,6 +2192,15 @@ export default function App() {
               <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin" style={{ borderTopColor: themeColor }} />
               <p className="text-zinc-500 font-medium animate-pulse">Kanallar Yükleniyor...</p>
             </div>
+          ) : uiMode === 'bento' && !searchQuery && channels.length > 0 ? (
+            <BentoDashboard 
+              recentlyWatched={recentlyWatched}
+              onSelect={handleChannelSelect}
+              themeColor={themeColor}
+              weatherCity={weatherCity}
+              now={now}
+              channels={channels}
+            />
           ) : channels.length === 0 ? (
             <div className="relative min-h-[80vh] flex flex-col items-center justify-center space-y-8 text-center px-4 py-20">
               <div className="absolute inset-0 z-0 overflow-hidden">
@@ -3189,7 +2484,10 @@ export default function App() {
 
                     {/* Filter Buttons Row */}
                     {!searchQuery && (
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div 
+                        ref={categoryScrollRef}
+                        className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth pb-2"
+                      >
                         {filterHeroButtons.filter(b => b.id !== 'search').map((btn, idx) => {
                           const isFocused = activeRow === -1 && activeCol === idx;
                           
@@ -3549,18 +2847,18 @@ export default function App() {
                   <button
                     key={tab.id}
                     data-tab-id={tab.id}
+                    data-sidebar-focus={tab.id}
                     onClick={() => {
-                      if (settingsArea === 'tabs') {
-                        setActiveSettingsTab(tab.id);
-                        setSidebarFocus(tab.id);
-                        setSettingsArea('content');
-                        setSettingsFocus(0);
-                      }
+                      setActiveSettingsTab(tab.id);
+                      setSidebarFocus(tab.id);
+                      setSettingsArea('content');
+                      setSettingsSection(0);
+                      setSettingsFocus(0);
                     }}
                     onPointerDown={() => {
+                      setActiveSettingsTab(tab.id);
+                      setSidebarFocus(tab.id);
                       if (settingsArea === 'tabs') {
-                        setActiveSettingsTab(tab.id);
-                        setSidebarFocus(tab.id);
                         setSettingsArea('tabs');
                       }
                     }}
@@ -3607,6 +2905,7 @@ export default function App() {
                     </div>
                   )}
                   <button
+                    data-sidebar-focus="3"
                     onClick={() => {
                       setShowSettings(false);
                       setNavContext('browse');
@@ -3649,7 +2948,7 @@ export default function App() {
                 </div>
 
                 <div className={cn(
-                  "flex-1 overflow-y-auto p-6 md:p-10 space-y-10 custom-scrollbar scroll-smooth transition-all duration-500",
+                  "flex-1 overflow-y-auto p-6 md:p-10 space-y-10 no-scrollbar scroll-smooth transition-all duration-500",
                   settingsArea === 'tabs' ? "opacity-30 grayscale-[0.5] scale-[0.98]" : "opacity-100 grayscale-0 scale-100"
                 )} ref={settingsContentRef}>
                   <AnimatePresence mode="wait">
@@ -3664,6 +2963,7 @@ export default function App() {
                       >
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 0 && "bg-white/10 text-white"
@@ -3747,6 +3047,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 1 && "bg-white/10 text-white"
@@ -3760,6 +3061,7 @@ export default function App() {
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           {[
                             { id: 'modern', label: 'Modern', icon: Tv, desc: 'Cam efektli, canlı ve hareketli' },
+                            { id: 'bento', label: 'Bento Grid', icon: Grid, desc: 'Modern dashboard görünümü' },
                             { id: 'classic', label: 'Klasik', icon: ListIcon, desc: 'Geleneksel, sade ve hızlı' },
                             { id: 'minimalist', label: 'Minimalist', icon: Equal, desc: 'Sadece içerik odaklı' }
                           ].map((mode, idx) => (
@@ -3788,6 +3090,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 2 && "bg-white/10 text-white"
@@ -3844,6 +3147,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 3 && "bg-white/10 text-white"
@@ -3901,6 +3205,7 @@ export default function App() {
                     >
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 0 && "bg-white/10 text-white"
@@ -3933,6 +3238,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 1 && "bg-white/10 text-white"
@@ -4026,6 +3332,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 2 && "bg-white/10 text-white"
@@ -4071,6 +3378,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 3 && "bg-white/10 text-white"
@@ -4143,6 +3451,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 4 && "bg-white/10 text-white"
@@ -4187,6 +3496,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 5 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 5 && "bg-white/10 text-white"
@@ -4313,6 +3623,7 @@ export default function App() {
                     >
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 0 && "bg-white/10 text-white"
@@ -4342,6 +3653,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 1 && "bg-white/10 text-white"
@@ -4375,6 +3687,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 2 && "bg-white/10 text-white"
@@ -4419,6 +3732,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 3 && "bg-white/10 text-white"
@@ -4467,6 +3781,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 4 && "bg-white/10 text-white"
@@ -4508,6 +3823,7 @@ export default function App() {
 
                       <section className="space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 5 ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
                             settingsArea === 'sections' && settingsSection === 5 && "bg-white/10 text-white"
@@ -4547,12 +3863,13 @@ export default function App() {
                       {/* Universal Back Button for Mobile/Touch/Remote */}
                       <div className="pt-10 space-y-4">
                         <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6) ? "true" : "false"}
                           className={cn(
                             "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
-                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6) && "bg-white/10 text-white"
+                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6) && "bg-white/10 text-white"
                           )}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6); }}
+                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6); }}
+                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6); }}
                         >
                           Ayarlardan Çık
                         </label>
@@ -4563,12 +3880,12 @@ export default function App() {
                           }}
                           onPointerDown={() => {
                             setSettingsArea('content');
-                            setSettingsSection(activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6);
+                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6);
                             setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16);
                           }}
                           onMouseEnter={() => { 
                             setSettingsArea('content'); 
-                            setSettingsSection(activeSettingsTab === 0 ? 3 : activeSettingsTab === 1 ? 5 : 6);
+                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6);
                             setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16); 
                           }}
                           style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16)) ? themeColor : undefined }}

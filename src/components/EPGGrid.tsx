@@ -17,7 +17,7 @@ interface EPGGridProps {
   onClose: () => void;
   onPlay: (channel: M3UChannel) => void;
   themeColor: string;
-  uiMode: 'modern' | 'classic' | 'minimalist';
+  uiMode: 'modern' | 'classic' | 'minimalist' | 'bento';
   customProxyUrl?: string;
 }
 
