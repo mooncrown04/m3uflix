@@ -9,6 +9,7 @@ export interface Playlist {
 }
 
 export type UIMode = 'modern' | 'classic' | 'minimalist' | 'bento';
+export type LogoStyle = 'default' | 'mooncrown' | 'minimal' | 'neon' | 'retro' | 'glitch';
 
 export interface ChannelRowProps {
   title: string;

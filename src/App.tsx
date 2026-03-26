@@ -13,7 +13,7 @@ import { getDominantColor } from './utils/colorExtractor';
 import { FixedSizeList as List } from 'react-window';
 
 import { BentoDashboard } from './components/Layout/BentoDashboard';
-import { Playlist, UIMode } from './types';
+import { Playlist, UIMode, LogoStyle } from './types';
 import { cn, useContainerWidth } from './lib/utils';
 import { ChannelRow } from './components/Channel/ChannelRow';
 import { Logo } from './components/Layout/Logo';
@@ -35,8 +35,16 @@ const MULTI_CATEGORIES = ['HABER', 'SPOR', 'ULUSAL', 'SİNEMA', 'BELGESEL'];
 
 export default function App() {
   const [playbackProgress, setPlaybackProgress] = useState<Record<string, { currentTime: number; duration: number }>>(() => {
-    const saved = localStorage.getItem('playbackProgress');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem('playbackProgress');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse playbackProgress:', e);
+    }
+    return {};
   });
 
   useEffect(() => {
@@ -55,8 +63,16 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentChannel, setCurrentChannel] = useState<M3UChannel | null>(null);
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
-    const saved = localStorage.getItem('playlists');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('playlists');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse playlists:', e);
+    }
+    return [];
   });
   const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(() => 
     localStorage.getItem('current_playlist_id')
@@ -88,12 +104,27 @@ export default function App() {
     return DEFAULT_M3U_URL;
   });
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
-  const [uiMode, setUiMode] = useState<UIMode>(() => (localStorage.getItem('ui_mode') as UIMode) || 'bento');
+  const [uiMode, setUiMode] = useState<UIMode>(() => {
+    const saved = localStorage.getItem('ui_mode');
+    return (saved as UIMode) || 'modern';
+  });
+  const [logoStyle, setLogoStyle] = useState<LogoStyle>(() => {
+    const saved = localStorage.getItem('logo_style');
+    return (saved as LogoStyle) || 'default';
+  });
   const [mixColor1, setMixColor1] = useState<string>(() => localStorage.getItem('mix_color_1') || '#dc2626');
   const [mixColor2, setMixColor2] = useState<string>(() => localStorage.getItem('mix_color_2') || '#2563eb');
   const [favorites, setFavorites] = useState<string[]>(() => {
-    const saved = localStorage.getItem('favorites');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('favorites');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse favorites:', e);
+    }
+    return [];
   });
 
   useEffect(() => {
@@ -101,13 +132,21 @@ export default function App() {
   }, [favorites]);
 
   const [multiSessions, setMultiSessions] = useState<Record<string, string[]>>(() => {
-    const saved = localStorage.getItem('multi_sessions');
-    if (saved) return JSON.parse(saved);
-    
-    // Migration from old multiChannels
-    const oldMulti = localStorage.getItem('multi_channels');
-    if (oldMulti) {
-      return { 'Multi Kanal': JSON.parse(oldMulti) };
+    try {
+      const saved = localStorage.getItem('multi_sessions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+      
+      // Migration from old multiChannels
+      const oldMulti = localStorage.getItem('multi_channels');
+      if (oldMulti) {
+        const parsed = JSON.parse(oldMulti);
+        if (Array.isArray(parsed)) return { 'Multi Kanal': parsed };
+      }
+    } catch (e) {
+      console.error('Failed to parse multi_sessions:', e);
     }
     return {};
   });
@@ -151,16 +190,40 @@ export default function App() {
     });
   };
   const [canliChannels, setCanliChannels] = useState<string[]>(() => {
-    const saved = localStorage.getItem('canli_channels');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('canli_channels');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse canli_channels:', e);
+    }
+    return [];
   });
   const [diziChannels, setDiziChannels] = useState<string[]>(() => {
-    const saved = localStorage.getItem('dizi_channels');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('dizi_channels');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse dizi_channels:', e);
+    }
+    return [];
   });
   const [filmChannels, setFilmChannels] = useState<string[]>(() => {
-    const saved = localStorage.getItem('film_channels');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('film_channels');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse film_channels:', e);
+    }
+    return [];
   });
 
   useEffect(() => {
@@ -178,12 +241,27 @@ export default function App() {
   const [isMultiPlayerOpen, setIsMultiPlayerOpen] = useState(false);
   const [multiPlayerChannels, setMultiPlayerChannels] = useState<M3UChannel[]>([]);
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
-    const saved = localStorage.getItem('recently_watched');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('recently_watched');
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('Failed to parse recently_watched:', e);
+      return [];
+    }
   });
   const [visibleCategories, setVisibleCategories] = useState<string[]>(() => {
-    const saved = localStorage.getItem('visible_categories');
-    return saved ? JSON.parse(saved) : ['Top 10'];
+    try {
+      const saved = localStorage.getItem('visible_categories');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse visible_categories:', e);
+    }
+    return ['Top 10'];
   });
 
   useEffect(() => {
@@ -221,8 +299,16 @@ export default function App() {
     localStorage.getItem('profile_pic') || PROFILE_PICS[0]
   );
   const [customOrders, setCustomOrders] = useState<Record<string, string[]>>(() => {
-    const saved = localStorage.getItem('custom_orders');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem('custom_orders');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to parse custom_orders:', e);
+    }
+    return {};
   });
 
   useEffect(() => {
@@ -364,6 +450,10 @@ export default function App() {
     localStorage.setItem('ui_mode', uiMode);
   }, [uiMode]);
 
+  useEffect(() => {
+    localStorage.setItem('logo_style', logoStyle);
+  }, [logoStyle]);
+
   // Dynamic Theme Logic for Modern Mode
   useEffect(() => {
     if (uiMode !== 'modern') return;
@@ -404,10 +494,7 @@ export default function App() {
 
   const uiClasses = useMemo(() => ({
     container: cn(
-      "min-h-screen text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-1000 relative",
-      uiMode === 'modern' && "bg-[#0a0a0a]",
-      uiMode === 'classic' && "bg-[#0a0a0a]",
-      uiMode === 'minimalist' && "bg-black",
+      "min-h-screen text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-1000 relative bg-[#0a0a0a]",
       deviceType === 'tv' && "text-lg",
       deviceType === 'phone' && "text-sm"
     ),
@@ -674,7 +761,7 @@ export default function App() {
     }
 
     // Add Yayın Akışı as a group if it has items and is visible
-    const epgChannels = channels.filter(ch => epgData[ch.id] && epgData[ch.id].length > 0 && !brokenChannelIds.has(ch.id));
+    const epgChannels = epgData ? channels.filter(ch => epgData[ch.id] && epgData[ch.id].length > 0 && !brokenChannelIds.has(ch.id)) : [];
     if (epgChannels.length > 0) {
       addGroup('Yayın Akışı', epgChannels.slice(0, 50)); // Limit to 50 for performance
     }
@@ -1057,7 +1144,7 @@ export default function App() {
     const hasMovies = getCategoryChannelsCount('movies') > 0;
     const hasSeries = getCategoryChannelsCount('series') > 0;
     const hasTop10 = channels.some(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10);
-    const hasEPG = Object.keys(epgData).length > 0;
+    const hasEPG = epgData && Object.keys(epgData).length > 0;
 
     return [
       { id: 'search', label: 'Ara', icon: Search, action: () => {
@@ -1411,7 +1498,7 @@ export default function App() {
                 else if (settingsSection === 1) setSettingsFocus(20);
                 else if (settingsSection === 2) setSettingsFocus(13);
                 else if (settingsSection === 3) setSettingsFocus(15);
-                else if (settingsSection === 4) setSettingsFocus(17);
+                else if (settingsSection === 4) setSettingsFocus(40);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) setSettingsFocus(0);
                 else if (settingsSection === 1) setSettingsFocus(1);
@@ -1472,7 +1559,7 @@ export default function App() {
                 else if (settingsSection === 1) setSettingsFocus(20);
                 else if (settingsSection === 2) setSettingsFocus(13);
                 else if (settingsSection === 3) setSettingsFocus(15);
-                else if (settingsSection === 4) setSettingsFocus(17);
+                else if (settingsSection === 4) setSettingsFocus(40);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) setSettingsFocus(0);
                 else if (settingsSection === 1) setSettingsFocus(1);
@@ -1496,6 +1583,7 @@ export default function App() {
                 else if (settingsSection === 1 && settingsFocus < 23) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
                 else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
+                else if (settingsSection === 4 && settingsFocus < 45) setSettingsFocus(prev => prev + 1);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1 && settingsFocus === 1) setSettingsFocus(2);
                 else if (settingsSection === 2 && settingsFocus === 4) setSettingsFocus(5);
@@ -1542,6 +1630,7 @@ export default function App() {
                   else if (settingsFocus < 23) setSettingsFocus(23);
                 } else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
                 else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
+                else if (settingsSection === 4 && settingsFocus <= 42) setSettingsFocus(prev => prev + 3);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1 && (settingsFocus === 1 || settingsFocus === 2) && epgData) setSettingsFocus(3);
                 else if (settingsSection === 4 && settingsFocus <= 10) setSettingsFocus(prev => prev + 3);
@@ -1575,6 +1664,7 @@ export default function App() {
                   if (settingsFocus >= 23) setSettingsFocus(prev => prev - 3);
                 } else if (settingsSection === 2 && settingsFocus === 14) setSettingsFocus(13);
                 else if (settingsSection === 3 && settingsFocus === 16) setSettingsFocus(15);
+                else if (settingsSection === 4 && settingsFocus >= 43) setSettingsFocus(prev => prev - 3);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1 && settingsFocus === 3) setSettingsFocus(1);
                 else if (settingsSection === 4 && settingsFocus >= 11) setSettingsFocus(prev => prev - 3);
@@ -2114,14 +2204,14 @@ export default function App() {
       {/* Navbar */}
       <nav className={cn(
         "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
-        uiMode === 'modern' && (scrolled || channels.length > 0 
+        (uiMode === 'modern' || uiMode === 'bento') && (scrolled || channels.length > 0 
           ? "bg-black/60 backdrop-blur-2xl h-16 border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.1)]" 
           : "bg-gradient-to-b from-black/90 via-black/40 to-transparent h-20 md:h-24"),
         uiMode === 'classic' && (scrolled || channels.length > 0 ? "bg-zinc-950 border-b border-zinc-800 h-16" : "bg-black h-20"),
         uiMode === 'minimalist' && (scrolled || channels.length > 0 ? "bg-black/40 h-16" : "bg-transparent h-20")
       )}>
         <div className="flex items-center gap-8">
-          <Logo uiMode={uiMode} />
+          <Logo uiMode={uiMode} logoStyle={logoStyle} />
           {channels.length > 0 && (
             <div className="hidden lg:flex items-center gap-5 text-sm font-medium text-zinc-300">
               <button className="hover:text-white transition-colors">Ana Sayfa</button>
@@ -3189,6 +3279,48 @@ export default function App() {
                             <div className="w-16 h-24 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
                             <span className="font-bold text-lg">Dikey</span>
                           </button>
+                        </div>
+                      </section>
+
+                      <section className="space-y-4">
+                        <label 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
+                          className={cn(
+                            "text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
+                            settingsArea === 'sections' && settingsSection === 4 && "bg-white/10 text-white"
+                          )}
+                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
+                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
+                        >
+                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                          Logo Stili
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {[
+                            { id: 'default', label: 'Varsayılan', desc: 'Dönüşümlü' },
+                            { id: 'mooncrown', label: 'Mooncrown', desc: 'Sadece Mooncrown' },
+                            { id: 'minimal', label: 'Minimal', desc: 'Sade görünüm' },
+                            { id: 'neon', label: 'Neon', desc: 'Parlak efekt' },
+                            { id: 'retro', label: 'Retro', desc: 'Klasik TV stili' },
+                            { id: 'glitch', label: 'Glitch', desc: 'Dijital bozulma' }
+                          ].map((style, idx) => (
+                            <button
+                              key={style.id}
+                              onClick={() => setLogoStyle(style.id as LogoStyle)}
+                              onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
+                              onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
+                              className={cn(
+                                "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                logoStyle === style.id 
+                                  ? "border-white bg-white/10" 
+                                  : "border-white/5 hover:border-white/20 bg-white/5",
+                                settingsArea === 'content' && settingsFocus === (40 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
+                              )}
+                            >
+                              <div className="font-bold text-sm">{style.label}</div>
+                              <div className="text-[10px] opacity-50">{style.desc}</div>
+                            </button>
+                          ))}
                         </div>
                       </section>
                     </motion.div>
