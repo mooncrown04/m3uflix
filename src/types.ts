@@ -9,12 +9,22 @@ export interface Playlist {
 }
 
 export type UIMode = 'modern' | 'classic' | 'minimalist' | 'bento';
-export type LogoStyle = 'default' | 'mooncrown' | 'minimal' | 'neon' | 'retro' | 'glitch';
+export type SortBy = 'default' | 'name' | 'number' | 'added';
+export type LogoStyle = 'default' | 'mooncrown' | 'mooncrown-gold' | 'mooncrown-silver' | 'mooncrown-neon' | 'mooncrown-glass' | 'mooncrown-fire' | 'minimal' | 'neon' | 'retro' | 'glitch';
+export type Top10Style = 'original' | 'filled' | 'neon' | 'retro' | 'minimal' | 'theme';
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: 'error' | 'success' | 'info';
+}
 
 export interface ChannelRowProps {
   title: string;
+  rowIndex: number;
   channels: M3UChannel[];
   onSelect: (channel: M3UChannel) => void;
+  onDetail?: (channel: M3UChannel) => void;
   onFocus: (row: number, col: number) => void;
   onToggleFavorite: (channelId: string) => void;
   onDeleteChannel: (channelId: string) => void;
@@ -24,7 +34,6 @@ export interface ChannelRowProps {
   canliChannels?: string[];
   filmChannels?: string[];
   diziChannels?: string[];
-  rowIndex: number;
   activeRow: number;
   activeCol: number;
   orientation: 'landscape' | 'portrait';
@@ -40,12 +49,13 @@ export interface ChannelRowProps {
   epgData?: EPGData | null;
   now: Date;
   isGrid?: boolean;
+  top10Style?: Top10Style;
 }
 
 export interface ChannelCardProps {
   channel: M3UChannel;
-  colIndex: number;
   rowIndex: number;
+  colIndex: number;
   activeRow: number;
   activeCol: number;
   previewChannelId: string | null;
@@ -65,6 +75,7 @@ export interface ChannelCardProps {
   now: Date;
   onFocus: (row: number, col: number) => void;
   onSelect: (channel: M3UChannel) => void;
+  onDetail?: (channel: M3UChannel) => void;
   onDeleteChannel: (channelId: string) => void;
   onToggleMini?: (channel: M3UChannel) => void;
   handlePressStart: (channelId: string) => void;
@@ -72,4 +83,5 @@ export interface ChannelCardProps {
   customProxyUrl?: string;
   style?: React.CSSProperties;
   channels: M3UChannel[];
+  top10Style?: Top10Style;
 }

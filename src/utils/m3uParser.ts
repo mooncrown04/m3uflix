@@ -13,6 +13,7 @@ export interface M3UChannel {
   description?: string;
   year?: string;
   language?: string;
+  type?: string;
   isMultiView?: boolean;
   sessionName?: string;
   sessionChannels?: string[];
@@ -29,42 +30,57 @@ export function parseM3U(content: string): M3UParseResult {
   let currentChannelInfo: Partial<M3UChannel> = {};
   let epgUrl: string | undefined;
 
+  // Pre-compile regex for performance
+  const epgRegex = /x-tvg-url="([^"]+)"/;
+  const nameRegex = /,(.*)$/;
+  
+  // Attribute regexes
+  const attrRegexes = {
+    logo: /tvg-logo="([^"]+)"/,
+    group: /group-title="([^"]+)"/,
+    tvgId: /tvg-id="([^"]+)"/,
+    tvgName: /tvg-name="([^"]+)"/,
+    tvgNumber: /tvg-number="([^"]+)"/,
+    channel: /channel="([^"]+)"/,
+    genre: /tvg-genre="([^"]+)"/,
+    actor: /tvg-actor="([^"]+)"/,
+    description: /tvg-description="([^"]+)"/,
+    year: /tvg-year="([^"]+)"/,
+    language: /tvg-langue="([^"]+)"/,
+    type: /type="([^"]+)"/
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
+    if (!line) continue;
 
     if (line.startsWith('#EXTM3U')) {
-      const epgMatch = line.match(/x-tvg-url="([^"]+)"/);
-      if (epgMatch) {
-        epgUrl = epgMatch[1];
-      }
+      const epgMatch = line.match(epgRegex);
+      if (epgMatch) epgUrl = epgMatch[1];
     } else if (line.startsWith('#EXTINF:')) {
-      const nameMatch = line.match(/,(.*)$/);
-      const logoMatch = line.match(/tvg-logo="([^"]+)"/);
-      const groupMatch = line.match(/group-title="([^"]+)"/);
-      const tvgIdMatch = line.match(/tvg-id="([^"]+)"/);
-      const tvgNameMatch = line.match(/tvg-name="([^"]+)"/);
-      const tvgNumberMatch = line.match(/tvg-number="([^"]+)"/);
-      const channelAttrMatch = line.match(/channel="([^"]+)"/);
-      const genreMatch = line.match(/tvg-genre="([^"]+)"/);
-      const actorMatch = line.match(/tvg-actor="([^"]+)"/);
-      const descriptionMatch = line.match(/tvg-description="([^"]+)"/);
-      const yearMatch = line.match(/tvg-year="([^"]+)"/);
-      const languageMatch = line.match(/tvg-langue="([^"]+)"/);
-
+      const nameMatch = line.match(nameRegex);
       currentChannelInfo.name = nameMatch ? nameMatch[1].trim() : 'Unknown Channel';
-      currentChannelInfo.logo = logoMatch ? logoMatch[1] : undefined;
-      currentChannelInfo.group = groupMatch ? groupMatch[1] : 'General';
-      currentChannelInfo.tvgId = tvgIdMatch ? tvgIdMatch[1] : (channelAttrMatch ? channelAttrMatch[1] : undefined);
-      currentChannelInfo.tvgName = tvgNameMatch ? tvgNameMatch[1] : undefined;
-      currentChannelInfo.tvgNumber = tvgNumberMatch ? parseInt(tvgNumberMatch[1], 10) : undefined;
-      currentChannelInfo.channel = channelAttrMatch ? channelAttrMatch[1] : undefined;
-      currentChannelInfo.genre = genreMatch ? genreMatch[1] : undefined;
-      currentChannelInfo.actor = actorMatch ? actorMatch[1] : undefined;
-      currentChannelInfo.description = descriptionMatch ? descriptionMatch[1] : undefined;
-      currentChannelInfo.year = yearMatch ? yearMatch[1] : undefined;
-      currentChannelInfo.language = languageMatch ? languageMatch[1] : undefined;
+      
+      // Only run attribute regexes if the line contains them to save time
+      if (line.includes('="')) {
+        currentChannelInfo.logo = line.match(attrRegexes.logo)?.[1];
+        currentChannelInfo.group = line.match(attrRegexes.group)?.[1] || 'General';
+        currentChannelInfo.tvgId = line.match(attrRegexes.tvgId)?.[1] || line.match(attrRegexes.channel)?.[1];
+        currentChannelInfo.tvgName = line.match(attrRegexes.tvgName)?.[1];
+        const numMatch = line.match(attrRegexes.tvgNumber)?.[1];
+        currentChannelInfo.tvgNumber = numMatch ? parseInt(numMatch, 10) : undefined;
+        currentChannelInfo.channel = line.match(attrRegexes.channel)?.[1];
+        currentChannelInfo.genre = line.match(attrRegexes.genre)?.[1];
+        currentChannelInfo.actor = line.match(attrRegexes.actor)?.[1];
+        currentChannelInfo.description = line.match(attrRegexes.description)?.[1];
+        currentChannelInfo.year = line.match(attrRegexes.year)?.[1];
+        currentChannelInfo.language = line.match(attrRegexes.language)?.[1];
+        currentChannelInfo.type = line.match(attrRegexes.type)?.[1];
+      } else {
+        currentChannelInfo.group = 'General';
+      }
     } else if (line.startsWith('http')) {
-      const url = line.trim();
+      const url = line;
       const name = currentChannelInfo.name || 'Unknown Channel';
       const group = currentChannelInfo.group || 'General';
       const key = `${name}_${group}`;
@@ -75,8 +91,11 @@ export function parseM3U(content: string): M3UParseResult {
           existingChannel.urls.push(url);
         }
       } else {
+        // Use a simpler ID generation for performance if possible, or keep it consistent
+        const id = Math.random().toString(36).substr(2, 9); // Faster than btoa(encodeURIComponent)
+        
         channelMap.set(key, {
-          id: btoa(encodeURIComponent(`${name}_${group}`).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16)))).replace(/[/+=]/g, '').substr(0, 12),
+          id,
           name,
           logo: currentChannelInfo.logo,
           group,
@@ -89,6 +108,7 @@ export function parseM3U(content: string): M3UParseResult {
           description: currentChannelInfo.description,
           year: currentChannelInfo.year,
           language: currentChannelInfo.language,
+          type: currentChannelInfo.type,
           urls: [url]
         });
       }

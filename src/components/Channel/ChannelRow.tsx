@@ -6,10 +6,12 @@ import { ChannelCard } from './ChannelCard';
 import { cn, useContainerWidth } from '../../lib/utils';
 import { ChannelRowProps } from '../../types';
 
-export const ChannelRow: React.FC<ChannelRowProps> = ({ 
+export const ChannelRow = React.memo<ChannelRowProps>(({ 
   title, 
+  rowIndex,
   channels, 
   onSelect, 
+  onDetail,
   onFocus, 
   onToggleFavorite, 
   onDeleteChannel,
@@ -20,7 +22,6 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
   canliChannels = [],
   filmChannels = [],
   diziChannels = [],
-  rowIndex, 
   activeRow, 
   activeCol, 
   orientation, 
@@ -34,13 +35,14 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
   playbackProgress = {},
   epgData,
   now,
-  isGrid = false
+  isGrid = false,
+  top10Style
 }) => {
   const listRef = useRef<any>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const containerWidth = useContainerWidth(listContainerRef);
-  const isActiveRow = rowIndex === activeRow;
+  const isActiveRow = activeRow === rowIndex;
   const isHeaderFocused = isActiveRow && activeCol === -1;
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [pressingId, setPressingId] = useState<string | null>(null);
@@ -96,7 +98,11 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
 
   if (isGrid) {
     return (
-      <div ref={rowRef} className="space-y-6 group/row relative px-4 md:px-12">
+      <div 
+        ref={rowRef} 
+        data-row-index={rowIndex}
+        className="space-y-6 group/row relative px-4 md:px-12 scroll-mt-[calc(var(--hero-height)+64px)]"
+      >
         <div className="flex items-center">
           <div 
             style={{ 
@@ -143,12 +149,14 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
               now={now}
               onFocus={onFocus}
               onSelect={onSelect}
+              onDetail={onDetail}
               onDeleteChannel={onDeleteChannel}
               onToggleMini={onToggleMini}
               handlePressStart={handlePressStart}
               handlePressEnd={handlePressEnd}
               customProxyUrl={customProxyUrl}
               channels={channels}
+              top10Style={top10Style}
             />
           ))}
         </div>
@@ -157,12 +165,15 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
   }
 
   return (
-    <div ref={rowRef} className="space-y-4 group/row relative">
+    <div 
+      ref={rowRef} 
+      className="space-y-4 group/row relative"
+    >
       <div className="flex items-center px-4 md:px-12">
         <div 
           onClick={onToggleCollapse}
-          onPointerDown={() => onFocus(rowIndex, -1)}
-          onMouseEnter={() => onFocus(rowIndex, -1)}
+          onPointerDown={() => onFocus(0, -1)} // Simplified for revert
+          onMouseEnter={() => onFocus(0, -1)} // Simplified for revert
           style={{ 
             backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
             color: 'white',
@@ -171,18 +182,25 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
           className={cn(
             "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
             uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
-            uiMode === 'classic' && "rounded-none border-l-4 border-white",
-            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
-            isHeaderFocused ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : "opacity-60 hover:opacity-100"
+            uiMode === 'classic' && "rounded-none border-l-[6px] border-zinc-700 bg-zinc-900/50",
+            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.4em] font-bold text-zinc-500",
+            isHeaderFocused ? (uiMode === 'modern' ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : uiMode === 'classic' ? "scale-105 border-white bg-zinc-800 text-white z-10" : "text-white scale-100 ring-0 border-b-2 border-white") : "opacity-60 hover:opacity-100"
           )}
         >
           <div className={cn(
-            "w-2 h-2 rounded-full mr-3 animate-pulse",
-            isHeaderFocused ? "bg-white" : "bg-white/20"
+            "w-2 h-2 rounded-full mr-3",
+            isHeaderFocused ? "bg-white animate-pulse" : "bg-white/20",
+            uiMode === 'minimalist' && "hidden"
           )} />
-          <span className="mr-3">{title}</span>
+          <span className={cn(
+            "mr-3",
+            uiMode === 'minimalist' && isHeaderFocused && "border-b-2 border-white pb-1"
+          )}>{title}</span>
           {!isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          <span className="ml-2 text-[10px] opacity-50">({channels.length})</span>
+          <span className={cn(
+            "ml-2 text-[10px] opacity-50",
+            uiMode === 'minimalist' && "hidden"
+          )}>({channels.length})</span>
         </div>
       </div>
       
@@ -231,6 +249,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
                     now={now}
                     onFocus={onFocus}
                     onSelect={onSelect}
+                    onDetail={onDetail}
                     onDeleteChannel={onDeleteChannel}
                     onToggleMini={onToggleMini}
                     handlePressStart={handlePressStart}
@@ -238,6 +257,7 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
                     customProxyUrl={customProxyUrl}
                     style={style}
                     channels={channels}
+                    top10Style={top10Style}
                   />
                 )}
               </List>
@@ -247,4 +267,4 @@ export const ChannelRow: React.FC<ChannelRowProps> = ({
       </AnimatePresence>
     </div>
   );
-};
+});

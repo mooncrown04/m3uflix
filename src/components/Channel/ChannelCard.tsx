@@ -5,10 +5,10 @@ import { PreviewPlayer } from '../PreviewPlayer';
 import { cn } from '../../lib/utils';
 import { ChannelCardProps } from '../../types';
 
-export const ChannelCard: React.FC<ChannelCardProps> = ({
+export const ChannelCard = React.memo<ChannelCardProps>(({
   channel,
-  colIndex,
   rowIndex,
+  colIndex,
   activeRow,
   activeCol,
   previewChannelId,
@@ -28,15 +28,17 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   now,
   onFocus,
   onSelect,
+  onDetail,
   onDeleteChannel,
   onToggleMini,
   handlePressStart,
   handlePressEnd,
   customProxyUrl,
   style,
-  channels
+  channels,
+  top10Style = 'original'
 }) => {
-  const isFocused = rowIndex === activeRow && colIndex === activeCol;
+  const isFocused = activeRow === rowIndex && colIndex === activeCol;
   const isPreviewing = isFocused && previewChannelId === channel.id;
   const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
   const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
@@ -44,6 +46,26 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
   const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
   const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
   const isPressing = pressingId === channel.id;
+
+  const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
+
+  const handleInteraction = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (clickTimer.current) {
+      // Double click detected
+      clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onDetail?.(channel);
+    } else {
+      // First click
+      clickTimer.current = setTimeout(() => {
+        onSelect(channel);
+        clickTimer.current = null;
+      }, 250);
+    }
+  };
 
   // Find current EPG program
   const currentProgram = useMemo(() => {
@@ -94,13 +116,18 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       {title === 'Top 10' && (
         <div className="absolute left-[-24px] bottom-[-10px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
           <span 
+            className={cn(
+              "font-black italic leading-none",
+              top10Style === 'retro' && "font-mono not-italic",
+              top10Style === 'minimal' && "font-light"
+            )}
             style={{ 
-              WebkitTextStroke: '2px rgba(255,255,255,0.2)',
-              color: 'transparent',
+              WebkitTextStroke: top10Style === 'original' ? '2px rgba(255,255,255,0.2)' : (top10Style === 'minimal' ? '1px rgba(255,255,255,0.1)' : 'none'),
+              color: top10Style === 'original' || top10Style === 'minimal' ? 'transparent' : (top10Style === 'theme' ? themeColor : 'white'),
               fontSize: '120px',
-              lineHeight: '1',
-              fontWeight: '900',
-              fontStyle: 'italic'
+              fontWeight: top10Style === 'minimal' ? '100' : '900',
+              textShadow: top10Style === 'neon' ? `0 0 10px ${themeColor}, 0 0 20px ${themeColor}` : (top10Style === 'filled' ? '0 10px 20px rgba(0,0,0,0.5)' : 'none'),
+              opacity: top10Style === 'minimal' ? 0.3 : 1
             }}
           >
             {colIndex + 1}
@@ -110,7 +137,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
       <motion.div
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        onClick={() => onSelect(channel)}
+        onClick={handleInteraction}
         onPointerDown={() => onFocus(rowIndex, colIndex)}
         onMouseDown={() => handlePressStart(channel.id)}
         onMouseUp={handlePressEnd}
@@ -119,21 +146,38 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         onTouchEnd={handlePressEnd}
         onMouseEnter={() => onFocus(rowIndex, colIndex)}
         style={{ 
-          boxShadow: isFocused ? (uiMode === 'modern' ? `0 0 30px ${themeColor}4d` : `0 0 15px ${themeColor}33`) : undefined,
-          borderColor: isFocused ? themeColor : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
+          boxShadow: isFocused 
+            ? (uiMode === 'modern' 
+                ? `0 0 30px ${themeColor}4d` 
+                : uiMode === 'classic'
+                ? `0 0 0 4px ${themeColor}, 0 20px 40px rgba(0,0,0,0.8)`
+                : `0 4px 0 0 ${themeColor}`) 
+            : undefined,
+          borderColor: isFocused 
+            ? (uiMode === 'minimalist' ? 'transparent' : themeColor)
+            : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
         }}
         className={cn(
-          "relative w-full bg-zinc-900 group/card transition-all duration-300 border-4 cursor-pointer overflow-hidden",
-          uiMode === 'modern' && "rounded-2xl border-white/10 bg-white/5 backdrop-blur-xl",
-          uiMode === 'classic' && "rounded-lg border-zinc-800",
-          uiMode === 'minimalist' && "rounded-none border-transparent",
+          "relative w-full transition-all duration-300 border-4 cursor-pointer overflow-hidden",
+          uiMode === 'modern' && "rounded-2xl border-white/10 bg-white/5 backdrop-blur-xl bg-zinc-900",
+          uiMode === 'classic' && "rounded-none border-zinc-800 bg-zinc-950",
+          uiMode === 'minimalist' && "rounded-none border-transparent bg-transparent",
           orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]",
-          isFocused && uiMode === 'modern' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]"
+          isFocused && uiMode === 'modern' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+          isFocused && uiMode === 'classic' && "scale-105 z-40",
+          isFocused && uiMode === 'minimalist' && "scale-100 z-40 opacity-100",
+          !isFocused && uiMode === 'minimalist' && "opacity-60"
         )}
       >
         {isFocused && uiMode === 'modern' && (
           <div 
             className="absolute inset-0 blur-2xl opacity-20 pointer-events-none"
+            style={{ backgroundColor: themeColor }}
+          />
+        )}
+        {isFocused && uiMode === 'minimalist' && (
+          <div 
+            className="absolute inset-0 opacity-10 pointer-events-none"
             style={{ backgroundColor: themeColor }}
           />
         )}
@@ -272,7 +316,7 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
         )}
 
         {/* Play Icon Overlay (if no EPG) */}
-        {!currentProgram && (
+        {!currentProgram && uiMode !== 'minimalist' && (
           <div className={cn(
             "absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3 transition-opacity duration-300",
             isFocused ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"
@@ -285,21 +329,35 @@ export const ChannelCard: React.FC<ChannelCardProps> = ({
             </div>
           </div>
         )}
+        {isFocused && uiMode === 'minimalist' && (
+          <div 
+            className="absolute bottom-0 left-0 right-0 h-1 z-[70]"
+            style={{ backgroundColor: themeColor }}
+          />
+        )}
       </motion.div>
-      <div className="mt-1">
+      <div className={cn(
+        "mt-2 transition-all duration-300",
+        uiMode === 'minimalist' && "mt-0"
+      )}>
         <p className={cn(
           "text-xs font-medium truncate transition-all duration-300",
           orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44",
-          isFocused ? "text-white font-bold translate-y-[-5px]" : "text-zinc-400"
+          isFocused ? "text-white font-bold translate-y-[-2px]" : "text-zinc-400",
+          uiMode === 'minimalist' && isFocused && "text-white tracking-widest uppercase",
+          uiMode === 'classic' && isFocused && "text-white"
         )}>
           {channel.name}
         </p>
         {currentProgram && (
-          <p className="text-[10px] text-zinc-500 truncate mt-0.5">
+          <p className={cn(
+            "text-[10px] text-zinc-500 truncate mt-0.5",
+            uiMode === 'minimalist' && "opacity-60 italic"
+          )}>
             {currentProgram.title}
           </p>
         )}
       </div>
     </div>
   );
-};
+});

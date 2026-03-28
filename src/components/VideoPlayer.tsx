@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
-import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor } from 'lucide-react';
+import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
 import { M3UChannel } from '../utils/m3uParser';
 import { EPGData, EPGProgram } from '../utils/epgParser';
+import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
 
 interface VideoPlayerProps {
   url: string;
@@ -59,6 +60,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [lastActivity, setLastActivity] = useState(Date.now());
+  const [metadata, setMetadata] = useState<MediaMetadata | null>(null);
+  const [loadingMetadata, setLoadingMetadata] = useState(false);
   const seekTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -168,6 +171,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setShowControls(true);
     setIsPlaying(true);
     setIsBuffering(true);
+    setMetadata(null);
+  }, [channel]);
+
+  useEffect(() => {
+    const loadMetadata = async () => {
+      if (channel?.type === 'video') {
+        setLoadingMetadata(true);
+        const data = await fetchMediaMetadata(channel.name, channel.group, channel.type);
+        setMetadata(data);
+        setLoadingMetadata(false);
+      }
+    };
+    loadMetadata();
   }, [channel]);
 
   // All available groups
@@ -993,7 +1009,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="fixed top-1/2 right-8 -translate-y-1/2 z-[100] flex flex-col items-center gap-4 bg-black/40 backdrop-blur-2xl p-4 rounded-full border border-white/10 shadow-2xl pointer-events-auto"
+              className="fixed top-1/2 right-8 -translate-y-1/2 z-[999] flex flex-col items-center gap-4 bg-black/40 backdrop-blur-2xl p-4 rounded-full border border-white/10 shadow-2xl pointer-events-auto"
             >
               <div 
                 className="h-48 w-1.5 bg-white/10 rounded-full relative overflow-hidden cursor-pointer group/vol"
@@ -1212,13 +1228,43 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           <p className="text-white font-bold text-sm">{channel.language}</p>
                         </div>
                       )}
-                      {channel?.description && (
+                      {metadata ? (
+                        <>
+                          {metadata.imdbScore && (
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">IMDb PUANI</p>
+                              <div className="flex items-center gap-2 text-yellow-500 font-black">
+                                <Star className="w-4 h-4 fill-current" />
+                                <span>{metadata.imdbScore}</span>
+                              </div>
+                            </div>
+                          )}
+                          {metadata.director && (
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">YÖNETMEN</p>
+                              <p className="text-white font-bold text-sm">{metadata.director}</p>
+                            </div>
+                          )}
+                          {metadata.cast && metadata.cast.length > 0 && (
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">OYUNCULAR</p>
+                              <p className="text-white font-bold text-sm">{metadata.cast.slice(0, 5).join(', ')}</p>
+                            </div>
+                          )}
+                          {metadata.summary && (
+                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">ÖZET</p>
+                              <p className="text-white font-medium text-xs leading-relaxed opacity-80">{metadata.summary}</p>
+                            </div>
+                          )}
+                        </>
+                      ) : channel?.description && (
                         <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                           <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">AÇIKLAMA</p>
                           <p className="text-white font-medium text-xs leading-relaxed opacity-80">{channel.description}</p>
                         </div>
                       )}
-                      {!channel?.genre && !channel?.actor && !channel?.year && !channel?.language && !channel?.description && (
+                      {!metadata && !channel?.genre && !channel?.actor && !channel?.year && !channel?.language && !channel?.description && (
                         <div className="text-center py-8">
                           <p className="text-zinc-500 italic text-sm">Bu kanal için ek bilgi bulunamadı.</p>
                         </div>
@@ -1552,11 +1598,34 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                                     )}
                                   </div>
                                 </div>
+                              ) : metadata ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 text-yellow-500 font-black text-[9px] uppercase tracking-widest">
+                                    <Star className="w-3 h-3 fill-current" />
+                                    {metadata.imdbScore ? `IMDb: ${metadata.imdbScore}` : 'VİDEO BİLGİSİ'}
+                                    {metadata.year && <span className="text-zinc-500 ml-2">{metadata.year}</span>}
+                                  </div>
+                                  <h3 className="text-2xl font-black text-white tracking-tighter leading-none">
+                                    {metadata.title}
+                                  </h3>
+                                  <div className="flex items-center gap-3 text-zinc-400 font-bold">
+                                    {metadata.genre && (
+                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
+                                        {metadata.genre.join(' • ')}
+                                      </span>
+                                    )}
+                                    {metadata.summary && (
+                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
+                                        {metadata.summary}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               ) : (
                                 <div className="space-y-1">
                                   <div className="text-zinc-500 font-black text-[9px] uppercase tracking-widest">YAYIN BİLGİSİ</div>
                                   <h3 className="text-xl font-black text-white/40 tracking-tighter italic">
-                                    Program bilgisi bulunamadı
+                                    {loadingMetadata ? 'Bilgiler yükleniyor...' : 'Program bilgisi bulunamadı'}
                                   </h3>
                                 </div>
                               )}
