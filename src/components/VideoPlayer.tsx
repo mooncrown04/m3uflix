@@ -22,6 +22,11 @@ interface VideoPlayerProps {
   isMini?: boolean;
   startTime?: number;
   onProgressUpdate?: (seconds: number, duration: number) => void;
+  channelSurfEnabled?: boolean;
+  volume?: number;
+  isMuted?: boolean;
+  onVolumeChange?: (volume: number) => void;
+  onMuteToggle?: (isMuted: boolean) => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -36,7 +41,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   customProxyUrl,
   isMini = false,
   startTime = 0,
-  onProgressUpdate
+  onProgressUpdate,
+  channelSurfEnabled = true,
+  volume: externalVolume,
+  isMuted: externalIsMuted,
+  onVolumeChange,
+  onMuteToggle
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
@@ -57,14 +67,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [seekStep, setSeekStep] = useState(10);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(externalVolume ?? 1);
+  const [isMuted, setIsMuted] = useState(externalIsMuted ?? false);
+
+  useEffect(() => {
+    if (externalVolume !== undefined) setVolume(externalVolume);
+  }, [externalVolume]);
+
+  useEffect(() => {
+    if (externalIsMuted !== undefined) setIsMuted(externalIsMuted);
+  }, [externalIsMuted]);
+
+  const updateVolume = (newVolume: number) => {
+    setVolume(newVolume);
+    if (onVolumeChange) onVolumeChange(newVolume);
+  };
+
+  const updateMute = (newMuted: boolean) => {
+    setIsMuted(newMuted);
+    if (onMuteToggle) onMuteToggle(newMuted);
+  };
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [metadata, setMetadata] = useState<MediaMetadata | null>(null);
   const [loadingMetadata, setLoadingMetadata] = useState(false);
   const seekTimerRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const surfScrollRef = useRef<HTMLDivElement>(null);
 
   const resetControlsTimer = () => {
     if (controlsTimeoutRef.current) {
@@ -99,6 +128,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     
     videoRef.current.currentTime = newTime;
     setPlaybackTime(newTime);
+  };
+
+  const scrollSurf = (direction: 'left' | 'right') => {
+    if (!surfScrollRef.current) return;
+    const scrollAmount = 400;
+    surfScrollRef.current.scrollBy({
+      left: direction === 'left' ? -scrollAmount : scrollAmount,
+      behavior: 'smooth'
+    });
   };
 
   useEffect(() => {
@@ -238,10 +276,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     const y = Math.max(0, Math.min(clientY - rect.top, rect.height));
     const percentage = 1 - (y / rect.height);
-    setVolume(percentage);
-    setIsMuted(false);
+    updateVolume(percentage);
+    updateMute(false);
     setShowControls(true);
-  }, []);
+  }, [updateVolume, updateMute]);
 
   const togglePip = React.useCallback(async () => {
     if (!videoRef.current) return;
@@ -657,7 +695,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           e.preventDefault();
           if (focusIndex === 0) onClose?.();
           else if (focusIndex === 1) onToggleMini?.();
-          else if (focusIndex === 2) setActiveMenu('volume');
+          else if (focusIndex === 2) {
+            setActiveMenu('volume');
+            setFocusIndex(60);
+          }
           else if (focusIndex === 3) setActiveMenu('audio');
           else if (focusIndex === 4) setActiveMenu('subtitle');
           else if (focusIndex === 5) {
@@ -692,8 +733,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             // Only one interactive item in details for now
             setFocusIndex(50);
           } else if (activeMenu === 'volume') {
-            setVolume(prev => Math.min(1, prev + 0.1));
-            setIsMuted(false);
+            updateVolume(Math.min(1, volume + 0.1));
+            updateMute(false);
           }
           break;
         case 'ArrowDown':
@@ -711,7 +752,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           } else if (activeMenu === 'details') {
             setFocusIndex(50);
           } else if (activeMenu === 'volume') {
-            setVolume(prev => Math.max(0, prev - 0.1));
+            updateVolume(Math.max(0, volume - 0.1));
           }
           break;
         case 'ArrowLeft':
@@ -1002,46 +1043,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           )}
         </AnimatePresence>
 
-        {/* Volume Indicator */}
-        <AnimatePresence>
-          {(showControls || isMuted || activeMenu === 'volume') && (
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="fixed top-1/2 right-8 -translate-y-1/2 z-[999] flex flex-col items-center gap-4 bg-black/40 backdrop-blur-2xl p-4 rounded-full border border-white/10 shadow-2xl pointer-events-auto"
-            >
-              <div 
-                className="h-48 w-1.5 bg-white/10 rounded-full relative overflow-hidden cursor-pointer group/vol"
-                onClick={handleVolumeChange}
-                onMouseDown={(e) => {
-                  const move = (moveEvent: MouseEvent) => handleVolumeChange(moveEvent as any);
-                  const up = () => {
-                    window.removeEventListener('mousemove', move);
-                    window.removeEventListener('mouseup', up);
-                  };
-                  window.addEventListener('mousemove', move);
-                  window.addEventListener('mouseup', up);
-                }}
-                onTouchMove={(e) => handleVolumeChange(e)}
-              >
-                <motion.div 
-                  className="absolute bottom-0 left-0 right-0 rounded-full"
-                  style={{ backgroundColor: themeColor }}
-                  initial={false}
-                  animate={{ height: `${isMuted ? 0 : volume * 100}%` }}
-                />
-              </div>
-              <button 
-                onClick={() => setIsMuted(!isMuted)}
-                className="text-white hover:scale-110 transition-transform"
-              >
-                {isMuted || volume === 0 ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Custom Controls Overlay */}
         <AnimatePresence>
           {showControls && !isMini && (
@@ -1169,7 +1170,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
 
               {/* Menus */}
-              <div className="flex justify-end items-end gap-8 mb-4">
+              <div className="flex justify-end items-center gap-8">
                 {activeMenu === 'details' && (
                   <motion.div 
                     initial={{ opacity: 0, y: 20 }}
@@ -1383,38 +1384,42 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     className="bg-zinc-900/90 backdrop-blur-xl border border-white/10 p-6 rounded-2xl w-80 shadow-2xl flex flex-col items-center gap-6"
                   >
                     <h3 className="text-zinc-400 text-xs font-black uppercase tracking-widest px-2">Ses Seviyesi</h3>
-                    <div 
-                      className="h-48 w-12 bg-white/10 rounded-2xl relative overflow-hidden cursor-pointer group/vol-menu"
-                      onClick={handleVolumeChange}
-                      onMouseDown={(e) => {
-                        const move = (moveEvent: MouseEvent) => handleVolumeChange(moveEvent as any);
-                        const up = () => {
-                          window.removeEventListener('mousemove', move);
-                          window.removeEventListener('mouseup', up);
-                        };
-                        window.addEventListener('mousemove', move);
-                        window.addEventListener('mouseup', up);
-                      }}
-                      onTouchMove={(e) => handleVolumeChange(e)}
-                    >
-                      <motion.div 
-                        className="absolute bottom-0 left-0 right-0 rounded-t-xl"
-                        style={{ backgroundColor: themeColor }}
-                        initial={false}
-                        animate={{ height: `${isMuted ? 0 : volume * 100}%` }}
-                      />
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <span className="text-white font-black text-xl drop-shadow-md">
-                          {isMuted ? '0' : Math.round(volume * 100)}
-                        </span>
+                    <div className="flex flex-col items-center gap-2">
+                      <div 
+                        className="h-48 w-12 bg-white/10 rounded-2xl relative overflow-hidden cursor-pointer group/vol-menu"
+                        onClick={handleVolumeChange}
+                        onMouseDown={(e) => {
+                          const move = (moveEvent: MouseEvent) => handleVolumeChange(moveEvent as any);
+                          const up = () => {
+                            window.removeEventListener('mousemove', move);
+                            window.removeEventListener('mouseup', up);
+                          };
+                          window.addEventListener('mousemove', move);
+                          window.addEventListener('mouseup', up);
+                        }}
+                        onTouchMove={(e) => handleVolumeChange(e)}
+                      >
+                        <motion.div 
+                          className="absolute bottom-0 left-0 right-0 rounded-t-xl"
+                          style={{ backgroundColor: themeColor }}
+                          initial={false}
+                          animate={{ height: `${isMuted ? 0 : volume * 100}%` }}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <span className="text-white font-black text-xl drop-shadow-md">
+                            {isMuted ? '0' : Math.round(volume * 100)}
+                          </span>
+                        </div>
                       </div>
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">AYARLAMAK İÇİN ↑ ↓</span>
                     </div>
                     <div className="flex gap-4 w-full">
                       <button
-                        onClick={() => setIsMuted(!isMuted)}
+                        onClick={() => updateMute(!isMuted)}
+                        onPointerDown={() => setFocusIndex(60)}
                         className={cn(
                           "flex-1 p-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2",
-                          isMuted ? "bg-red-500 text-white" : "bg-white/10 text-white hover:bg-white/20"
+                          focusIndex === 60 ? "bg-white text-black scale-105 ring-4 ring-white/30" : (isMuted ? "bg-red-500 text-white" : "bg-white/10 text-white hover:bg-white/20")
                         )}
                       >
                         {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
@@ -1499,6 +1504,88 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </motion.div>
                 )}
               </div>
+              {/* Channel Surf Strip */}
+              <AnimatePresence>
+                {showControls && !isMini && channelSurfEnabled && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 20 }}
+                    className="absolute bottom-64 left-0 right-0 px-8 z-50"
+                  >
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between px-2">
+                        <span className="text-[10px] text-white/40 font-black uppercase tracking-[0.3em] italic">Kanal Sörfü</span>
+                        <span className="text-[10px] text-white/20 font-bold uppercase tracking-widest">{selectedGroup || 'Tümü'}</span>
+                      </div>
+                      <div className="relative group/surf-container">
+                        <div 
+                          ref={surfScrollRef}
+                          className="flex items-center gap-3 overflow-x-auto pt-8 pb-8 scrollbar-hide mask-fade-edges -mt-4"
+                        >
+                          {categoryChannels.map((ch, idx) => (
+                            <button
+                              key={ch.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onChannelSelect) onChannelSelect(ch);
+                              }}
+                              onPointerDown={() => setFocusIndex(100 + idx)}
+                              className={cn(
+                                "flex-none w-48 group/surf transition-all duration-300",
+                                channel?.id === ch.id ? "scale-105" : "opacity-60 hover:opacity-100 hover:scale-105"
+                              )}
+                            >
+                              <div className={cn(
+                                "relative aspect-video rounded-2xl overflow-hidden border-2 transition-all duration-500 shadow-2xl",
+                                channel?.id === ch.id ? "border-white ring-4 ring-white/20" : "border-white/10 group-hover/surf:border-white/40",
+                                focusIndex === 100 + idx && "ring-4 ring-white scale-110 z-10"
+                              )}>
+                                {ch.logo ? (
+                                  <img src={ch.logo} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                ) : (
+                                  <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                                    <Tv className="w-12 h-12 text-zinc-800" />
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                                <div className="absolute bottom-3 left-3 right-3">
+                                  <p className="text-white font-black text-xs truncate tracking-tighter">{ch.name}</p>
+                                  {channel?.id === ch.id && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                                      <span className="text-[8px] text-red-500 font-black uppercase tracking-widest">İZLENİYOR</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Navigation Buttons */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); scrollSurf('left'); }}
+                          className="absolute left-0 top-1/2 -translate-y-1/2 w-14 h-32 bg-gradient-to-r from-black/90 via-black/40 to-transparent flex items-center justify-start pl-2 opacity-0 group-hover/surf-container:opacity-100 active:opacity-100 transition-all duration-500 z-10 rounded-r-3xl backdrop-blur-[2px] hover:scale-x-110 origin-left"
+                        >
+                          <div className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
+                            <ChevronLeft className="w-8 h-8 text-white drop-shadow-2xl" />
+                          </div>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); scrollSurf('right'); }}
+                          className="absolute right-0 top-1/2 -translate-y-1/2 w-14 h-32 bg-gradient-to-l from-black/90 via-black/40 to-transparent flex items-center justify-end pr-2 opacity-0 group-hover/surf-container:opacity-100 active:opacity-100 transition-all duration-500 z-10 rounded-l-3xl backdrop-blur-[2px] hover:scale-x-110 origin-right"
+                        >
+                          <div className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
+                            <ChevronRight className="w-8 h-8 text-white drop-shadow-2xl" />
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* EPG Info Bottom Bar */}
               <div className="mt-auto">
                 <AnimatePresence mode="wait">
@@ -1604,20 +1691,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                                     <Star className="w-3 h-3 fill-current" />
                                     {metadata.imdbScore ? `IMDb: ${metadata.imdbScore}` : 'VİDEO BİLGİSİ'}
                                     {metadata.year && <span className="text-zinc-500 ml-2">{metadata.year}</span>}
+                                    {metadata.director && (
+                                      <span className="text-zinc-500 ml-2 border-l border-white/10 pl-2">
+                                        YÖNETMEN: <span className="text-zinc-400">{metadata.director}</span>
+                                      </span>
+                                    )}
                                   </div>
                                   <h3 className="text-2xl font-black text-white tracking-tighter leading-none">
                                     {metadata.title}
                                   </h3>
-                                  <div className="flex items-center gap-3 text-zinc-400 font-bold">
-                                    {metadata.genre && (
-                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
-                                        {metadata.genre.join(' • ')}
-                                      </span>
-                                    )}
+                                  <div className="flex flex-col gap-1 mt-1">
+                                    <div className="flex items-center gap-3 text-zinc-400 font-bold">
+                                      {metadata.genre && (
+                                        <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
+                                          {metadata.genre.join(' • ')}
+                                        </span>
+                                      )}
+                                      {metadata.cast && metadata.cast.length > 0 && (
+                                        <span className="text-zinc-600 font-medium line-clamp-1 max-w-md text-[10px] border-l border-white/10 pl-3">
+                                          <span className="opacity-50 uppercase mr-1">OYUNCULAR:</span> 
+                                          <span className="text-zinc-400">{metadata.cast.slice(0, 4).join(', ')}</span>
+                                        </span>
+                                      )}
+                                    </div>
                                     {metadata.summary && (
-                                      <span className="text-zinc-500 font-medium line-clamp-1 max-w-md text-xs italic">
+                                      <p className="text-zinc-500 font-medium line-clamp-2 max-w-3xl text-xs italic leading-tight mt-0.5 opacity-80">
                                         {metadata.summary}
-                                      </span>
+                                      </p>
                                     )}
                                   </div>
                                 </div>
@@ -1641,13 +1741,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                               </span>
                             </div>
 
-                            {nextProgram && (
+                            {nextProgram ? (
                               <div className="text-right hidden lg:block bg-white/5 p-3 rounded-xl border border-white/5">
                                 <div className="text-zinc-500 font-black text-[8px] uppercase tracking-widest mb-1">SIRADAKİ</div>
                                 <div className="text-white font-black text-base tracking-tight">{nextProgram.title}</div>
                                 <div className="text-zinc-400 font-bold text-xs flex items-center justify-end gap-1.5">
                                   <Clock className="w-3 h-3" />
                                   {formatTime(nextProgram.start)}
+                                </div>
+                              </div>
+                            ) : metadata && (
+                              <div className="text-right hidden lg:block bg-white/5 p-3 rounded-xl border border-white/5 max-w-[200px]">
+                                <div className="text-zinc-500 font-black text-[8px] uppercase tracking-widest mb-1">YÖNETMEN</div>
+                                <div className="text-white font-black text-sm tracking-tight truncate">{metadata.director || 'Bilinmiyor'}</div>
+                                <div className="mt-2 text-zinc-500 font-black text-[8px] uppercase tracking-widest mb-1">OYUNCULAR</div>
+                                <div className="text-zinc-400 font-bold text-[10px] line-clamp-2 leading-tight">
+                                  {metadata.cast?.slice(0, 3).join(', ')}
                                 </div>
                               </div>
                             )}

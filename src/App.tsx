@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
-import { EPGGrid } from './components/EPGGrid';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
 import { ChannelDetail } from './components/ChannelDetail';
@@ -14,12 +13,13 @@ import { FixedSizeList as List } from 'react-window';
 import { useVoiceControl } from './hooks/useVoiceControl';
 
 import { BentoDashboard } from './components/Layout/BentoDashboard';
-import { Playlist, UIMode, LogoStyle, Top10Style, SortBy, Toast } from './types';
+import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast } from './types';
 import { cn, useContainerWidth } from './lib/utils';
 import { ChannelRow } from './components/Channel/ChannelRow';
 import { Logo } from './components/Layout/Logo';
 import { WeatherWidget } from './components/Layout/WeatherWidget';
 import { DigitalClock } from './components/Layout/DigitalClock';
+import { EPGTimeline } from './components/EPG/EPGTimeline';
 
 const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
 
@@ -84,6 +84,23 @@ export default function App() {
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [newPlaylistUrl, setNewPlaylistUrl] = useState('');
   const [epgData, setEpgData] = useState<EPGData | null>(null);
+  const [globalVolume, setGlobalVolume] = useState(() => {
+    const saved = localStorage.getItem('global_volume');
+    return saved ? parseFloat(saved) : 1;
+  });
+  const [isMuted, setIsMuted] = useState(() => {
+    const saved = localStorage.getItem('is_muted');
+    return saved === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('global_volume', globalVolume.toString());
+  }, [globalVolume]);
+
+  useEffect(() => {
+    localStorage.setItem('is_muted', String(isMuted));
+  }, [isMuted]);
+
   const [isLoading, setIsLoading] = useState(() => {
     const saved = localStorage.getItem('m3u_url');
     const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
@@ -100,6 +117,7 @@ export default function App() {
   }, []);
   const [scrolled, setScrolled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showEPGTimeline, setShowEPGTimeline] = useState(false);
   const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>(() => 
     (localStorage.getItem('poster_orientation') as 'landscape' | 'portrait') || 'landscape'
   );
@@ -120,6 +138,43 @@ export default function App() {
     const saved = localStorage.getItem('logo_style');
     return (saved as LogoStyle) || 'default';
   });
+  const [dynamicThemeEnabled, setDynamicThemeEnabled] = useState(() => 
+    localStorage.getItem('dynamic_theme_enabled') === 'true'
+  );
+  const [voiceControlEnabled, setVoiceControlEnabled] = useState(() => 
+    localStorage.getItem('voice_control_enabled') !== 'false' // Default to true
+  );
+  const [focusEffect, setFocusEffect] = useState<FocusEffect>(() => {
+    const saved = localStorage.getItem('focus_effect');
+    return (saved as FocusEffect) || 'default';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('voice_control_enabled', String(voiceControlEnabled));
+  }, [voiceControlEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('dynamic_theme_enabled', String(dynamicThemeEnabled));
+  }, [dynamicThemeEnabled]);
+
+  useEffect(() => {
+    if (!dynamicThemeEnabled || !currentChannel) return;
+
+    const imageUrl = currentChannel.logo || (currentChannel.type === 'video' ? `https://picsum.photos/seed/${currentChannel.name}/800/1200` : null);
+    if (!imageUrl) return;
+
+    getDominantColor(imageUrl).then(color => {
+      if (color) {
+        setThemeColor(color);
+        localStorage.setItem('theme_color', color);
+      }
+    });
+  }, [currentChannel, dynamicThemeEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('focus_effect', focusEffect);
+  }, [focusEffect]);
+
   const [mixColor1, setMixColor1] = useState<string>(() => localStorage.getItem('mix_color_1') || '#dc2626');
   const [mixColor2, setMixColor2] = useState<string>(() => localStorage.getItem('mix_color_2') || '#2563eb');
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -338,6 +393,15 @@ export default function App() {
     return () => clearInterval(interval);
   }, [channels, epgData, showToast]);
 
+  const [channelSurfEnabled, setChannelSurfEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('channel_surf_enabled');
+    return saved === null ? true : saved === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('channel_surf_enabled', channelSurfEnabled.toString());
+  }, [channelSurfEnabled]);
+
   const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem('auto_preview_enabled');
     return saved === null ? false : saved === 'true';
@@ -418,7 +482,6 @@ export default function App() {
   const [detailFocus, setDetailFocus] = useState(0); // 0: Play, 1: Multi, 2: Close
   const [settingsFocus, setSettingsFocus] = useState(0); 
   const [settingsSection, setSettingsSection] = useState(0);
-  const [showEPGGrid, setShowEPGGrid] = useState(false);
   const [isMiniPlayer, setIsMiniPlayer] = useState(false);
   const [featuredChannel, setFeaturedChannel] = useState<M3UChannel | null>(null);
   const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
@@ -457,16 +520,20 @@ export default function App() {
   }, [visibleCategories]);
 
   const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    '0-0': true, '1-0': true, '2-0': true
-  });
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   const toggleSection = useCallback((tabIndex: number, sectionIndex: number) => {
     const key = `${tabIndex}-${sectionIndex}`;
-    setExpandedSections(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+    setExpandedSections(prev => {
+      const isOpening = !prev[key];
+      if (isOpening) {
+        // Close all others and open this one
+        return { [key]: true };
+      } else {
+        // Just close this one
+        return { ...prev, [key]: false };
+      }
+    });
   }, []);
 
   const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
@@ -517,6 +584,12 @@ export default function App() {
   }, [activeSettingsTab]);
 
   useEffect(() => {
+    if (showSettings) {
+      setExpandedSections({});
+    }
+  }, [showSettings]);
+
+  useEffect(() => {
     if (showSettings && settingsSidebarRef.current) {
       const focusedElement = settingsSidebarRef.current.querySelector(`[data-sidebar-focus="${sidebarFocus}"]`);
       if (focusedElement) {
@@ -529,11 +602,25 @@ export default function App() {
     }
   }, [sidebarFocus, showSettings]);
 
-  useEffect(() => {
-    if (settingsContentRef.current) {
-      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+  const scrollSidebar = (direction: 'left' | 'right') => {
+    if (settingsSidebarRef.current) {
+      const scrollAmount = 200;
+      settingsSidebarRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
     }
-  }, [activeSettingsTab]);
+  };
+
+  const scrollSettingsContent = (direction: 'up' | 'down') => {
+    if (settingsContentRef.current) {
+      const scrollAmount = 300;
+      settingsContentRef.current.scrollBy({
+        top: direction === 'up' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -1172,15 +1259,24 @@ export default function App() {
         }
         break;
       case 'volume-up':
-        // If we had a global volume state, we'd update it here.
-        // For now, we'll just show feedback.
-        console.log('Volume Up');
+        setGlobalVolume(prev => Math.min(1, prev + 0.1));
+        setIsMuted(false);
         break;
       case 'volume-down':
-        console.log('Volume Down');
+        setGlobalVolume(prev => Math.max(0, prev - 0.1));
+        setIsMuted(false);
         break;
       case 'mute':
-        console.log('Mute');
+        setIsMuted(prev => !prev);
+        break;
+      case 'set-volume':
+        if (value) {
+          const vol = parseInt(value);
+          if (!isNaN(vol)) {
+            setGlobalVolume(vol / 100);
+            setIsMuted(false);
+          }
+        }
         break;
       case 'open-settings':
         setShowSettings(true);
@@ -1264,6 +1360,7 @@ export default function App() {
     if (!featuredChannel) return [];
     return [
       { id: 'play', label: 'Oynat', icon: Play, action: () => handleChannelSelect(featuredChannel) },
+      { id: 'guide', label: 'Rehber', icon: Calendar, action: () => setShowEPGTimeline(true) },
       { id: 'details', label: 'Detaylar', icon: Info, action: () => {
         setChannelForDetail(featuredChannel);
         setNavContext('channel-detail');
@@ -1305,6 +1402,13 @@ export default function App() {
         const searchInput = document.getElementById('hero-search-input');
         if (searchInput) searchInput.focus();
       }, isActive: true },
+      voiceControlEnabled && {
+        id: 'voice',
+        label: isListening ? 'Dinliyor...' : 'Sesli Kontrol',
+        icon: isListening ? Mic : MicOff,
+        action: isListening ? stopListening : startListening,
+        isActive: isListening
+      },
       { id: 'sort', label: `Sırala: ${sortBy === 'default' ? 'Varsayılan' : sortBy === 'name' ? 'İsim' : 'Sayı'}`, icon: ArrowUpDown, action: () => {
         const next: Record<SortBy, SortBy> = { 'default': 'name', 'name': 'number', 'number': 'default', 'added': 'default' };
         setSortBy(next[sortBy]);
@@ -1357,13 +1461,6 @@ export default function App() {
         icon: ListIcon,
         action: () => toggleCategory('series'),
         isActive: visibleCategories.includes('Dizi')
-      },
-      hasEPG && {
-        id: 'epg',
-        label: 'Yayın Akışı',
-        icon: Bell,
-        action: () => toggleCategory('epg'),
-        isActive: visibleCategories.includes('Yayın Akışı')
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
   }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy]);
@@ -1407,8 +1504,6 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showEPGGrid) return;
-      
       // Toggle Mini Player with 'M' key
       if (e.key.toLowerCase() === 'm' && currentChannel && navContext !== 'player') {
         e.preventDefault();
@@ -1451,6 +1546,13 @@ export default function App() {
       }
       if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = 'Enter';
 
+      // Toggle EPG Timeline with 'G' key
+      if (key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setShowEPGTimeline(prev => !prev);
+        return;
+      }
+
       // Detect long press for Enter/OK
       if (key === 'Enter' && !isKeyHeld.current) {
         isKeyHeld.current = true;
@@ -1482,6 +1584,7 @@ export default function App() {
           setNavContext('browse');
           return;
         }
+
         if (showSettings) {
           setShowSettings(false);
           setNavContext('browse');
@@ -1746,6 +1849,7 @@ export default function App() {
                   else if (settingsSection === 4) setSettingsFocus(40);
                   else if (settingsSection === 5) setSettingsFocus(50);
                   else if (settingsSection === 6) setSettingsFocus(60);
+                  else if (settingsSection === 7) setSettingsFocus(70);
                 } else if (activeSettingsTab === 1) {
                   if (settingsSection === 0) setSettingsFocus(0);
                   else if (settingsSection === 1) setSettingsFocus(1);
@@ -1773,6 +1877,7 @@ export default function App() {
                 else if (settingsSection === 4 && settingsFocus < 50) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 5 && settingsFocus < 54) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 6 && settingsFocus < 65) setSettingsFocus(prev => prev + 1);
+                else if (settingsSection === 7 && settingsFocus < 74) setSettingsFocus(prev => prev + 1);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1 && settingsFocus === 1) setSettingsFocus(2);
                 else if (settingsSection === 2 && settingsFocus === 4) setSettingsFocus(5);
@@ -1825,7 +1930,7 @@ export default function App() {
                 }
               }
             } else if (settingsArea === 'sections') {
-              const maxSections = activeSettingsTab === 0 ? 6 : activeSettingsTab === 1 ? 6 : 6;
+              const maxSections = activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 6 : 6;
               if (settingsSection === maxSections) {
                 // Stay or cycle? User said "pass to side section"
                 // Maybe they want to cycle back to tabs?
@@ -1858,6 +1963,9 @@ export default function App() {
                   else { setSettingsSection(6); setSettingsFocus(60); }
                 } else if (settingsSection === 6) {
                   if (settingsFocus <= 62) setSettingsFocus(prev => prev + 3);
+                  else { setSettingsSection(7); setSettingsFocus(70); }
+                } else if (settingsSection === 7) {
+                  if (settingsFocus <= 71) setSettingsFocus(prev => prev + 3);
                 }
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) {
@@ -1883,7 +1991,10 @@ export default function App() {
               } else if (activeSettingsTab === 2) {
                 if (settingsSection === 0) { setSettingsSection(1); setSettingsFocus(1); }
                 else if (settingsSection === 1) { setSettingsSection(2); setSettingsFocus(2); }
-                else if (settingsSection === 2) { setSettingsSection(3); setSettingsFocus(3); }
+                else if (settingsSection === 2) {
+                  if (settingsFocus === 2) setSettingsFocus(3);
+                  else { setSettingsSection(3); setSettingsFocus(4); }
+                }
                 else if (settingsSection === 3) {
                   if (settingsFocus <= 6) setSettingsFocus(prev => prev + 4);
                   else { setSettingsSection(4); setSettingsFocus(11); }
@@ -1908,7 +2019,7 @@ export default function App() {
                 // Desktop: move between tabs
                 if (sidebarFocus === 0) {
                   setSettingsArea('sections');
-                  const maxSections = activeSettingsTab === 0 ? 6 : activeSettingsTab === 1 ? 6 : 6;
+                  const maxSections = activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 6 : 6;
                   setSettingsSection(maxSections);
                 } else {
                   const nextFocus = (sidebarFocus - 1 + 4) % 4;
@@ -1951,6 +2062,9 @@ export default function App() {
                 } else if (settingsSection === 6) {
                   if (settingsFocus >= 63) setSettingsFocus(prev => prev - 3);
                   else { setSettingsSection(5); setSettingsFocus(50); }
+                } else if (settingsSection === 7) {
+                  if (settingsFocus >= 73) setSettingsFocus(prev => prev - 3);
+                  else { setSettingsSection(6); setSettingsFocus(60); }
                 }
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1) {
@@ -1976,10 +2090,13 @@ export default function App() {
                 }
               } else if (activeSettingsTab === 2) {
                 if (settingsSection === 1) { setSettingsSection(0); setSettingsFocus(0); }
-                else if (settingsSection === 2) { setSettingsSection(1); setSettingsFocus(1); }
+                else if (settingsSection === 2) {
+                  if (settingsFocus === 3) setSettingsFocus(2);
+                  else { setSettingsSection(1); setSettingsFocus(1); }
+                }
                 else if (settingsSection === 3) {
-                  if (settingsFocus >= 7) setSettingsFocus(prev => prev - 4);
-                  else { setSettingsSection(2); setSettingsFocus(2); }
+                  if (settingsFocus >= 8) setSettingsFocus(prev => prev - 4);
+                  else { setSettingsSection(2); setSettingsFocus(3); }
                 } else if (settingsSection === 4) {
                   if (settingsFocus >= 13) setSettingsFocus(prev => prev - 2);
                   else { setSettingsSection(3); setSettingsFocus(7); }
@@ -2491,27 +2608,57 @@ export default function App() {
           <motion.div 
             animate={{ 
               backgroundColor: themeColor,
-              opacity: [0.05, 0.12, 0.05],
-              scale: [1, 1.2, 1],
-              x: [0, 50, 0],
-              y: [0, 30, 0]
+              opacity: [0.05, 0.15, 0.05],
+              scale: [1, 1.3, 1],
+              x: ['-10%', '10%', '-10%'],
+              y: ['-10%', '5%', '-10%']
             }}
-            transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-            className="absolute -top-[10%] -left-[10%] w-[70%] h-[70%] rounded-full blur-[180px]"
+            transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute top-0 left-0 w-[80%] h-[80%] rounded-full blur-[150px]"
           />
           <motion.div 
             animate={{ 
               backgroundColor: themeColor,
               opacity: [0.03, 0.1, 0.03],
-              scale: [1.2, 1, 1.2],
-              x: [0, -50, 0],
-              y: [0, -30, 0]
+              scale: [1.3, 1, 1.3],
+              x: ['20%', '-10%', '20%'],
+              y: ['10%', '-5%', '10%']
             }}
-            transition={{ duration: 15, repeat: Infinity, ease: "linear", delay: 2 }}
-            className="absolute -bottom-[10%] -right-[10%] w-[60%] h-[60%] rounded-full blur-[180px]"
+            transition={{ duration: 20, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+            className="absolute bottom-0 right-0 w-[70%] h-[70%] rounded-full blur-[180px]"
           />
+          <motion.div 
+            animate={{ 
+              backgroundColor: themeColor,
+              opacity: [0.02, 0.08, 0.02],
+              scale: [1, 1.5, 1],
+              x: ['-20%', '20%', '-20%'],
+              y: ['20%', '-20%', '20%']
+            }}
+            transition={{ duration: 25, repeat: Infinity, ease: "easeInOut", delay: 5 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[60%] h-[60%] rounded-full blur-[200px]"
+          />
+          {/* Subtle Particle Overlay */}
+          <div className="absolute inset-0 opacity-20 mix-blend-overlay pointer-events-none">
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] animate-pulse" />
+          </div>
         </div>
       )}
+      {/* EPG Timeline */}
+      <AnimatePresence>
+        {showEPGTimeline && (
+          <EPGTimeline
+            isOpen={showEPGTimeline}
+            onClose={() => setShowEPGTimeline(false)}
+            epgData={epgData}
+            channels={channels}
+            now={now}
+            onSelectChannel={handleChannelSelect}
+            themeColor={themeColor}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Navbar */}
       <nav className={cn(
         "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
@@ -2552,23 +2699,6 @@ export default function App() {
           )}
           {channels.length > 0 && (
             <div className="flex items-center gap-3 sm:gap-4">
-              <button
-                onClick={isListening ? stopListening : startListening}
-                className={cn(
-                  "w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center transition-all duration-300 relative group",
-                  uiMode === 'modern' && "rounded-2xl bg-white/5 hover:bg-white/10",
-                  uiMode === 'classic' && "rounded-none border-2 border-zinc-800 bg-zinc-900",
-                  uiMode === 'minimalist' && "rounded-none border-0 bg-transparent",
-                  isListening && "text-red-500 animate-pulse bg-red-500/10"
-                )}
-                title="Sesli Komut"
-              >
-                {isListening ? <Mic className="w-5 h-5 sm:w-6 sm:h-6" /> : <MicOff className="w-5 h-5 sm:w-6 sm:h-6 opacity-50" />}
-                {isListening && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-ping" />
-                )}
-              </button>
-
               <button 
                 onClick={() => {
                   setShowSettings(true);
@@ -2762,7 +2892,7 @@ export default function App() {
               {featuredChannel && (
                 <div 
                   className="relative w-full overflow-hidden transition-all duration-700"
-                  style={{ height: searchQuery ? '35vh' : '60vh' }}
+                  style={{ height: searchQuery ? '35vh' : '75vh' }}
                 >
                 <div className="absolute inset-0">
                   <motion.img 
@@ -2785,7 +2915,11 @@ export default function App() {
                   )}
                 </div>
 
-                <div className={cn("absolute left-4 md:left-12 max-w-3xl space-y-4 sm:space-y-6 transition-all duration-500", searchQuery ? "bottom-8" : "bottom-[10%] sm:bottom-[15%]")}>
+                <div className={cn(
+                  "absolute left-4 md:left-12 max-w-3xl space-y-3 sm:space-y-4 transition-all duration-500 z-10", 
+                  searchQuery ? "bottom-8" : "bottom-[5%] sm:bottom-[8%]",
+                  "max-h-[calc(100%-120px)] overflow-hidden flex flex-col justify-end pt-24"
+                )}>
                   {!searchQuery && (
                     <motion.div 
                       initial={{ opacity: 0, y: 20 }}
@@ -2799,8 +2933,8 @@ export default function App() {
                       </div>
                       
                       <h1 className={cn(
-                        "font-black tracking-tighter uppercase italic line-clamp-2",
-                        deviceType === 'tv' ? "text-5xl sm:text-7xl md:text-9xl" : "text-3xl sm:text-5xl md:text-7xl"
+                        "font-black tracking-tighter uppercase italic line-clamp-2 leading-none",
+                        deviceType === 'tv' ? "text-5xl sm:text-7xl md:text-8xl" : "text-2xl sm:text-4xl md:text-6xl"
                       )}>{featuredChannel.name}</h1>
 
                       <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-white/80">
@@ -2917,7 +3051,7 @@ export default function App() {
 
                     {/* Search Row */}
                     <div className="flex items-center gap-2">
-                      {filterHeroButtons.filter(b => b.id === 'search').map((btn, idx) => {
+                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice').map((btn, idx) => {
                         const isFocused = activeRow === -2 && activeCol === idx;
                         
                         return (
@@ -2943,39 +3077,42 @@ export default function App() {
                                 }}
                                 className={cn(
                                   "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
-                                  isFocused && "shadow-2xl ring-4 ring-white/20"
+                                  isFocused && "shadow-2xl ring-4 ring-white/20",
+                                  btn.id === 'voice' && isListening && "animate-pulse"
                                 )}
                               >
-                                <Search className="w-3 h-3" />
+                                <btn.icon className={cn("w-3 h-3", btn.id === 'voice' && isListening && "text-red-500")} />
                                 {btn.label}
                               </button>
-                              <div className="relative flex items-center ml-2">
-                                <input
-                                  id="hero-search-input"
-                                  type="text"
-                                  placeholder="Ara..."
-                                  className={cn(
-                                    "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
-                                    isFocused || searchQuery 
-                                      ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
-                                      : "w-0 opacity-0 border-transparent"
+                              {btn.id === 'search' && (
+                                <div className="relative flex items-center ml-2">
+                                  <input
+                                    id="hero-search-input"
+                                    type="text"
+                                    placeholder="Ara..."
+                                    className={cn(
+                                      "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
+                                      isFocused || searchQuery 
+                                        ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
+                                        : "w-0 opacity-0 border-transparent"
+                                    )}
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    onFocus={() => {
+                                      setActiveRow(-2);
+                                      setActiveCol(idx);
+                                    }}
+                                  />
+                                  {searchQuery && (isFocused || searchQuery) && (
+                                    <button
+                                      onClick={() => setSearchQuery('')}
+                                      className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
                                   )}
-                                  value={searchQuery}
-                                  onChange={(e) => setSearchQuery(e.target.value)}
-                                  onFocus={() => {
-                                    setActiveRow(-2);
-                                    setActiveCol(idx);
-                                  }}
-                                />
-                                {searchQuery && (isFocused || searchQuery) && (
-                                  <button
-                                    onClick={() => setSearchQuery('')}
-                                    className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
-                                  >
-                                    <X className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         );
@@ -2988,7 +3125,7 @@ export default function App() {
                         ref={categoryScrollRef}
                         className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth pb-2"
                       >
-                        {filterHeroButtons.filter(b => b.id !== 'search').map((btn, idx) => {
+                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice').map((btn, idx) => {
                           const isFocused = activeRow === -1 && activeCol === idx;
                           
                           return (
@@ -3085,6 +3222,7 @@ export default function App() {
                   playbackProgress={playbackProgress}
                   epgData={epgData}
                   now={now}
+                  focusEffect={focusEffect}
                 />
               ))}
             </div>
@@ -3092,21 +3230,6 @@ export default function App() {
         )}
       </div>
     </main>
-
-      {/* EPG Grid Overlay */}
-      <AnimatePresence>
-        {showEPGGrid && (
-          <EPGGrid
-            channels={channels}
-            epgData={epgData}
-            onClose={() => setShowEPGGrid(false)}
-            onPlay={handleChannelSelect}
-            themeColor={themeColor}
-            uiMode={uiMode}
-            customProxyUrl={customProxyUrl}
-          />
-        )}
-      </AnimatePresence>
 
       {/* Mini Player (Floating PIP) */}
       <AnimatePresence>
@@ -3131,6 +3254,11 @@ export default function App() {
                 setCurrentChannel(null);
               }}
               isMini={true}
+              channelSurfEnabled={channelSurfEnabled}
+              volume={globalVolume}
+              isMuted={isMuted}
+              onVolumeChange={setGlobalVolume}
+              onMuteToggle={setIsMuted}
             />
             <div className="absolute top-2 right-2 opacity-100 flex gap-2 z-[200]">
               <button
@@ -3358,6 +3486,23 @@ export default function App() {
         )}
       </AnimatePresence>
       <AnimatePresence>
+        {/* Voice Transcript Overlay */}
+        <AnimatePresence>
+          {isListening && voiceTranscript && (
+            <motion.div
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
+            >
+              <div className="bg-black/80 backdrop-blur-xl border border-white/20 px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <p className="text-white font-medium italic">"{voiceTranscript}"</p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {showSettings && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -3386,13 +3531,30 @@ export default function App() {
                 <div className="absolute top-0 left-0 w-full h-2" style={{ backgroundColor: themeColor }} />
               )}
               {/* Sidebar Tabs */}
-              <div 
-                ref={settingsSidebarRef}
-                className="w-full md:w-56 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 p-3 md:p-5 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-y-auto no-scrollbar scroll-smooth"
-              >
-                <div className="hidden md:block mb-6">
-                  <h2 className="text-xl font-black italic tracking-tighter uppercase text-white opacity-50">Ayarlar</h2>
+              <div className="relative flex flex-col md:w-56 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 overflow-hidden">
+                <div className="md:hidden absolute left-0 top-0 bottom-0 z-10 flex items-center bg-gradient-to-r from-black/80 to-transparent pointer-events-none px-1">
+                  <button 
+                    onClick={() => scrollSidebar('left')}
+                    className="p-1 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4 text-white" />
+                  </button>
                 </div>
+                <div className="md:hidden absolute right-0 top-0 bottom-0 z-10 flex items-center bg-gradient-to-l from-black/80 to-transparent pointer-events-none px-1">
+                  <button 
+                    onClick={() => scrollSidebar('right')}
+                    className="p-1 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+                <div 
+                  ref={settingsSidebarRef}
+                  className="w-full h-full px-8 py-3 md:p-5 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-y-auto custom-scrollbar scroll-smooth"
+                >
+                  <div className="hidden md:block mb-6">
+                    <h2 className="text-xl font-black italic tracking-tighter uppercase text-white opacity-50">Ayarlar</h2>
+                  </div>
                 {[
                   { id: 0, label: 'Görünüm', icon: Sun },
                   { id: 1, label: 'Liste', icon: ListIcon },
@@ -3408,6 +3570,7 @@ export default function App() {
                       setSettingsArea('content');
                       setSettingsSection(0);
                       setSettingsFocus(0);
+                      setExpandedSections({});
                     }}
                     onPointerDown={() => {
                       setActiveSettingsTab(tab.id);
@@ -3496,9 +3659,26 @@ export default function App() {
                   </button>
                 </div>
               </div>
+            </div>
 
               {/* Content Area */}
-              <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+                {/* Scroll Buttons for Content Area */}
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2 pointer-events-none">
+                  <button 
+                    onClick={() => scrollSettingsContent('up')}
+                    className="p-2 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors backdrop-blur-md border border-white/10"
+                  >
+                    <ChevronDown className="w-5 h-5 text-white rotate-180" />
+                  </button>
+                  <button 
+                    onClick={() => scrollSettingsContent('down')}
+                    className="p-2 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors backdrop-blur-md border border-white/10"
+                  >
+                    <ChevronDown className="w-5 h-5 text-white" />
+                  </button>
+                </div>
+
                 <div className="md:hidden p-4 border-b border-white/5 flex justify-between items-center">
                   <h2 className="text-xl font-black italic uppercase text-white">
                     {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : 'Genel'}
@@ -3512,7 +3692,7 @@ export default function App() {
                 </div>
 
                 <div className={cn(
-                  "flex-1 overflow-y-auto p-6 md:p-10 pb-[50vh] space-y-10 no-scrollbar scroll-smooth transition-all duration-500",
+                  "flex-1 overflow-y-auto p-6 md:p-10 pb-[50vh] space-y-10 custom-scrollbar scroll-smooth transition-all duration-500",
                   settingsArea === 'tabs' ? "opacity-30 grayscale-[0.5] scale-[0.98]" : "opacity-100 grayscale-0 scale-100"
                 )} ref={settingsContentRef}>
                   <AnimatePresence mode="wait">
@@ -4047,6 +4227,199 @@ export default function App() {
                                     <div className="font-bold text-xs tracking-widest uppercase">{style.label}</div>
                                   </button>
                                 ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+
+                      <section className="space-y-4">
+                        <button 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 7 ? "true" : "false"}
+                          className={cn(
+                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
+                            uiMode === 'modern' && "rounded-xl",
+                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
+                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
+                            settingsArea === 'sections' && settingsSection === 7 
+                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
+                              : "hover:bg-white/5"
+                          )}
+                          onClick={() => toggleSection(0, 7)}
+                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(7); }}
+                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(7); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                            Görsel Odak Efektleri
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-7'] ? "rotate-180" : "rotate-0")} />
+                        </button>
+                        <AnimatePresence>
+                          {expandedSections['0-7'] && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
+                                {[
+                                  { id: 'default', label: 'Varsayılan', desc: 'Sade odak' },
+                                  { id: 'glow', label: 'Parlama', desc: 'Yumuşak ışık' },
+                                  { id: 'pulse', label: 'Nabız', desc: 'Yavaşça büyüme' },
+                                  { id: 'border', label: 'Kenarlık', desc: 'Renkli çerçeve' },
+                                  { id: 'scale', label: 'Büyütme', desc: 'Daha belirgin' }
+                                ].map((effect, idx) => (
+                                  <button
+                                    key={effect.id}
+                                    onClick={() => setFocusEffect(effect.id as FocusEffect)}
+                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
+                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
+                                    className={cn(
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                      uiMode === 'modern' && "rounded-2xl",
+                                      uiMode === 'classic' && "rounded-none",
+                                      uiMode === 'minimalist' && "rounded-none border-0",
+                                      focusEffect === effect.id 
+                                        ? "border-white bg-white/10" 
+                                        : "border-white/5 hover:border-white/20 bg-white/5",
+                                      settingsArea === 'content' && settingsFocus === (70 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
+                                    )}
+                                  >
+                                    <div className="font-bold text-sm">{effect.label}</div>
+                                    <div className="text-[10px] opacity-50">{effect.desc}</div>
+                                  </button>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+
+                      <section className="space-y-4">
+                        <button 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 8 ? "true" : "false"}
+                          className={cn(
+                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
+                            uiMode === 'modern' && "rounded-xl",
+                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
+                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
+                            settingsArea === 'sections' && settingsSection === 8 
+                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
+                              : "hover:bg-white/5"
+                          )}
+                          onClick={() => toggleSection(0, 8)}
+                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(8); }}
+                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(8); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                            Dinamik Tema (Magic Color)
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-8'] ? "rotate-180" : "rotate-0")} />
+                        </button>
+                        <AnimatePresence>
+                          {expandedSections['0-8'] && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2">
+                                <button
+                                  onClick={() => setDynamicThemeEnabled(!dynamicThemeEnabled)}
+                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(8); setSettingsFocus(80); } }}
+                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(8); setSettingsFocus(80); } }}
+                                  className={cn(
+                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
+                                    dynamicThemeEnabled 
+                                      ? "border-white bg-white/10" 
+                                      : "border-white/5 hover:border-white/20 bg-white/5",
+                                    settingsArea === 'content' && settingsFocus === 80 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
+                                  )}
+                                >
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span className="font-bold text-lg">Dinamik Tema</span>
+                                    <span className="text-xs text-zinc-500">Uygulama renkleri içeriğe göre otomatik değişir</span>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full transition-all relative",
+                                    dynamicThemeEnabled ? "bg-green-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      dynamicThemeEnabled ? "left-7" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+
+                      <section className="space-y-4">
+                        <button 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 9 ? "true" : "false"}
+                          className={cn(
+                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
+                            uiMode === 'modern' && "rounded-xl",
+                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
+                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
+                            settingsArea === 'sections' && settingsSection === 9 
+                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
+                              : "hover:bg-white/5"
+                          )}
+                          onClick={() => toggleSection(0, 9)}
+                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(9); }}
+                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(9); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                            Sesli Kontrol
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-9'] ? "rotate-180" : "rotate-0")} />
+                        </button>
+                        <AnimatePresence>
+                          {expandedSections['0-9'] && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2">
+                                <button
+                                  onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
+                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
+                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
+                                  className={cn(
+                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
+                                    voiceControlEnabled 
+                                      ? "border-white bg-white/10" 
+                                      : "border-white/5 hover:border-white/20 bg-white/5",
+                                    settingsArea === 'content' && settingsFocus === 90 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
+                                  )}
+                                >
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span className="font-bold text-lg">Sesli Kontrol</span>
+                                    <span className="text-xs text-zinc-500">Uygulamayı sesli komutlarla yönetin</span>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full transition-all relative",
+                                    voiceControlEnabled ? "bg-green-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      voiceControlEnabled ? "left-7" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
                               </div>
                             </motion.div>
                           )}
@@ -4784,6 +5157,38 @@ export default function App() {
                                     )} />
                                   </div>
                                 </button>
+
+                                <button 
+                                  onClick={() => setChannelSurfEnabled(prev => !prev)}
+                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(3); }}
+                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(3); }}
+                                  className={cn(
+                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group mt-2",
+                                    settingsArea === 'content' && settingsFocus === 3 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className={cn(
+                                      "p-3 rounded-xl transition-transform",
+                                      settingsArea === 'content' && settingsFocus === 3 ? "bg-black/10" : "bg-white/10"
+                                    )}>
+                                      <Tv className="w-6 h-6" />
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="text-lg">Kanal Sörfü</div>
+                                      <div className="text-xs opacity-50 font-medium">Oynatıcıda hızlı kanal geçiş şeridi</div>
+                                    </div>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full relative transition-colors",
+                                    channelSurfEnabled ? "bg-emerald-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      channelSurfEnabled ? "right-1" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
                               </div>
                             </motion.div>
                           )}
@@ -4829,12 +5234,12 @@ export default function App() {
                                       setProfilePic(pic);
                                       localStorage.setItem('profile_pic', pic);
                                     }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(3 + i); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(3 + i); }}
+                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(4 + i); }}
+                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(4 + i); }}
                                     className={cn(
                                       "aspect-square rounded-2xl overflow-hidden border-4 transition-all relative group flex items-center justify-center",
                                       profilePic === pic ? "border-white" : "border-transparent hover:border-white/20",
-                                      settingsArea === 'content' && settingsFocus === (3 + i) && "ring-4 ring-white scale-110 z-10 shadow-2xl settings-focused"
+                                      settingsArea === 'content' && settingsFocus === (4 + i) && "ring-4 ring-white scale-110 z-10 shadow-2xl settings-focused"
                                     )}
                                     style={{ backgroundColor: themeColor }}
                                   >
@@ -5304,6 +5709,11 @@ export default function App() {
             setIsMiniPlayer(true);
             setNavContext('browse');
           }}
+          channelSurfEnabled={channelSurfEnabled}
+          volume={globalVolume}
+          isMuted={isMuted}
+          onVolumeChange={setGlobalVolume}
+          onMuteToggle={setIsMuted}
         />
       </div>
       )}

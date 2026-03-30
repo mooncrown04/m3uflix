@@ -36,7 +36,8 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   epgData,
   now,
   isGrid = false,
-  top10Style
+  top10Style,
+  focusEffect
 }) => {
   const listRef = useRef<any>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -151,12 +152,14 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
               onSelect={onSelect}
               onDetail={onDetail}
               onDeleteChannel={onDeleteChannel}
+              onLongPress={onLongPress}
               onToggleMini={onToggleMini}
               handlePressStart={handlePressStart}
               handlePressEnd={handlePressEnd}
               customProxyUrl={customProxyUrl}
               channels={channels}
               top10Style={top10Style}
+              focusEffect={focusEffect}
             />
           ))}
         </div>
@@ -211,18 +214,18 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
-            className="relative overflow-hidden"
+            className="relative"
           >
-            <div ref={listContainerRef} className="px-4 md:px-12 pt-4 pb-4">
+            <div ref={listContainerRef} className="px-4 md:px-12 pt-10 pb-10 -mt-6">
               <List
                 ref={listRef}
-                height={listHeight}
+                height={listHeight + 80}
                 itemCount={channels.length}
                 itemSize={itemSize}
                 layout="horizontal"
                 width={containerWidth || (typeof window !== 'undefined' ? window.innerWidth : 1200)}
                 className="no-scrollbar"
-                style={{ overflowY: 'hidden' }}
+                style={{ overflowY: 'visible' }}
               >
                 {({ index, style }: { index: number; style: React.CSSProperties }) => (
                   <ChannelCard
@@ -251,13 +254,15 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
                     onSelect={onSelect}
                     onDetail={onDetail}
                     onDeleteChannel={onDeleteChannel}
+                    onLongPress={onLongPress}
                     onToggleMini={onToggleMini}
                     handlePressStart={handlePressStart}
                     handlePressEnd={handlePressEnd}
                     customProxyUrl={customProxyUrl}
-                    style={style}
+                    style={{ ...style, top: (style.top as number) + 40 }}
                     channels={channels}
                     top10Style={top10Style}
+                    focusEffect={focusEffect}
                   />
                 )}
               </List>

@@ -1,4 +1,5 @@
 import { M3UChannel } from './utils/m3uParser';
+export type { M3UChannel };
 import { EPGData } from './utils/epgParser';
 
 export interface Playlist {
@@ -12,6 +13,7 @@ export type UIMode = 'modern' | 'classic' | 'minimalist' | 'bento';
 export type SortBy = 'default' | 'name' | 'number' | 'added';
 export type LogoStyle = 'default' | 'mooncrown' | 'mooncrown-gold' | 'mooncrown-silver' | 'mooncrown-neon' | 'mooncrown-glass' | 'mooncrown-fire' | 'minimal' | 'neon' | 'retro' | 'glitch';
 export type Top10Style = 'original' | 'filled' | 'neon' | 'retro' | 'minimal' | 'theme';
+export type FocusEffect = 'default' | 'glow' | 'pulse' | 'border' | 'scale';
 
 export interface Toast {
   id: string;
@@ -50,6 +52,7 @@ export interface ChannelRowProps {
   now: Date;
   isGrid?: boolean;
   top10Style?: Top10Style;
+  focusEffect?: FocusEffect;
 }
 
 export interface ChannelCardProps {
@@ -77,6 +80,7 @@ export interface ChannelCardProps {
   onSelect: (channel: M3UChannel) => void;
   onDetail?: (channel: M3UChannel) => void;
   onDeleteChannel: (channelId: string) => void;
+  onLongPress?: (channelId: string, category: string) => void;
   onToggleMini?: (channel: M3UChannel) => void;
   handlePressStart: (channelId: string) => void;
   handlePressEnd: () => void;
@@ -84,4 +88,5 @@ export interface ChannelCardProps {
   style?: React.CSSProperties;
   channels: M3UChannel[];
   top10Style?: Top10Style;
+  focusEffect?: FocusEffect;
 }

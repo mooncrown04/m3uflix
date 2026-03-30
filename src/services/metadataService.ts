@@ -14,6 +14,9 @@ export interface MediaMetadata {
   backdropUrl?: string;
   imdbScore?: string;
   duration?: string;
+  tmdbId?: number;
+  mediaType?: 'movie' | 'tv';
+  tmdbDirector?: { id: number; name: string; profile_path?: string };
 }
 
 const getGeminiApiKey = () => {
@@ -60,7 +63,10 @@ export async function fetchMediaMetadata(title: string, group?: string, type?: s
         backdropUrl: getTMDBImageUrl(tmdbData.backdrop_path || '', 'original') || undefined,
         cast: tmdbData.cast?.map(c => c.name),
         tmdbCast: tmdbData.cast,
-        genre: tmdbData.genres?.map(g => g.name)
+        genre: tmdbData.genres?.map(g => g.name),
+        tmdbId: tmdbData.id,
+        mediaType: tmdbData.media_type,
+        tmdbDirector: tmdbData.director
       };
     }
 

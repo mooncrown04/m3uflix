@@ -64,14 +64,17 @@ export const useVoiceControl = ({ onCommand, language = 'tr-TR' }: VoiceControlP
       onCommand('volume-down');
     } else if (transcript.includes('sesi kapat') || transcript.includes('sessize al')) {
       onCommand('mute');
+    } else if (transcript.includes('sesi %') || transcript.includes('sesi yüzde')) {
+      const match = transcript.match(/(\d+)/);
+      if (match) onCommand('set-volume', match[0]);
     } else if (transcript.includes('ayarlar')) {
       onCommand('open-settings');
     } else if (transcript.includes('kapat') || transcript.includes('geri')) {
       onCommand('close');
     } else if (transcript.includes('favorilere ekle') || transcript.includes('favori yap')) {
       onCommand('toggle-favorite');
-    } else if (transcript.includes('ara')) {
-      const query = transcript.replace('ara', '').trim();
+    } else if (transcript.includes('ara') || transcript.includes('göster')) {
+      const query = transcript.replace('ara', '').replace('göster', '').replace('filmlerini', '').replace('dizilerini', '').trim();
       if (query) onCommand('search', query);
     } else {
       // Generic command fallback

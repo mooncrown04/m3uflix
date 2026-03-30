@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Play, Monitor, Tv, X } from 'lucide-react';
+import { Play, Monitor, Tv, X, MoreVertical } from 'lucide-react';
 import { motion } from 'motion/react';
 import { PreviewPlayer } from '../PreviewPlayer';
 import { cn } from '../../lib/utils';
@@ -30,13 +30,15 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
   onSelect,
   onDetail,
   onDeleteChannel,
+  onLongPress,
   onToggleMini,
   handlePressStart,
   handlePressEnd,
   customProxyUrl,
   style,
   channels,
-  top10Style = 'original'
+  top10Style = 'original',
+  focusEffect = 'default'
 }) => {
   const isFocused = activeRow === rowIndex && colIndex === activeCol;
   const isPreviewing = isFocused && previewChannelId === channel.id;
@@ -50,16 +52,19 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
   const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   const handleInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
     e.stopPropagation();
     
+    // For mouse, we now handle selection in onPointerDown for instant response
+    if (e.type === 'click' && (e.nativeEvent instanceof MouseEvent)) {
+      return;
+    }
+
+    // For Touch/TV users, maintain the double-click for details logic
     if (clickTimer.current) {
-      // Double click detected
       clearTimeout(clickTimer.current);
       clickTimer.current = null;
       onDetail?.(channel);
     } else {
-      // First click
       clickTimer.current = setTimeout(() => {
         onSelect(channel);
         clickTimer.current = null;
@@ -76,6 +81,27 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
     const programs = epgData.programs[channelId] || [];
     
     return programs.find(p => now >= p.start && now <= p.stop);
+  }, [epgData, channel.tvgId, channel.name, now]);
+
+  // Find next EPG program
+  const nextProgram = useMemo(() => {
+    if (!epgData || !epgData.programs) return null;
+    
+    const channelId = channel.tvgId || channel.name;
+    const programs = epgData.programs[channelId] || [];
+    
+    // Programs are sorted by start time in epgParser.ts
+    const currentIndex = programs.findIndex(p => now >= p.start && now <= p.stop);
+    if (currentIndex !== -1 && currentIndex < programs.length - 1) {
+      return programs[currentIndex + 1];
+    }
+    
+    // If no current program found, find the first one that starts after 'now'
+    if (currentIndex === -1) {
+      return programs.find(p => p.start > now);
+    }
+    
+    return null;
   }, [epgData, channel.tvgId, channel.name, now]);
 
   const progress = useMemo(() => {
@@ -99,6 +125,39 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
     return b;
   };
   const badges = getBadges();
+
+  const getFocusAnimation = (): any => {
+    if (!isFocused) return {};
+    
+    switch (focusEffect) {
+      case 'glow':
+        return {
+          boxShadow: [
+            `0 0 20px ${themeColor}4d`,
+            `0 0 50px ${themeColor}80`,
+            `0 0 20px ${themeColor}4d`
+          ],
+          transition: { duration: 2, repeat: Infinity, ease: "easeInOut" }
+        };
+      case 'pulse':
+        return {
+          scale: [1.1, 1.15, 1.1],
+          transition: { duration: 1.5, repeat: Infinity, ease: "easeInOut" }
+        };
+      case 'border':
+        return {
+          borderColor: [themeColor, '#ffffff', themeColor],
+          transition: { duration: 2, repeat: Infinity, ease: "linear" }
+        };
+      case 'scale':
+        return {
+          scale: 1.15,
+          transition: { type: 'spring', stiffness: 300, damping: 20 }
+        };
+      default:
+        return {};
+    }
+  };
 
   return (
     <div 
@@ -137,8 +196,23 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       <motion.div
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
+        animate={getFocusAnimation()}
         onClick={handleInteraction}
-        onPointerDown={() => onFocus(rowIndex, colIndex)}
+        onContextMenu={(e) => {
+          if (deviceType !== 'tv') {
+            e.preventDefault();
+            e.stopPropagation();
+            onLongPress?.(channel.id, title);
+          }
+        }}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'mouse') {
+            onSelect(channel);
+          }
+          if (activeRow !== rowIndex || activeCol !== colIndex) {
+            onFocus(rowIndex, colIndex);
+          }
+        }}
         onMouseDown={() => handlePressStart(channel.id)}
         onMouseUp={handlePressEnd}
         onMouseLeave={handlePressEnd}
@@ -146,7 +220,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         onTouchEnd={handlePressEnd}
         onMouseEnter={() => onFocus(rowIndex, colIndex)}
         style={{ 
-          boxShadow: isFocused 
+          boxShadow: isFocused && focusEffect === 'default'
             ? (uiMode === 'modern' 
                 ? `0 0 30px ${themeColor}4d` 
                 : uiMode === 'classic'
@@ -154,7 +228,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
                 : `0 4px 0 0 ${themeColor}`) 
             : undefined,
           borderColor: isFocused 
-            ? (uiMode === 'minimalist' ? 'transparent' : themeColor)
+            ? (uiMode === 'minimalist' ? 'transparent' : (focusEffect === 'border' ? 'white' : themeColor))
             : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
         }}
         className={cn(
@@ -163,8 +237,8 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
           uiMode === 'classic' && "rounded-none border-zinc-800 bg-zinc-950",
           uiMode === 'minimalist' && "rounded-none border-transparent bg-transparent",
           orientation === 'landscape' ? "aspect-video" : "aspect-[2/3]",
-          isFocused && uiMode === 'modern' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]",
-          isFocused && uiMode === 'classic' && "scale-105 z-40",
+          isFocused && uiMode === 'modern' && focusEffect !== 'pulse' && focusEffect !== 'scale' && "scale-110 z-50 shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+          isFocused && uiMode === 'classic' && focusEffect !== 'pulse' && focusEffect !== 'scale' && "scale-105 z-40",
           isFocused && uiMode === 'minimalist' && "scale-100 z-40 opacity-100",
           !isFocused && uiMode === 'minimalist' && "opacity-60"
         )}
@@ -213,6 +287,21 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
               title="Picture in Picture (P)"
             >
               <Monitor className="w-4 h-4" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onLongPress?.(channel.id, title);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerUp={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
+              className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer z-[100]"
+              title="Daha Fazla (Favori/Multi)"
+            >
+              <MoreVertical className="w-4 h-4" />
             </button>
           </div>
         )}
@@ -349,12 +438,17 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         )}>
           {channel.name}
         </p>
-        {currentProgram && (
+        {nextProgram && (
           <p className={cn(
-            "text-[10px] text-zinc-500 truncate mt-0.5",
+            "text-[10px] text-zinc-500 truncate mt-0.5 flex items-center gap-1.5",
             uiMode === 'minimalist' && "opacity-60 italic"
           )}>
-            {currentProgram.title}
+            <span className="opacity-40 font-black text-[8px] uppercase tracking-tighter shrink-0">Sonraki</span>
+            <span className="opacity-60 font-mono shrink-0">
+              {nextProgram.start.getHours().toString().padStart(2, '0')}:
+              {nextProgram.start.getMinutes().toString().padStart(2, '0')}
+            </span>
+            <span className="truncate opacity-80">{nextProgram.title}</span>
           </p>
         )}
       </div>

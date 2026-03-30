@@ -6,6 +6,7 @@ const BASE_URL = 'https://api.themoviedb.org/3';
 
 export interface TMDBData {
   id: number;
+  media_type?: 'movie' | 'tv';
   poster_path?: string;
   backdrop_path?: string;
   vote_average?: number;
@@ -16,6 +17,15 @@ export interface TMDBData {
   title?: string;
   genres?: { id: number; name: string }[];
   cast?: { id: number; name: string; character: string; profile_path?: string }[];
+  director?: { id: number; name: string; profile_path?: string };
+}
+
+export interface TMDBTrailer {
+  id: string;
+  key: string;
+  name: string;
+  site: string;
+  type: string;
 }
 
 export interface ActorDetails {
@@ -70,14 +80,22 @@ export async function fetchTMDBData(name: string, type: 'movie' | 'tv' | 'auto' 
       const creditsResponse = await fetch(creditsUrl);
       const creditsData = await creditsResponse.json();
       
+      const director = creditsData.crew?.find((c: any) => c.job === 'Director');
+      
       const tmdbData: TMDBData = {
         ...result,
+        media_type: searchType as 'movie' | 'tv',
         cast: creditsData.cast?.slice(0, 10).map((c: any) => ({
           id: c.id,
           name: c.name,
           character: c.character,
           profile_path: c.profile_path
-        }))
+        })),
+        director: director ? {
+          id: director.id,
+          name: director.name,
+          profile_path: director.profile_path
+        } : undefined
       };
       
       cache.set(cacheKey, tmdbData);
@@ -123,6 +141,45 @@ export async function fetchActorMovies(actorId: number): Promise<ActorMovie[]> {
     return movies;
   } catch (error) {
     console.error('Error fetching actor movies:', error);
+    return [];
+  }
+}
+
+export async function fetchTMDBTrailers(id: number, type: 'movie' | 'tv'): Promise<TMDBTrailer[]> {
+  const apiKey = getApiKey();
+  if (!apiKey) return [];
+
+  try {
+    const url = `${BASE_URL}/${type}/${id}/videos?api_key=${apiKey}&language=tr-TR`;
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    // If no Turkish trailers, try English
+    if (!data.results || data.results.length === 0) {
+      const enUrl = `${BASE_URL}/${type}/${id}/videos?api_key=${apiKey}&language=en-US`;
+      const enResponse = await fetch(enUrl);
+      const enData = await enResponse.json();
+      return enData.results?.filter((v: any) => v.site === 'YouTube' && v.type === 'Trailer') || [];
+    }
+
+    return data.results?.filter((v: any) => v.site === 'YouTube' && v.type === 'Trailer') || [];
+  } catch (error) {
+    console.error('Error fetching trailers:', error);
+    return [];
+  }
+}
+
+export async function fetchTMDBSimilar(id: number, type: 'movie' | 'tv'): Promise<TMDBData[]> {
+  const apiKey = getApiKey();
+  if (!apiKey) return [];
+
+  try {
+    const url = `${BASE_URL}/${type}/${id}/similar?api_key=${apiKey}&language=tr-TR&page=1`;
+    const response = await fetch(url);
+    const data = await response.json();
+    return data.results?.slice(0, 12) || [];
+  } catch (error) {
+    console.error('Error fetching similar content:', error);
     return [];
   }
 }

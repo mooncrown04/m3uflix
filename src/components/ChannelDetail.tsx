@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, X, Star, Users, Clock, Calendar, Film, Info, Monitor, Bell, BellOff, ExternalLink, User } from 'lucide-react';
+import { Play, X, Star, Users, Clock, Calendar, Film, Info, Monitor, Bell, BellOff, ExternalLink, User, Youtube, ChevronRight } from 'lucide-react';
 import { M3UChannel } from '../utils/m3uParser';
 import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
-import { fetchActorDetails, fetchActorMovies, ActorDetails, ActorMovie, getTMDBImageUrl } from '../services/tmdbService';
+import { fetchActorDetails, fetchActorMovies, fetchTMDBTrailers, fetchTMDBSimilar, ActorDetails, ActorMovie, TMDBTrailer, TMDBData, getTMDBImageUrl } from '../services/tmdbService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -45,6 +45,9 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
   const [selectedActor, setSelectedActor] = useState<ActorDetails | null>(null);
   const [actorMovies, setActorMovies] = useState<ActorMovie[]>([]);
   const [loadingActor, setLoadingActor] = useState(false);
+  const [trailers, setTrailers] = useState<TMDBTrailer[]>([]);
+  const [similarContent, setSimilarContent] = useState<TMDBData[]>([]);
+  const [showTrailer, setShowTrailer] = useState<string | null>(null);
   const [reminders, setReminders] = useState<string[]>(() => {
     const saved = localStorage.getItem('broadcast_reminders');
     return saved ? JSON.parse(saved) : [];
@@ -79,6 +82,14 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
       const data = await fetchMediaMetadata(channel.name, channel.group, channel.type);
       if (data) {
         setMetadata(data);
+        if (data.tmdbId && data.mediaType) {
+          const [trailerData, similarData] = await Promise.all([
+            fetchTMDBTrailers(data.tmdbId, data.mediaType),
+            fetchTMDBSimilar(data.tmdbId, data.mediaType)
+          ]);
+          setTrailers(trailerData);
+          setSimilarContent(similarData);
+        }
       }
       setLoading(false);
     };
@@ -262,7 +273,30 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
               </div>
             )}
 
-            {metadata?.director && (
+            {metadata?.tmdbDirector ? (
+              <div>
+                <h3 className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <User className="w-3 h-3" /> Yönetmen
+                </h3>
+                <button 
+                  onClick={() => handleActorClick(metadata.tmdbDirector!.id)}
+                  className="group flex items-center gap-3 px-4 py-3 rounded-2xl bg-white/5 border border-white/5 text-lg font-bold text-white hover:bg-white/10 hover:border-white/20 transition-all"
+                >
+                  {metadata.tmdbDirector.profile_path ? (
+                    <img 
+                      src={getTMDBImageUrl(metadata.tmdbDirector.profile_path)} 
+                      className="w-10 h-10 rounded-full object-cover grayscale group-hover:grayscale-0 transition-all" 
+                      alt={metadata.tmdbDirector.name}
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
+                      <User className="w-5 h-5" />
+                    </div>
+                  )}
+                  {metadata.tmdbDirector.name}
+                </button>
+              </div>
+            ) : metadata?.director && (
               <div>
                 <h3 className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Yönetmen</h3>
                 <p className="text-xl font-bold text-white">{metadata.director}</p>
@@ -379,6 +413,21 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                 {hasReminder ? 'Hatırlatıcı Kuruldu' : 'Hatırlatıcı Kur'}
               </button>
 
+              {trailers.length > 0 && (
+                <button
+                  onClick={() => setShowTrailer(trailers[0].key)}
+                  onMouseEnter={() => onFocusChange?.(5)}
+                  className={cn(
+                    "px-8 py-5 flex items-center gap-3 font-bold transition-all border-2 bg-red-600/10 text-red-500 border-red-600/20 hover:bg-red-600/20",
+                    uiMode === 'modern' && "rounded-full",
+                    activeFocus === 5 && "ring-4 ring-red-600/40 scale-105"
+                  )}
+                >
+                  <Youtube className="w-5 h-5" />
+                  Fragman İzle
+                </button>
+              )}
+
               {playbackProgress[channel.id] && (
                 <button
                   onClick={() => onPlay({ ...channel, urls: [channel.urls[0]] })}
@@ -430,8 +479,80 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Similar Content */}
+          {similarContent.length > 0 && (
+            <div className="mt-16">
+              <h3 className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] mb-6 flex items-center justify-between">
+                <span className="flex items-center gap-2"><Film className="w-3 h-3" /> Benzer İçerikler</span>
+                <span className="text-[8px] opacity-50">TMDb Önerileri</span>
+              </h3>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+                {similarContent.map((item) => (
+                  <div 
+                    key={item.id} 
+                    className="group cursor-pointer space-y-2"
+                    onClick={() => {
+                      // In a real app, we would navigate to this channel or fetch its metadata
+                      // For now, we just show a hint
+                      console.log("Navigate to:", item.title || item.name);
+                    }}
+                  >
+                    <div className="aspect-[2/3] rounded-2xl overflow-hidden border border-white/5 group-hover:border-white/20 transition-all relative">
+                      <img 
+                        src={getTMDBImageUrl(item.poster_path || '') || ''} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                        alt={item.title || item.name}
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <ChevronRight className="w-6 h-6 text-white" />
+                      </div>
+                    </div>
+                    <p className="text-[10px] font-bold text-white/40 truncate group-hover:text-white transition-colors">
+                      {item.title || item.name}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         </motion.div>
+
+        {/* Trailer Modal */}
+        <AnimatePresence>
+          {showTrailer && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[300] bg-black/95 backdrop-blur-3xl flex items-center justify-center p-4"
+              onClick={() => setShowTrailer(null)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative w-full max-w-5xl aspect-video bg-black rounded-[40px] overflow-hidden shadow-[0_0_100px_rgba(255,0,0,0.2)]"
+                onClick={e => e.stopPropagation()}
+              >
+                <iframe
+                  src={`https://www.youtube.com/embed/${showTrailer}?autoplay=1`}
+                  className="w-full h-full"
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                />
+                <button
+                  onClick={() => setShowTrailer(null)}
+                  className="absolute top-6 right-6 p-3 rounded-full bg-black/60 text-white hover:bg-white/20 transition-all border border-white/10"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Actor Details Modal */}
         <AnimatePresence>
