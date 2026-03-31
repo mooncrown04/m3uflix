@@ -164,7 +164,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       style={style}
       className={cn(
         "flex flex-col gap-2 snap-start relative", 
-        title === 'Top 10' && "pl-16",
+        title === 'Top 10' && "pl-20",
         deviceType === 'tv' 
           ? (orientation === 'landscape' ? "w-48 md:w-72" : "w-40 md:w-56")
           : deviceType === 'phone'
@@ -173,7 +173,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       )}
     >
       {title === 'Top 10' && (
-        <div className="absolute left-[-24px] bottom-[-10px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
+        <div className="absolute left-[-60px] bottom-[-5px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
           <span 
             className={cn(
               "font-black italic leading-none",
@@ -181,12 +181,12 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
               top10Style === 'minimal' && "font-light"
             )}
             style={{ 
-              WebkitTextStroke: top10Style === 'original' ? '2px rgba(255,255,255,0.2)' : (top10Style === 'minimal' ? '1px rgba(255,255,255,0.1)' : 'none'),
+              WebkitTextStroke: top10Style === 'original' ? '5px rgba(255,255,255,0.5)' : (top10Style === 'minimal' ? '2px rgba(255,255,255,0.2)' : 'none'),
               color: top10Style === 'original' || top10Style === 'minimal' ? 'transparent' : (top10Style === 'theme' ? themeColor : 'white'),
-              fontSize: '120px',
+              fontSize: '160px',
               fontWeight: top10Style === 'minimal' ? '100' : '900',
-              textShadow: top10Style === 'neon' ? `0 0 10px ${themeColor}, 0 0 20px ${themeColor}` : (top10Style === 'filled' ? '0 10px 20px rgba(0,0,0,0.5)' : 'none'),
-              opacity: top10Style === 'minimal' ? 0.3 : 1
+              textShadow: top10Style === 'neon' ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` : (top10Style === 'filled' ? '0 15px 30px rgba(0,0,0,0.8)' : 'none'),
+              opacity: top10Style === 'minimal' ? 0.45 : 1
             }}
           >
             {colIndex + 1}

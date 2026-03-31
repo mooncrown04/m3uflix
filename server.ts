@@ -25,9 +25,48 @@ const httpAgent = new http.Agent({
   timeout: 30000,
 });
 
+import { Server } from "socket.io";
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  const httpServer = http.createServer(app);
+  const io = new Server(httpServer, {
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+
+  // Socket.io logic for remote control
+  io.on("connection", (socket) => {
+    console.log("A user connected:", socket.id);
+
+    socket.on("join-room", (roomId) => {
+      socket.join(roomId);
+      console.log(`User ${socket.id} joined room: ${roomId}`);
+      // Notify other users in the room (the TV app) that a remote has joined
+      socket.to(roomId).emit("user-joined");
+    });
+
+    socket.on("send-command", ({ roomId, command, value }) => {
+      console.log(`Command ${command} sent to room ${roomId} with value:`, value);
+      io.to(roomId).emit("command-received", { command, value });
+    });
+
+    socket.on("disconnect", () => {
+      console.log("User disconnected:", socket.id);
+    });
+  });
+
+  // Config endpoint to provide APP_URL to the client
+  app.get("/api/config", (req, res) => {
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host;
+    res.json({
+      appUrl: process.env.APP_URL || `${protocol}://${host}`
+    });
+  });
 
   // CORS Proxy Endpoint
   app.get("/api/proxy", async (req, res) => {
@@ -147,7 +186,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

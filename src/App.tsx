@@ -11,6 +11,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getDominantColor } from './utils/colorExtractor';
 import { FixedSizeList as List } from 'react-window';
 import { useVoiceControl } from './hooks/useVoiceControl';
+import { io } from 'socket.io-client';
+import { QRCodeCanvas } from 'qrcode.react';
+import MobileRemote from './components/MobileRemote';
 
 import { BentoDashboard } from './components/Layout/BentoDashboard';
 import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast } from './types';
@@ -35,6 +38,7 @@ const PROFILE_PICS = [
 const MULTI_CATEGORIES = ['HABER', 'SPOR', 'ULUSAL', 'SİNEMA', 'BELGESEL'];
 
 export default function App() {
+  const [isRemoteMode, setIsRemoteMode] = useState(() => localStorage.getItem('is_remote_mode') === 'true');
   const [playbackProgress, setPlaybackProgress] = useState<Record<string, { currentTime: number; duration: number }>>(() => {
     try {
       const saved = localStorage.getItem('playbackProgress');
@@ -47,6 +51,11 @@ export default function App() {
     }
     return {};
   });
+
+  // Check if we are in remote control mode
+  const urlParams = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
+  const remoteRoomIdFromUrl = urlParams.get('remote')?.trim().toUpperCase() || null;
+  const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   useEffect(() => {
     localStorage.setItem('playbackProgress', JSON.stringify(playbackProgress));
@@ -289,17 +298,36 @@ export default function App() {
     return [];
   });
 
-  useEffect(() => {
-    localStorage.setItem('canli_channels', JSON.stringify(canliChannels));
-  }, [canliChannels]);
+  const [remoteRoomId] = useState(() => {
+    const saved = localStorage.getItem('remote_room_id');
+    if (saved) return saved;
+    const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    localStorage.setItem('remote_room_id', newId);
+    return newId;
+  });
+  const [isRemoteConnected, setIsRemoteConnected] = useState(false);
+  const [isTvSocketConnected, setIsTvSocketConnected] = useState(false);
+  const [appUrl, setAppUrl] = useState<string>(() => localStorage.getItem('manual_app_url') || window.location.origin);
+  const socketRef = useRef<any>(null);
 
   useEffect(() => {
-    localStorage.setItem('dizi_channels', JSON.stringify(diziChannels));
-  }, [diziChannels]);
+    if (localStorage.getItem('manual_app_url')) return;
+    
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data.appUrl) {
+          setAppUrl(data.appUrl);
+        }
+      })
+      .catch(err => console.error('Failed to fetch app config:', err));
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('film_channels', JSON.stringify(filmChannels));
-  }, [filmChannels]);
+    if (appUrl !== window.location.origin) {
+      localStorage.setItem('manual_app_url', appUrl);
+    }
+  }, [appUrl]);
 
   const [isMultiPlayerOpen, setIsMultiPlayerOpen] = useState(false);
   const [multiPlayerChannels, setMultiPlayerChannels] = useState<M3UChannel[]>([]);
@@ -1255,7 +1283,12 @@ export default function App() {
       case 'play-channel':
         if (value) {
           const found = channels.find(ch => ch.name.toLowerCase().includes(value.toLowerCase()));
-          if (found) handleChannelSelect(found);
+          if (found) {
+            handleChannelSelect(found);
+            speak(`${found.name} açılıyor.`);
+          } else {
+            speak(`${value} kanalı bulunamadı.`);
+          }
         }
         break;
       case 'volume-up':
@@ -1302,15 +1335,61 @@ export default function App() {
           if (selectedChannel) toggleFavorite(selectedChannel.id);
         }
         break;
+      case 'filter-category':
+        if (value) {
+          const categoryMap: Record<string, string> = {
+            'haber': 'HABER',
+            'spor': 'SPOR',
+            'film': 'SİNEMA',
+            'dizi': 'DİZİ',
+            'ulusal': 'ULUSAL',
+            'belgesel': 'BELGESEL'
+          };
+          const target = categoryMap[value.toLowerCase()] || value.toUpperCase();
+          selectCategory(target);
+        }
+        break;
+      case 'what-is-on':
+        if (currentChannel && epgData?.[currentChannel.id]) {
+          const now = new Date();
+          const currentProgram = epgData[currentChannel.id].find(p => 
+            new Date(p.start) <= now && new Date(p.stop) >= now
+          );
+          if (currentProgram) {
+            speak(`${currentChannel.name} kanalında şu an ${currentProgram.title} yayında.`);
+          } else {
+            speak(`${currentChannel.name} kanalında şu an yayın bilgisi bulunmuyor.`);
+          }
+        } else {
+          speak("Şu an bir kanal izlemiyorsunuz.");
+        }
+        break;
       case 'search':
         if (value) setSearchQuery(value);
         break;
     }
   }, [channels, handleChannelSelect, navContext, showSettings, currentChannel, toggleFavorite, activeRow, groupedChannels, activeCol]);
 
-  const { isListening, startListening, stopListening, error: voiceError } = useVoiceControl({
-    onCommand: handleVoiceCommand
+  const { isListening, isProcessing: isVoiceProcessing, startListening, stopListening, speak, error: voiceError } = useVoiceControl({
+    onCommand: handleVoiceCommand,
+    apiKey: geminiApiKey
   });
+
+  const activeRowRef = useRef(activeRow);
+  const activeColRef = useRef(activeCol);
+  const groupedChannelsRef = useRef(groupedChannels);
+  const navContextRef = useRef(navContext);
+  const channelForDetailRef = useRef(channelForDetail);
+  const currentChannelRef = useRef(currentChannel);
+
+  useEffect(() => { activeRowRef.current = activeRow; }, [activeRow]);
+  useEffect(() => { activeColRef.current = activeCol; }, [activeCol]);
+  useEffect(() => { groupedChannelsRef.current = groupedChannels; }, [groupedChannels]);
+  useEffect(() => { navContextRef.current = navContext; }, [navContext]);
+  useEffect(() => { channelForDetailRef.current = channelForDetail; }, [channelForDetail]);
+  useEffect(() => { currentChannelRef.current = currentChannel; }, [currentChannel]);
+
+  // handleRemoteCommand moved down to after handleUrlSubmit definition
 
   // Auto-preview logic
   useEffect(() => {
@@ -1461,6 +1540,17 @@ export default function App() {
         icon: ListIcon,
         action: () => toggleCategory('series'),
         isActive: visibleCategories.includes('Dizi')
+      },
+      {
+        id: 'remote-mode',
+        label: 'Uzaktan Kumanda',
+        icon: Smartphone,
+        action: () => {
+          localStorage.removeItem('m3u_url');
+          localStorage.setItem('is_remote_mode', 'true');
+          window.location.reload();
+        },
+        isActive: false
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
   }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy]);
@@ -2459,6 +2549,163 @@ export default function App() {
     }
   };
 
+  const handleRemoteCommand = useCallback((command: string, value?: any) => {
+    console.log('Remote command received:', command, value);
+    
+    switch (command) {
+      case 'nav-up':
+        setActiveRow(prev => Math.max(0, prev - 1));
+        break;
+      case 'nav-down':
+        const maxRows = channels.length === 0 ? 5 : groupedChannelsRef.current.length;
+        setActiveRow(prev => Math.min(maxRows - 1, prev + 1));
+        break;
+      case 'nav-left':
+        setActiveCol(prev => Math.max(0, prev - 1));
+        break;
+      case 'nav-right':
+        const currentRow = groupedChannelsRef.current[activeRowRef.current];
+        if (currentRow) {
+          setActiveCol(prev => Math.min(currentRow[1].length - 1, prev + 1));
+        }
+        break;
+      case 'nav-ok':
+        if (navContextRef.current === 'browse' && activeRowRef.current !== -1) {
+          if (channels.length === 0) {
+            // Handle setup screen buttons based on current implementation
+            switch (activeRowRef.current) {
+              case 0: 
+                document.getElementById('empty-file-upload')?.click(); 
+                break;
+              case 1: 
+                if (extraUrl) {
+                  setPlaylistUrl(extraUrl);
+                  handleUrlSubmit(extraUrl);
+                }
+                break;
+              case 2: 
+                localStorage.removeItem('m3u_url');
+                localStorage.setItem('is_remote_mode', 'true');
+                window.location.reload();
+                break;
+              case 3: 
+                localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+                setSavedUrl(DEFAULT_M3U_URL);
+                setPlaylistUrl(DEFAULT_M3U_URL);
+                handleUrlSubmit(DEFAULT_M3U_URL);
+                break;
+              case 4:
+                setShowSettings(true);
+                setNavContext('settings');
+                setSettingsFocus(0);
+                setActiveSettingsTab(1);
+                break;
+            }
+          } else {
+            const selectedChannel = groupedChannelsRef.current[activeRowRef.current]?.[1][activeColRef.current];
+            if (selectedChannel) handleChannelSelect(selectedChannel);
+          }
+        } else if (navContextRef.current === 'channel-detail' && channelForDetailRef.current) {
+          handleChannelSelect(channelForDetailRef.current);
+        }
+        break;
+      case 'volume-up':
+        setGlobalVolume(prev => Math.min(1, prev + 0.1));
+        setIsMuted(false);
+        break;
+      case 'volume-down':
+        setGlobalVolume(prev => Math.max(0, prev - 0.1));
+        setIsMuted(false);
+        break;
+      case 'mute':
+        setIsMuted(prev => !prev);
+        break;
+      case 'open-settings':
+        setShowSettings(true);
+        setNavContext('settings');
+        break;
+      case 'open-search':
+        setNavContext('browse');
+        break;
+      case 'close':
+        if (navContextRef.current === 'player') {
+          setCurrentChannel(null);
+          setNavContext('browse');
+        } else if (showSettings) {
+          setShowSettings(false);
+          setNavContext('browse');
+        } else if (navContextRef.current === 'channel-menu') {
+          setChannelMenuId(null);
+          setNavContext('browse');
+        } else if (navContextRef.current === 'channel-detail') {
+          setChannelForDetail(null);
+          setNavContext('browse');
+        }
+        break;
+      case 'toggle-favorite':
+        if (currentChannelRef.current) {
+          toggleFavorite(currentChannelRef.current.id);
+        } else if (navContextRef.current === 'browse' && activeRowRef.current !== -1) {
+          const selectedChannel = groupedChannelsRef.current[activeRowRef.current]?.[1][activeColRef.current];
+          if (selectedChannel) toggleFavorite(selectedChannel.id);
+        }
+        break;
+      case 'voice-trigger':
+        startListening();
+        break;
+    }
+  }, [channels, handleChannelSelect, toggleFavorite, startListening, setShowSettings, setNavContext, setCurrentChannel, setChannelMenuId, setChannelForDetail, handleUrlSubmit, extraUrl, setPlaylistUrl, setSavedUrl]);
+
+  const handleRemoteCommandRef = useRef(handleRemoteCommand);
+  useEffect(() => { handleRemoteCommandRef.current = handleRemoteCommand; }, [handleRemoteCommand]);
+
+  useEffect(() => {
+    if (!appUrl || !remoteRoomId) return;
+
+    const normalizedAppUrl = appUrl.replace(/\/$/, '');
+    console.log('TV app connecting to socket for remote control...', normalizedAppUrl);
+    
+    const socket = io(normalizedAppUrl, {
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      timeout: 20000
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('TV app socket connected, joining room:', remoteRoomId);
+      setIsTvSocketConnected(true);
+      socket.emit('join-room', remoteRoomId);
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('TV app socket connection error:', err);
+      setIsTvSocketConnected(false);
+    });
+
+    socket.on('command-received', ({ command, value }: { command: string, value?: any }) => {
+      console.log('TV app received remote command:', command, value);
+      handleRemoteCommandRef.current(command, value);
+    });
+
+    socket.on('user-joined', (data) => {
+      console.log('Remote user joined room:', data);
+      setIsRemoteConnected(true);
+      showToast("Mobil kumanda bağlandı", "success");
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.log('TV app socket disconnected:', reason);
+      setIsTvSocketConnected(false);
+      setIsRemoteConnected(false);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [remoteRoomId, showToast, appUrl]);
+
   const checkAbortController = useRef<AbortController | null>(null);
 
   const checkChannelLinks = async (channelsToCheck: M3UChannel[]) => {
@@ -2599,6 +2846,64 @@ export default function App() {
     };
     reader.readAsText(file);
   };
+
+  // If mobile and no remote ID, or explicitly in remote mode
+  // If we have a remote ID in URL, we are an ACTIVE remote
+  if (remoteRoomIdFromUrl) {
+    console.log('Mobile remote mode detected, roomId:', remoteRoomIdFromUrl);
+    return <MobileRemote roomId={remoteRoomIdFromUrl} appUrl={appUrl} />;
+  }
+
+  // If mobile user lands without a code, show a pairing screen instead of the full TV app
+  if ((isMobileDevice || isRemoteMode) && !localStorage.getItem('m3u_url')) {
+    return (
+      <div className="fixed inset-0 bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-8 text-center">
+        <div className="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20 mb-8">
+          <Smartphone className="w-10 h-10 text-white" />
+        </div>
+        <h1 className="text-3xl font-black italic uppercase tracking-tighter mb-2">MOON IPTV</h1>
+        <p className="text-zinc-500 text-sm mb-10 max-w-xs">Televizyonunuzu kontrol etmek için eşleşme kodunu girin.</p>
+        
+        <div className="w-full max-w-xs space-y-4">
+          <input 
+            type="text"
+            placeholder="EŞLEŞME KODU (Örn: AB12CD)"
+            className="w-full bg-white/5 border-2 border-white/10 rounded-2xl px-6 py-4 text-center text-xl font-black tracking-[0.3em] uppercase outline-none focus:border-orange-500 transition-all"
+            onChange={(e) => {
+              if (e.target.value.length === 6) {
+                setIsRemoteMode(true);
+                window.location.href = `/?remote=${e.target.value.toUpperCase()}`;
+              }
+            }}
+          />
+          <p className="text-[10px] text-zinc-600 uppercase font-bold tracking-widest">6 HANELİ KODU GİRİN</p>
+        </div>
+
+        <div className="mt-12 pt-12 border-t border-white/5 w-full max-w-xs space-y-4">
+          <button 
+            onClick={() => {
+              navigator.clipboard.writeText(`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`);
+              showToast('Kendi bağlantı adresiniz kopyalandı!', 'success');
+            }}
+            className="w-full py-4 bg-white/5 text-zinc-400 text-xs font-bold hover:text-white transition-colors rounded-2xl border border-white/5 flex items-center justify-center gap-2"
+          >
+            <LinkIcon className="w-4 h-4" />
+            BAĞLANTIYI KOPYALA
+          </button>
+          <button 
+            onClick={() => {
+              localStorage.removeItem('is_remote_mode');
+              localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
+              window.location.reload();
+            }}
+            className="w-full py-4 bg-white/5 text-zinc-400 text-xs font-bold hover:text-white transition-colors rounded-2xl border border-white/5"
+          >
+            VEYA TV UYGULAMASINI AÇ
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={uiClasses.container}>
@@ -2850,6 +3155,22 @@ export default function App() {
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <button
                     onClick={() => {
+                      localStorage.removeItem('m3u_url');
+                      localStorage.setItem('is_remote_mode', 'true');
+                      window.location.reload();
+                    }}
+                    onPointerDown={() => { setActiveRow(2); setActiveCol(0); }}
+                    onMouseEnter={() => { setActiveRow(2); setActiveCol(0); }}
+                    className={cn(
+                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      activeRow === 2 ? "bg-orange-500 text-white scale-105 shadow-xl" : "bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
+                    )}
+                  >
+                    <Smartphone className="w-5 h-5" />
+                    Uzaktan Kumanda Modu
+                  </button>
+                  <button
+                    onClick={() => {
                       localStorage.removeItem('m3u_deleted');
                       localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
                       setSavedUrl(DEFAULT_M3U_URL);
@@ -2884,6 +3205,43 @@ export default function App() {
                     <Settings className="w-5 h-5" />
                     Gelişmiş Ayarlar
                   </button>
+                </div>
+
+                {/* Remote Pairing Info for TV Setup */}
+                <div className="pt-12 mt-12 border-t border-white/5 space-y-6">
+                  <div className="flex flex-col items-center gap-6">
+                    <div className="flex flex-col md:flex-row items-center gap-8 bg-white/5 p-8 rounded-[40px] border border-white/10 backdrop-blur-xl">
+                      <div className="p-4 bg-white rounded-3xl shadow-2xl transform -rotate-3 hover:rotate-0 transition-transform duration-500">
+                        <QRCodeCanvas 
+                          value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
+                          size={140}
+                          level="H"
+                          includeMargin={false}
+                        />
+                      </div>
+                      
+                      <div className="space-y-6 text-left">
+                        <div className="space-y-2">
+                          <h3 className="text-xl font-black text-white uppercase tracking-tighter italic">BU KODU KUMANDAYA GİRİN</h3>
+                          <p className="text-xs text-zinc-500 font-medium max-w-[240px]">Telefonunuzu kumanda olarak kullanmak için bu kodu kumanda modundaki cihazınıza girin.</p>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          <div className="bg-black/40 border border-white/10 rounded-2xl px-6 py-4">
+                            <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">TV EŞLEŞME KODU</div>
+                            <div className="text-3xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
+                          </div>
+                          <div className={cn(
+                            "px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex flex-col items-center justify-center gap-1 min-w-[100px]",
+                            isRemoteConnected ? "bg-green-500/20 text-green-500 border border-green-500/20" : "bg-orange-500/20 text-orange-500 border border-orange-500/20"
+                          )}>
+                            <div className={cn("w-2 h-2 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-orange-500")} />
+                            {isRemoteConnected ? 'BAĞLI' : 'BEKLİYOR'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3558,7 +3916,8 @@ export default function App() {
                 {[
                   { id: 0, label: 'Görünüm', icon: Sun },
                   { id: 1, label: 'Liste', icon: ListIcon },
-                  { id: 2, label: 'Genel', icon: Settings }
+                  { id: 2, label: 'Genel', icon: Settings },
+                  { id: 3, label: 'Kumanda', icon: Smartphone }
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -3629,7 +3988,7 @@ export default function App() {
                     </div>
                   )}
                   <button
-                    data-sidebar-focus="3"
+                    data-sidebar-focus="4"
                     onClick={() => {
                       setShowSettings(false);
                       setNavContext('browse');
@@ -3637,11 +3996,11 @@ export default function App() {
                       setActiveCol(0);
                     }}
                     onPointerDown={() => {
-                      setSidebarFocus(3);
+                      setSidebarFocus(4);
                       setSettingsArea('tabs');
                     }}
                     onMouseEnter={() => {
-                      setSidebarFocus(3);
+                      setSidebarFocus(4);
                       setSettingsArea('tabs');
                     }}
                     className={cn(
@@ -3649,7 +4008,7 @@ export default function App() {
                       uiMode === 'modern' && "rounded-xl",
                       uiMode === 'classic' && "rounded-none border border-zinc-800",
                       uiMode === 'minimalist' && "rounded-none border-0",
-                      settingsArea === 'tabs' && sidebarFocus === 3 
+                      settingsArea === 'tabs' && sidebarFocus === 4 
                         ? (uiMode === 'modern' ? "bg-white text-black ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b-2 border-white settings-focused") 
                         : "text-zinc-500 hover:bg-white/5 hover:text-white"
                     )}
@@ -3681,7 +4040,7 @@ export default function App() {
 
                 <div className="md:hidden p-4 border-b border-white/5 flex justify-between items-center">
                   <h2 className="text-xl font-black italic uppercase text-white">
-                    {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : 'Genel'}
+                    {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : activeSettingsTab === 2 ? 'Genel' : 'Kumanda'}
                   </h2>
                   <button onClick={() => {
                     setShowSettings(false);
@@ -5447,18 +5806,106 @@ export default function App() {
                       </section>
                     </motion.div>
                   )}
+                    {activeSettingsTab === 3 && (
+                      <motion.div 
+                        key="tab-3"
+                        initial={{ opacity: 0, y: 10 }} 
+                        animate={{ opacity: 1, y: 0 }} 
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-10"
+                      >
+                        <section className="space-y-6 text-center flex flex-col items-center">
+                          <div className="space-y-2">
+                            <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white">Mobil Uzaktan Kumanda</h3>
+                            <p className="text-zinc-500 text-sm max-w-md mx-auto">Telefonunuzu bir kumandaya dönüştürmek için aşağıdaki QR kodu taratın.</p>
+                          </div>
+
+                          <div className="p-6 bg-white rounded-[32px] shadow-2xl shadow-white/10 border-8 border-white/5 relative group">
+                            <QRCodeCanvas 
+                              value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
+                              size={200}
+                              level="H"
+                              includeMargin={false}
+                            />
+                            <div className="absolute -top-4 -right-4 bg-orange-500 text-white px-4 py-2 rounded-full font-black text-xs shadow-xl animate-bounce">
+                              TARATIN
+                            </div>
+                          </div>
+
+                          <div className="space-y-4 w-full max-w-sm">
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block text-left">MANUEL URL (HATA VARSA DÜZELTİN)</label>
+                              <div className="flex gap-2">
+                                <input 
+                                  type="text" 
+                                  value={appUrl}
+                                  onChange={(e) => setAppUrl(e.target.value)}
+                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500"
+                                  placeholder="https://uygulama-adresi.run.app"
+                                />
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`);
+                                    showToast('Bağlantı adresi kopyalandı!', 'success');
+                                  }}
+                                  className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-xl transition-colors"
+                                >
+                                  <LinkIcon className="w-5 h-5" />
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-zinc-600 text-left">QR kod çalışmazsa bu adresi telefonunuzun tarayıcısına elle yazabilirsiniz.</p>
+                            </div>
+
+                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                              <div className="text-left">
+                                <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">EŞLEŞME KODU</div>
+                                <div className="text-2xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
+                              </div>
+                              <div className={cn(
+                                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
+                                isRemoteConnected ? "bg-green-500/20 text-green-500" : "bg-orange-500/20 text-orange-500"
+                              )}>
+                                {isRemoteConnected ? 'BAĞLI' : 'BEKLİYOR'}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className={cn(
+                                "bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors",
+                                isRemoteConnected ? "border-green-500/50 bg-green-500/5" : ""
+                              )}>
+                                <Smartphone className={cn("w-6 h-6", isRemoteConnected ? "text-green-500" : "text-zinc-500")} />
+                                <span className="text-[10px] font-bold text-zinc-400 uppercase">TELEFON</span>
+                                <div className={cn("w-1.5 h-1.5 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-zinc-700")} />
+                              </div>
+                              <div className={cn(
+                                "bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors",
+                                isTvSocketConnected ? "border-blue-500/50 bg-blue-500/5" : ""
+                              )}>
+                                <Tv className={cn("w-6 h-6", isTvSocketConnected ? "text-blue-500" : "text-zinc-500")} />
+                                <span className="text-[10px] font-bold text-zinc-400 uppercase">TELEVİZYON</span>
+                                <div className={cn("w-1.5 h-1.5 rounded-full", isTvSocketConnected ? "bg-blue-500 animate-pulse" : "bg-zinc-700")} />
+                              </div>
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] text-zinc-600 italic">Kumanda özelliği için cihazların aynı ağda olması gerekmez, bulut üzerinden çalışır.</p>
+                        </section>
+                      </motion.div>
+                    )}
                   </AnimatePresence>
 
                       {/* Universal Back Button for Mobile/Touch/Remote */}
                       <div className="pt-10 space-y-4">
                         <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 7) ? "true" : "false"}
+                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) ? "true" : "false"}
                           className={cn(
                             "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
-                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 7) && "bg-white/10 text-white settings-focused"
+                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) && "bg-white/10 text-white settings-focused"
                           )}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 7); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 7); }}
+                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
+                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
                           onClick={() => {
                             if (settingsArea === 'content') setSettingsArea('sections');
                             else setSettingsArea('tabs');
@@ -5473,18 +5920,18 @@ export default function App() {
                           }}
                           onPointerDown={() => {
                             setSettingsArea('content');
-                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6);
-                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16);
+                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 6 : 0);
+                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0);
                           }}
                           onMouseEnter={() => { 
                             setSettingsArea('content'); 
-                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : 6);
-                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16); 
+                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 6 : 0);
+                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0); 
                           }}
-                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16)) ? themeColor : undefined }}
+                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0)) ? themeColor : undefined }}
                           className={cn(
                             "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : 16)) ? "text-white scale-105 shadow-2xl settings-focused" : "bg-white/5 text-zinc-400 hover:bg-white/10"
+                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0)) ? "text-white scale-105 shadow-2xl settings-focused" : "bg-white/5 text-zinc-400 hover:bg-white/10"
                           )}
                         >
                           <ChevronLeft className="w-6 h-6" />
@@ -5534,7 +5981,7 @@ export default function App() {
 
       {/* Voice Feedback Overlay */}
       <AnimatePresence>
-        {isListening && (
+        {(isListening || isVoiceProcessing) && (
           <motion.div
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
@@ -5548,16 +5995,29 @@ export default function App() {
               uiMode === 'minimalist' && "bg-black border border-white/10 rounded-none"
             )}>
               <div className="flex gap-1 items-center">
-                {[1, 2, 3, 4].map(i => (
+                {isVoiceProcessing ? (
                   <motion.div
-                    key={i}
-                    animate={{ height: [10, 25, 10] }}
-                    transition={{ repeat: Infinity, duration: 0.5, delay: i * 0.1 }}
-                    className="w-1 bg-red-500 rounded-full"
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                    className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full"
                   />
-                ))}
+                ) : (
+                  [1, 2, 3, 4].map(i => (
+                    <motion.div
+                      key={i}
+                      animate={{ height: [10, 25, 10] }}
+                      transition={{ repeat: Infinity, duration: 0.5, delay: i * 0.1 }}
+                      className="w-1 bg-red-500 rounded-full"
+                    />
+                  ))
+                )}
               </div>
-              <span className="text-sm font-black uppercase tracking-widest text-red-500">Dinliyorum...</span>
+              <span className={cn(
+                "text-sm font-black uppercase tracking-widest",
+                isVoiceProcessing ? "text-orange-500" : "text-red-500"
+              )}>
+                {isVoiceProcessing ? 'Anlıyorum...' : 'Dinliyorum...'}
+              </span>
             </div>
             {voiceTranscript && (
               <motion.div

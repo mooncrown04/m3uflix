@@ -93,7 +93,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
 
   const itemWidth = getItemWidth();
   const gap = 16;
-  const top10Offset = title === 'Top 10' ? 64 : 0;
+  const top10Offset = title === 'Top 10' ? 90 : 0;
   const itemSize = itemWidth + gap + top10Offset;
   const listHeight = orientation === 'landscape' ? (itemWidth * 9/16 + 80) : (itemWidth * 3/2 + 80);
 
@@ -170,7 +170,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   return (
     <div 
       ref={rowRef} 
-      className="space-y-4 group/row relative"
+      className="space-y-2 group/row relative"
     >
       <div className="flex items-center px-4 md:px-12">
         <div 
@@ -216,7 +216,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="relative"
           >
-            <div ref={listContainerRef} className="px-4 md:px-12 pt-10 pb-10 -mt-6">
+            <div ref={listContainerRef} className="px-4 md:px-12 pt-0 pb-6 -mt-6">
               <List
                 ref={listRef}
                 height={listHeight + 80}
@@ -259,7 +259,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
                     handlePressStart={handlePressStart}
                     handlePressEnd={handlePressEnd}
                     customProxyUrl={customProxyUrl}
-                    style={{ ...style, top: (style.top as number) + 40 }}
+                    style={{ ...style, top: (style.top as number) + 20 }}
                     channels={channels}
                     top10Style={top10Style}
                     focusEffect={focusEffect}
