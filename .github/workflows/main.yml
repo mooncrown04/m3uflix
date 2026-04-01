@@ -55,10 +55,11 @@ jobs:
           fi
           npx cap sync android
 
-      - name: Duplicate Class Hatasını Düzelt (Kotlin Patch)
+      - name: Duplicate Class Hatasını Düzelt (Kotlin Patch v2)
         run: |
-          # android/app/build.gradle dosyasına çakışan kütüphaneleri engelleyen kodu ekle
-          sed -i '/dependencies {/a \    modules {\n        module("org.jetbrains.kotlin:kotlin-stdlib-jdk7") { substitutedWith("org.jetbrains.kotlin:kotlin-stdlib") }\n        module("org.jetbrains.kotlin:kotlin-stdlib-jdk8") { substitutedWith("org.jetbrains.kotlin:kotlin-stdlib") }\n    }' android/app/build.gradle
+          # Bu komut, android/build.gradle dosyasına tüm alt projeler için kütüphane zorlama kuralı ekler.
+          # Bu yöntem 'substitutedWith' hatası vermez ve tüm çakışmaları temizler.
+          sed -i '/allprojects {/a \    configurations.all {\n        resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"\n        resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22"\n        resolutionStrategy.force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22"\n    }' android/build.gradle
 
       - name: APK Derle
         run: |
