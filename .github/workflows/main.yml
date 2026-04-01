@@ -38,25 +38,27 @@ jobs:
           git commit -m "M3U Listesi Güncellendi" || echo "Değişiklik yok"
           git push
 
-      - name: Bağımlılıkları Yükle
+      - name: Bağımlılıkları Yükle (React 19 Hatası Çözümü)
         run: npm install --legacy-peer-deps
 
-      - name: Web Buildini Yap
+      - name: Web Buildini Yap (Vite/React)
         run: npm run build
 
-      - name: Capacitor Hazırlık ve Sync
+      - name: Capacitor Platform Ayarları (Eksik Android Klasörü Çözümü)
         run: |
-          # npx'in 'executable' bulamama hatasını önlemek için CLI'ı doğruluyoruz
           npm install @capacitor/cli @capacitor/android --legacy-peer-deps
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
           npx cap sync android
 
-      - name: APK Derle
+      - name: APK Derle (Gradle)
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: APK Dosyasını Yükle (Artifact)
+      - name: APK Dosyasını Yükle (İndirme Linki Oluşturur)
         uses: actions/upload-artifact@v4
         with:
           name: uygulama-debug-apk
