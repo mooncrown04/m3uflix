@@ -22,7 +22,7 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Java ve Android SDK Kurulumu (APK için)
+      - name: Java ve Android SDK Kurulumu
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -38,16 +38,16 @@ jobs:
           git commit -m "M3U Listesi Güncellendi" || echo "Değişiklik yok"
           git push
 
-      - name: Bağımlılıkları ve Web Buildini Yap
-        run: |
-          npm install
-          npm run build
+      - name: Bağımlılıkları Yükle (Hata Çözücü Ekli)
+        run: npm install --legacy-peer-deps
 
-      - name: Capacitor ile Android Projesini Hazırla
-        run: |
-          npx cap sync android
+      - name: Web Buildini Yap
+        run: npm run build
 
-      - name: APK Derle (Gradle)
+      - name: Capacitor Sync
+        run: npx cap sync android
+
+      - name: APK Derle
         run: |
           cd android
           chmod +x gradlew
