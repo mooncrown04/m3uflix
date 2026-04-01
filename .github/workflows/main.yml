@@ -1,38 +1,60 @@
-name: M3U Playlist Otomatik Güncelleyici
+name: M3U Güncelle ve APK Oluştur
 
 on:
-  schedule:
-    # Her gün gece 00:00'da çalışır
-    - cron: '0 0 * * *'
+  push:
+    branches: [ main ]
   workflow_dispatch:
-    # Manuel olarak çalıştırma butonu ekler
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Depoyu Kontrol Et
+      - name: Depoyu Çek
         uses: actions/checkout@v4
 
-      - name: Python Kurulumu
-        uses: actions/setup-python@v5
+      - name: Node.js Kurulumu
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.x'
+          node-version: 20
+          cache: 'npm'
 
-      - name: Gerekli Kütüphaneleri Yükle
+      - name: Java ve Android SDK Kurulumu (APK için)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Python ve M3U Güncelleme
         run: |
           pip install requests
-
-      - name: M3U Birleştirme Scriptini Çalıştır
-        run: |
-          # Burada ana python scriptini çağırıyoruz
           python combine_m3u.py
-
-      - name: Değişiklikleri Kaydet ve Pushla
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
           git add .
-          git commit -m "Oto-Güncelleme: $(date +'%d-%m-%Y %H:%M')" || exit 0
+          git commit -m "M3U Listesi Güncellendi" || echo "Değişiklik yok"
           git push
+
+      - name: Bağımlılıkları ve Web Buildini Yap
+        run: |
+          npm install
+          npm run build
+
+      - name: Capacitor ile Android Projesini Hazırla
+        run: |
+          npx cap sync android
+
+      - name: APK Derle (Gradle)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: APK Dosyasını Yükle (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: uygulama-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
