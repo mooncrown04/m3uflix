@@ -22,11 +22,11 @@ jobs:
           node-version: 20
           cache: 'npm'
 
-      - name: Java ve Android SDK Kurulumu
+      - name: Java ve Android SDK Kurulumu (Java 21 Hatası Çözüldü)
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21' # Hata veren kısım burasıydı, 21'e yükselttik
 
       - name: Python ve M3U Güncelleme
         run: |
@@ -47,13 +47,9 @@ jobs:
       - name: Capacitor Yapılandırma ve Platform Ayarları
         run: |
           npm install @capacitor/cli @capacitor/android --legacy-peer-deps
-          
-          # Eğer capacitor.config dosyası yoksa geçici bir tane oluştur
           if [ ! -f "capacitor.config.json" ] && [ ! -f "capacitor.config.ts" ]; then
             echo '{"appId": "com.m3uflix.app", "appName": "M3UFlix", "webDir": "dist"}' > capacitor.config.json
           fi
-
-          # Android klasörü yoksa ekle, varsa güncelle
           if [ ! -d "android" ]; then
             npx cap add android
           fi
