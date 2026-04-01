@@ -19,7 +19,6 @@ jobs:
           node-version: 20
 
       - name: Install Dependencies
-        # Bağımlılık çakışmalarını aşmak için --legacy-peer-deps eklendi
         run: npm install --legacy-peer-deps
 
       - name: Build Web Project
@@ -32,26 +31,30 @@ jobs:
           java-version: '21'
 
       - name: Initialize Capacitor
-        # Hatayı çözmek için Capacitor paketlerine --legacy-peer-deps eklendi
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+          # APK içinde CORS sorunlarını kökten çözmek için Native HTTP eklentisini ekliyoruz
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor-community/http --legacy-peer-deps
           npx cap init M3UFLIX com.mooncrown.m3uflix --web-dir dist || true
           npx cap add android || true
+          
+          # --- KRİTİK ADIM: HTTP YAYINLARINA İZİN VER ---
+          # Android 9+ cihazlarda http:// linklerinin (IPTV kanallarının) açılması için şarttır.
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            sed -i '/<application/a \    android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
+          fi
+          
           npx cap copy android
 
-      # KOTLIN ÇAKIŞMASINI ÇÖZEN ADIM
       - name: Force Fix Kotlin Duplicates
         run: |
           if [ -d "android" ]; then
             sed -i '1i\configurations.all { resolutionStrategy { force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"; exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"; exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7" } }' android/app/build.gradle
           fi
 
-      # DERLEME VE APK OLUŞTURMA
       - name: Build APK (Gradle)
         run: |
           cd android
           chmod +x gradlew
-          # Jetifier ve AndroidX desteğiyle derleme
           ./gradlew assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true
 
       - name: Upload APK Artifact
