@@ -38,27 +38,34 @@ jobs:
           git commit -m "M3U Listesi Güncellendi" || echo "Değişiklik yok"
           git push
 
-      - name: Bağımlılıkları Yükle (React 19 Hatası Çözümü)
+      - name: Bağımlılıkları Yükle
         run: npm install --legacy-peer-deps
 
-      - name: Web Buildini Yap (Vite/React)
+      - name: Web Buildini Yap
         run: npm run build
 
-      - name: Capacitor Platform Ayarları (Eksik Android Klasörü Çözümü)
+      - name: Capacitor Yapılandırma ve Platform Ayarları
         run: |
           npm install @capacitor/cli @capacitor/android --legacy-peer-deps
+          
+          # Eğer capacitor.config dosyası yoksa geçici bir tane oluştur
+          if [ ! -f "capacitor.config.json" ] && [ ! -f "capacitor.config.ts" ]; then
+            echo '{"appId": "com.m3uflix.app", "appName": "M3UFlix", "webDir": "dist"}' > capacitor.config.json
+          fi
+
+          # Android klasörü yoksa ekle, varsa güncelle
           if [ ! -d "android" ]; then
             npx cap add android
           fi
           npx cap sync android
 
-      - name: APK Derle (Gradle)
+      - name: APK Derle
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: APK Dosyasını Yükle (İndirme Linki Oluşturur)
+      - name: APK Dosyasını Yükle (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: uygulama-debug-apk
