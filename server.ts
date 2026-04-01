@@ -54,6 +54,15 @@ async function startServer() {
       io.to(roomId).emit("command-received", { command, value });
     });
 
+    socket.on("sync-state", (data) => {
+      // Find the room this socket is in (excluding its own ID)
+      const rooms = Array.from(socket.rooms);
+      const roomId = rooms.find(r => r !== socket.id);
+      if (roomId) {
+        socket.to(roomId).emit("sync-state", data);
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
     });

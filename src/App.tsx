@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -153,6 +153,9 @@ export default function App() {
   const [voiceControlEnabled, setVoiceControlEnabled] = useState(() => 
     localStorage.getItem('voice_control_enabled') !== 'false' // Default to true
   );
+  const [remoteControlEnabled, setRemoteControlEnabled] = useState(() => 
+    localStorage.getItem('remote_control_enabled') !== 'false' // Default to true
+  );
   const [focusEffect, setFocusEffect] = useState<FocusEffect>(() => {
     const saved = localStorage.getItem('focus_effect');
     return (saved as FocusEffect) || 'default';
@@ -161,6 +164,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('voice_control_enabled', String(voiceControlEnabled));
   }, [voiceControlEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('remote_control_enabled', String(remoteControlEnabled));
+  }, [remoteControlEnabled]);
 
   useEffect(() => {
     localStorage.setItem('dynamic_theme_enabled', String(dynamicThemeEnabled));
@@ -457,6 +464,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('gemini_api_key', geminiApiKey);
   }, [geminiApiKey]);
+
+  const [playerEngine, setPlayerEngine] = useState<'hls' | 'shaka'>(() => 
+    (localStorage.getItem('player_engine') as 'hls' | 'shaka') || 'hls'
+  );
+
+  useEffect(() => {
+    localStorage.setItem('player_engine', playerEngine);
+  }, [playerEngine]);
 
   const [clockStyle, setClockStyle] = useState<'original' | 'horizontal' | 'minimal' | 'retro' | 'modern'>(() => 
     (localStorage.getItem('clock_style') as any) || 'original'
@@ -783,6 +798,7 @@ export default function App() {
       const isAlreadyFavorite = current.includes(channelId);
       
       if (isAlreadyFavorite) {
+        showToast(`${channel.name} favorilerden çıkarıldı`, "info");
         return current.filter(id => id !== channelId);
       } else {
         const hasSameUrl = current.some(favId => {
@@ -791,12 +807,14 @@ export default function App() {
         });
         
         if (hasSameUrl) {
+          showToast("Bu kanal zaten favorilerinizde", "info");
           return current;
         }
+        showToast(`${channel.name} favorilere eklendi`, "success");
         return [...current, channelId];
       }
     });
-  }, [channels]);
+  }, [channels, showToast]);
 
   useEffect(() => {
     if (channels.length === 0) {
@@ -1592,9 +1610,8 @@ export default function App() {
   const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
   const isKeyHeld = useRef(false);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Toggle Mini Player with 'M' key
+  const handleKeyDown = (e: KeyboardEvent) => {
+    // Toggle Mini Player with 'M' key
       if (e.key.toLowerCase() === 'm' && currentChannel && navContext !== 'player') {
         e.preventDefault();
         setIsMiniPlayer(!isMiniPlayer);
@@ -1940,6 +1957,10 @@ export default function App() {
                   else if (settingsSection === 5) setSettingsFocus(50);
                   else if (settingsSection === 6) setSettingsFocus(60);
                   else if (settingsSection === 7) setSettingsFocus(70);
+                  else if (settingsSection === 8) setSettingsFocus(80);
+                  else if (settingsSection === 9) setSettingsFocus(90);
+                  else if (settingsSection === 10) setSettingsFocus(100);
+                  else if (settingsSection === 11) setSettingsFocus(17);
                 } else if (activeSettingsTab === 1) {
                   if (settingsSection === 0) setSettingsFocus(0);
                   else if (settingsSection === 1) setSettingsFocus(1);
@@ -1968,6 +1989,7 @@ export default function App() {
                 else if (settingsSection === 5 && settingsFocus < 54) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 6 && settingsFocus < 65) setSettingsFocus(prev => prev + 1);
                 else if (settingsSection === 7 && settingsFocus < 74) setSettingsFocus(prev => prev + 1);
+                else if (settingsSection === 10 && settingsFocus === 100) setSettingsFocus(101);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1 && settingsFocus === 1) setSettingsFocus(2);
                 else if (settingsSection === 2 && settingsFocus === 4) setSettingsFocus(5);
@@ -2020,7 +2042,7 @@ export default function App() {
                 }
               }
             } else if (settingsArea === 'sections') {
-              const maxSections = activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 6 : 6;
+              const maxSections = activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : 7;
               if (settingsSection === maxSections) {
                 // Stay or cycle? User said "pass to side section"
                 // Maybe they want to cycle back to tabs?
@@ -2056,6 +2078,16 @@ export default function App() {
                   else { setSettingsSection(7); setSettingsFocus(70); }
                 } else if (settingsSection === 7) {
                   if (settingsFocus <= 71) setSettingsFocus(prev => prev + 3);
+                  else { setSettingsSection(8); setSettingsFocus(80); }
+                } else if (settingsSection === 8) {
+                  setSettingsSection(9); setSettingsFocus(90);
+                } else if (settingsSection === 9) {
+                  setSettingsSection(10); setSettingsFocus(100);
+                } else if (settingsSection === 10) {
+                  if (settingsFocus === 100) setSettingsFocus(101);
+                  else { setSettingsSection(11); setSettingsFocus(17); }
+                } else if (settingsSection === 11) {
+                  // Back button, do nothing
                 }
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) {
@@ -2109,7 +2141,7 @@ export default function App() {
                 // Desktop: move between tabs
                 if (sidebarFocus === 0) {
                   setSettingsArea('sections');
-                  const maxSections = activeSettingsTab === 0 ? 7 : activeSettingsTab === 1 ? 6 : 6;
+                  const maxSections = activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : 7;
                   setSettingsSection(maxSections);
                 } else {
                   const nextFocus = (sidebarFocus - 1 + 4) % 4;
@@ -2155,6 +2187,15 @@ export default function App() {
                 } else if (settingsSection === 7) {
                   if (settingsFocus >= 73) setSettingsFocus(prev => prev - 3);
                   else { setSettingsSection(6); setSettingsFocus(60); }
+                } else if (settingsSection === 8) {
+                  setSettingsSection(7); setSettingsFocus(74);
+                } else if (settingsSection === 9) {
+                  setSettingsSection(8); setSettingsFocus(80);
+                } else if (settingsSection === 10) {
+                  if (settingsFocus === 101) setSettingsFocus(100);
+                  else { setSettingsSection(9); setSettingsFocus(90); }
+                } else if (settingsSection === 11) {
+                  setSettingsSection(10); setSettingsFocus(101);
                 }
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 1) {
@@ -2382,26 +2423,37 @@ export default function App() {
       }
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      let key = e.key;
-      if (key === 'Select' || key === 'OK') key = 'Enter';
-      
-      if (key === 'Enter') {
-        if (keyHoldTimer.current) {
-          clearTimeout(keyHoldTimer.current);
-          keyHoldTimer.current = null;
-        }
-        isKeyHeld.current = false;
+  const handleKeyUp = (e: KeyboardEvent) => {
+    let key = e.key;
+    if (key === 'Select' || key === 'OK') key = 'Enter';
+    
+    if (key === 'Enter') {
+      if (keyHoldTimer.current) {
+        clearTimeout(keyHoldTimer.current);
+        keyHoldTimer.current = null;
       }
-    };
+      isKeyHeld.current = false;
+    }
+  };
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+  const handleKeyDownRef = useRef(handleKeyDown);
+  const handleKeyUpRef = useRef(handleKeyUp);
+
+  useEffect(() => {
+    handleKeyDownRef.current = handleKeyDown;
+    handleKeyUpRef.current = handleKeyUp;
+  });
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => handleKeyDownRef.current(e);
+    const onKeyUp = (e: KeyboardEvent) => handleKeyUpRef.current(e);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
     };
-  }, [navContext, groupedChannels, activeRow, activeCol, channels.length, currentChannel, showSettings, settingsFocus, playlistUrl, favorites]);
+  }, []);
 
   const resolveUrl = (rawUrl: string) => {
     if (!rawUrl) return [];
@@ -2549,73 +2601,103 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (socketRef.current && isRemoteConnected && channels.length > 0) {
+      socketRef.current.emit('sync-state', {
+        channels: channels.slice(0, 2000).map(c => ({
+          id: c.id,
+          name: c.name,
+          logo: c.logo,
+          group: c.group
+        }))
+      });
+    }
+  }, [channels, isRemoteConnected]);
+
+  useEffect(() => {
+    if (socketRef.current && isRemoteConnected) {
+      socketRef.current.emit('sync-state', {
+        currentChannel: currentChannel ? { id: currentChannel.id, name: currentChannel.name } : null
+      });
+    }
+  }, [currentChannel, isRemoteConnected]);
+
   const handleRemoteCommand = useCallback((command: string, value?: any) => {
     console.log('Remote command received:', command, value);
     
     switch (command) {
       case 'nav-up':
-        setActiveRow(prev => Math.max(0, prev - 1));
+        handleKeyDown({ key: 'ArrowUp', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'nav-down':
-        const maxRows = channels.length === 0 ? 5 : groupedChannelsRef.current.length;
-        setActiveRow(prev => Math.min(maxRows - 1, prev + 1));
+        handleKeyDown({ key: 'ArrowDown', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'nav-left':
-        setActiveCol(prev => Math.max(0, prev - 1));
+        handleKeyDown({ key: 'ArrowLeft', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'nav-right':
-        const currentRow = groupedChannelsRef.current[activeRowRef.current];
-        if (currentRow) {
-          setActiveCol(prev => Math.min(currentRow[1].length - 1, prev + 1));
-        }
+        handleKeyDown({ key: 'ArrowRight', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'nav-ok':
-        if (navContextRef.current === 'browse' && activeRowRef.current !== -1) {
-          if (channels.length === 0) {
-            // Handle setup screen buttons based on current implementation
-            switch (activeRowRef.current) {
-              case 0: 
-                document.getElementById('empty-file-upload')?.click(); 
-                break;
-              case 1: 
-                if (extraUrl) {
-                  setPlaylistUrl(extraUrl);
-                  handleUrlSubmit(extraUrl);
-                }
-                break;
-              case 2: 
-                localStorage.removeItem('m3u_url');
-                localStorage.setItem('is_remote_mode', 'true');
-                window.location.reload();
-                break;
-              case 3: 
-                localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
-                setSavedUrl(DEFAULT_M3U_URL);
-                setPlaylistUrl(DEFAULT_M3U_URL);
-                handleUrlSubmit(DEFAULT_M3U_URL);
-                break;
-              case 4:
-                setShowSettings(true);
-                setNavContext('settings');
-                setSettingsFocus(0);
-                setActiveSettingsTab(1);
-                break;
-            }
-          } else {
-            const selectedChannel = groupedChannelsRef.current[activeRowRef.current]?.[1][activeColRef.current];
-            if (selectedChannel) handleChannelSelect(selectedChannel);
-          }
-        } else if (navContextRef.current === 'channel-detail' && channelForDetailRef.current) {
-          handleChannelSelect(channelForDetailRef.current);
-        }
+        handleKeyDown({ key: 'Enter', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'volume-up':
-        setGlobalVolume(prev => Math.min(1, prev + 0.1));
+        setGlobalVolume(prev => {
+          const next = Math.min(1, prev + 0.1);
+          if (socketRef.current) {
+            socketRef.current.emit('sync-state', { volume: next, isMuted: false });
+          }
+          return next;
+        });
         setIsMuted(false);
         break;
       case 'volume-down':
-        setGlobalVolume(prev => Math.max(0, prev - 0.1));
+        setGlobalVolume(prev => {
+          const next = Math.max(0, prev - 0.1);
+          if (socketRef.current) {
+            socketRef.current.emit('sync-state', { volume: next, isMuted: false });
+          }
+          return next;
+        });
         setIsMuted(false);
+        break;
+      case 'channel-up':
+        if (navContextRef.current === 'player' && currentChannelRef.current) {
+          const currentIndex = channels.findIndex(ch => ch.id === currentChannelRef.current?.id);
+          if (currentIndex !== -1) {
+            const nextIndex = (currentIndex + 1) % channels.length;
+            handleChannelSelect(channels[nextIndex]);
+          }
+        } else {
+          setActiveRow(prev => Math.max(0, prev - 1));
+        }
+        break;
+      case 'channel-down':
+        if (navContextRef.current === 'player' && currentChannelRef.current) {
+          const currentIndex = channels.findIndex(ch => ch.id === currentChannelRef.current?.id);
+          if (currentIndex !== -1) {
+            const prevIndex = (currentIndex - 1 + channels.length) % channels.length;
+            handleChannelSelect(channels[prevIndex]);
+          }
+        } else {
+          const maxRows = channels.length === 0 ? 5 : groupedChannelsRef.current.length;
+          setActiveRow(prev => Math.min(maxRows - 1, prev + 1));
+        }
+        break;
+      case 'add-favorite':
+        const category = value;
+        let channelToFav = null;
+        if (currentChannelRef.current) {
+          channelToFav = currentChannelRef.current;
+        } else if (navContextRef.current === 'browse' && activeRowRef.current !== -1) {
+          channelToFav = groupedChannelsRef.current[activeRowRef.current]?.[1][activeColRef.current];
+        }
+        
+        if (channelToFav) {
+          toggleFavorite(channelToFav.id);
+          const catName = category === 'live' ? 'Canlı TV' : category === 'movie' ? 'Film' : category === 'series' ? 'Dizi' : 'Multimedya';
+          showToast(`${channelToFav.name} ${catName} favorilerine eklendi`, "success");
+        }
         break;
       case 'mute':
         setIsMuted(prev => !prev);
@@ -2650,17 +2732,74 @@ export default function App() {
           if (selectedChannel) toggleFavorite(selectedChannel.id);
         }
         break;
+      case 'toggle-mini-player':
+        if (currentChannelRef.current) {
+          setIsMiniPlayer(prev => !prev);
+        }
+        break;
+      case 'toggle-epg':
+        setShowEPGTimeline(prev => !prev);
+        break;
+      case 'preview-player':
+        if (navContextRef.current === 'browse' && activeRowRef.current >= 0 && activeColRef.current >= 0) {
+          const selectedChannel = groupedChannelsRef.current[activeRowRef.current]?.[1][activeColRef.current];
+          if (selectedChannel) {
+            if (isMiniPlayer && currentChannelRef.current?.id === selectedChannel.id) {
+              setIsMiniPlayer(false);
+              setCurrentChannel(null);
+            } else {
+              setCurrentChannel(selectedChannel);
+              setIsMiniPlayer(true);
+            }
+          }
+        }
+        break;
+      case 'digit-0': case 'digit-1': case 'digit-2': case 'digit-3': case 'digit-4':
+      case 'digit-5': case 'digit-6': case 'digit-7': case 'digit-8': case 'digit-9':
+        const digit = parseInt(command.split('-')[1]);
+        console.log('Digit command received:', digit);
+        // We could implement channel switching by number here if we had channel numbers
+        break;
+      case 'type-text':
+        if (typeof value === 'string') {
+          setSearchQuery(value);
+          setNavContext('browse');
+          if (value === '') {
+            setActiveRow(0);
+            setActiveCol(0);
+          }
+        }
+        break;
+      case 'back':
+        // Simulate Backspace key
+        handleKeyDown({ key: 'Backspace', preventDefault: () => {}, stopPropagation: () => {} } as any);
+        break;
+      case 'exit':
+        setNavContext('browse');
+        setCurrentChannel(null);
+        setShowSettings(false);
+        setChannelMenuId(null);
+        setSearchQuery('');
+        break;
+      case 'select-channel':
+        if (value) {
+          const channelToSelect = channels.find(c => c.id === value || c.name === value);
+          if (channelToSelect) {
+            handleChannelSelect(channelToSelect);
+          }
+        }
+        break;
       case 'voice-trigger':
         startListening();
         break;
     }
-  }, [channels, handleChannelSelect, toggleFavorite, startListening, setShowSettings, setNavContext, setCurrentChannel, setChannelMenuId, setChannelForDetail, handleUrlSubmit, extraUrl, setPlaylistUrl, setSavedUrl]);
+  }, [channels, handleChannelSelect, toggleFavorite, startListening, setShowSettings, setNavContext, setCurrentChannel, setChannelMenuId, setChannelForDetail, handleUrlSubmit, extraUrl, setPlaylistUrl, setSavedUrl, handleKeyDown]);
 
   const handleRemoteCommandRef = useRef(handleRemoteCommand);
   useEffect(() => { handleRemoteCommandRef.current = handleRemoteCommand; }, [handleRemoteCommand]);
 
   useEffect(() => {
-    if (!appUrl || !remoteRoomId) return;
+    if (!appUrl || !remoteRoomId || !remoteControlEnabled) return;
 
     const normalizedAppUrl = appUrl.replace(/\/$/, '');
     console.log('TV app connecting to socket for remote control...', normalizedAppUrl);
@@ -2669,7 +2808,7 @@ export default function App() {
       transports: ['polling', 'websocket'],
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
-      timeout: 20000
+      timeout: 120000 // Extended from 60000
     });
     socketRef.current = socket;
 
@@ -2693,6 +2832,36 @@ export default function App() {
       console.log('Remote user joined room:', data);
       setIsRemoteConnected(true);
       showToast("Mobil kumanda bağlandı", "success");
+      
+      // Sync initial state
+      if (channels.length > 0) {
+        const syncData = {
+          channels: channels.slice(0, 2000).map(c => ({
+            id: c.id,
+            name: c.name,
+            logo: c.logo,
+            group: c.group
+          })),
+          currentChannel: currentChannel ? { id: currentChannel.id, name: currentChannel.name } : null
+        };
+        socket.emit('sync-state', syncData);
+      }
+    });
+
+    socket.on('request-sync', () => {
+      console.log('Remote requested sync');
+      if (channels.length > 0) {
+        const syncData = {
+          channels: channels.slice(0, 2000).map(c => ({
+            id: c.id,
+            name: c.name,
+            logo: c.logo,
+            group: c.group
+          })),
+          currentChannel: currentChannel ? { id: currentChannel.id, name: currentChannel.name } : null
+        };
+        socket.emit('sync-state', syncData);
+      }
     });
 
     socket.on('disconnect', (reason) => {
@@ -3916,8 +4085,7 @@ export default function App() {
                 {[
                   { id: 0, label: 'Görünüm', icon: Sun },
                   { id: 1, label: 'Liste', icon: ListIcon },
-                  { id: 2, label: 'Genel', icon: Settings },
-                  { id: 3, label: 'Kumanda', icon: Smartphone }
+                  { id: 2, label: 'Genel', icon: Settings }
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -4752,7 +4920,7 @@ export default function App() {
                               transition={{ duration: 0.3, ease: "easeInOut" }}
                               className="overflow-hidden"
                             >
-                              <div className="p-2">
+                              <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <button
                                   onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
                                   onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
@@ -4765,12 +4933,12 @@ export default function App() {
                                     settingsArea === 'content' && settingsFocus === 90 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
                                   )}
                                 >
-                                  <div className="flex flex-col items-start gap-1">
+                                  <div className="flex flex-col items-start gap-1 text-left">
                                     <span className="font-bold text-lg">Sesli Kontrol</span>
-                                    <span className="text-xs text-zinc-500">Uygulamayı sesli komutlarla yönetin</span>
+                                    <span className="text-[10px] text-zinc-500">Uygulamayı sesli komutlarla yönetin</span>
                                   </div>
                                   <div className={cn(
-                                    "w-12 h-6 rounded-full transition-all relative",
+                                    "w-12 h-6 rounded-full transition-all relative flex-shrink-0",
                                     voiceControlEnabled ? "bg-green-500" : "bg-zinc-700"
                                   )}>
                                     <div className={cn(
@@ -4779,6 +4947,151 @@ export default function App() {
                                     )} />
                                   </div>
                                 </button>
+
+                                <button
+                                  onClick={() => setRemoteControlEnabled(!remoteControlEnabled)}
+                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(100); } }}
+                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(100); } }}
+                                  className={cn(
+                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
+                                    remoteControlEnabled 
+                                      ? "border-white bg-white/10" 
+                                      : "border-white/5 hover:border-white/20 bg-white/5",
+                                    settingsArea === 'content' && settingsFocus === 100 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
+                                  )}
+                                >
+                                  <div className="flex flex-col items-start gap-1 text-left">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-lg">Uzaktan Kumanda</span>
+                                      {isRemoteConnected && (
+                                        <motion.div 
+                                          animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                                          transition={{ duration: 2, repeat: Infinity }}
+                                          className="w-2 h-2 rounded-full"
+                                          style={{ backgroundColor: themeColor }}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] text-zinc-500">Mobil cihazınızı kumanda olarak kullanın</span>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full transition-all relative flex-shrink-0",
+                                    remoteControlEnabled ? "bg-green-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      remoteControlEnabled ? "left-7" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+
+                      <section className="space-y-4">
+                        <button 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 10 ? "true" : "false"}
+                          className={cn(
+                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
+                            uiMode === 'modern' && "rounded-xl",
+                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
+                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
+                            settingsArea === 'sections' && settingsSection === 10 
+                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
+                              : "hover:bg-white/5"
+                          )}
+                          onClick={() => toggleSection(0, 10)}
+                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(10); }}
+                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(10); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                            Uzaktan Kumanda
+                            {isRemoteConnected && (
+                              <motion.div 
+                                animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                                transition={{ duration: 2, repeat: Infinity }}
+                                className="w-2 h-2 rounded-full ml-1"
+                                style={{ backgroundColor: themeColor }}
+                              />
+                            )}
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-10'] ? "rotate-180" : "rotate-0")} />
+                        </button>
+                        <AnimatePresence>
+                          {expandedSections['0-10'] && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2 space-y-6">
+
+                                {remoteControlEnabled && (
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="space-y-6 text-center flex flex-col items-center pt-4 border-t border-white/5"
+                                  >
+                                    <div className="p-4 bg-white rounded-[24px] shadow-2xl shadow-white/5 border-4 border-white/5 relative group">
+                                      <QRCodeCanvas 
+                                        value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
+                                        size={140}
+                                        level="H"
+                                        includeMargin={false}
+                                      />
+                                      <div className="absolute -top-3 -right-3 bg-orange-500 text-white px-3 py-1.5 rounded-full font-black text-[8px] shadow-xl animate-bounce">
+                                        TARATIN
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-4 w-full">
+                                      <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
+                                        <div className="text-left">
+                                          <div className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">EŞLEŞME KODU</div>
+                                          <div className="text-xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
+                                        </div>
+                                        <button 
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`);
+                                            showToast('Bağlantı adresi kopyalandı!', 'success');
+                                          }}
+                                          onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(101); } }}
+                                          onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(101); } }}
+                                          className={cn(
+                                            "p-3 rounded-xl transition-all",
+                                            settingsArea === 'content' && settingsFocus === 101 ? "bg-white text-black scale-110" : "bg-white/10 text-white hover:bg-white/20"
+                                          )}
+                                        >
+                                          <LinkIcon className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                      
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div className={cn(
+                                          "bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors",
+                                          isRemoteConnected ? "border-green-500/50 bg-green-500/5" : ""
+                                        )}>
+                                          <Smartphone className={cn("w-4 h-4", isRemoteConnected ? "text-green-500" : "text-zinc-500")} />
+                                          <span className="text-[8px] font-bold text-zinc-400 uppercase">MOBİL</span>
+                                          <div className={cn("w-1 h-1 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-zinc-700")} />
+                                        </div>
+                                        <div className={cn(
+                                          "bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors",
+                                          isTvSocketConnected ? "border-blue-500/50 bg-blue-500/5" : ""
+                                        )}>
+                                          <Tv className={cn("w-4 h-4", isTvSocketConnected ? "text-blue-500" : "text-zinc-500")} />
+                                          <span className="text-[8px] font-bold text-zinc-400 uppercase">TV</span>
+                                          <div className={cn("w-1 h-1 rounded-full", isTvSocketConnected ? "bg-blue-500 animate-pulse" : "bg-zinc-700")} />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
                               </div>
                             </motion.div>
                           )}
@@ -5535,7 +5848,7 @@ export default function App() {
                                     </div>
                                     <div className="text-left">
                                       <div className="text-lg">Kanal Sörfü</div>
-                                      <div className="text-xs opacity-50 font-medium">Oynatıcıda hızlı kanal geçiş şeridi</div>
+                                      <div className="text-xs opacity-50 font-medium">Yukarı/Aşağı tuşlarıyla kanal değiştirme</div>
                                     </div>
                                   </div>
                                   <div className={cn(
@@ -5548,6 +5861,46 @@ export default function App() {
                                     )} />
                                   </div>
                                 </button>
+
+                                <div className="mt-4 space-y-2 px-2">
+                                  <div className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">
+                                    <Cpu className="w-3 h-3" />
+                                    Oynatıcı Motoru
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                      { id: 'hls', name: 'Standart', desc: 'HLS.js' },
+                                      { id: 'shaka', name: 'ExoPlayer', desc: 'Shaka Web' }
+                                    ].map((engine, idx) => (
+                                      <button
+                                        key={engine.id}
+                                        onClick={() => setPlayerEngine(engine.id as any)}
+                                        onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4 + idx); }}
+                                        onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4 + idx); }}
+                                        className={cn(
+                                          "flex flex-col items-start p-3 rounded-xl border transition-all duration-300 text-left",
+                                          playerEngine === engine.id
+                                            ? "bg-white/10 border-white/20 ring-1 ring-white/20"
+                                            : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10",
+                                          settingsArea === 'content' && settingsFocus === (4 + idx) ? "border-white ring-2 ring-white/20 scale-105 bg-white/20 settings-focused" : ""
+                                        )}
+                                      >
+                                        <div className="flex items-center justify-between w-full mb-0.5">
+                                          <span className={cn(
+                                            "font-bold text-sm",
+                                            playerEngine === engine.id ? "text-white" : "text-white/60"
+                                          )}>
+                                            {engine.name}
+                                          </span>
+                                          {playerEngine === engine.id && (
+                                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                                          )}
+                                        </div>
+                                        <span className="text-[10px] text-white/40 font-medium">{engine.desc}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                               </div>
                             </motion.div>
                           )}
@@ -5806,106 +6159,17 @@ export default function App() {
                       </section>
                     </motion.div>
                   )}
-                    {activeSettingsTab === 3 && (
-                      <motion.div 
-                        key="tab-3"
-                        initial={{ opacity: 0, y: 10 }} 
-                        animate={{ opacity: 1, y: 0 }} 
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="space-y-10"
-                      >
-                        <section className="space-y-6 text-center flex flex-col items-center">
-                          <div className="space-y-2">
-                            <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white">Mobil Uzaktan Kumanda</h3>
-                            <p className="text-zinc-500 text-sm max-w-md mx-auto">Telefonunuzu bir kumandaya dönüştürmek için aşağıdaki QR kodu taratın.</p>
-                          </div>
-
-                          <div className="p-6 bg-white rounded-[32px] shadow-2xl shadow-white/10 border-8 border-white/5 relative group">
-                            <QRCodeCanvas 
-                              value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
-                              size={200}
-                              level="H"
-                              includeMargin={false}
-                            />
-                            <div className="absolute -top-4 -right-4 bg-orange-500 text-white px-4 py-2 rounded-full font-black text-xs shadow-xl animate-bounce">
-                              TARATIN
-                            </div>
-                          </div>
-
-                          <div className="space-y-4 w-full max-w-sm">
-                            <div className="space-y-2">
-                              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block text-left">MANUEL URL (HATA VARSA DÜZELTİN)</label>
-                              <div className="flex gap-2">
-                                <input 
-                                  type="text" 
-                                  value={appUrl}
-                                  onChange={(e) => setAppUrl(e.target.value)}
-                                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-orange-500"
-                                  placeholder="https://uygulama-adresi.run.app"
-                                />
-                                <button 
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`);
-                                    showToast('Bağlantı adresi kopyalandı!', 'success');
-                                  }}
-                                  className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-xl transition-colors"
-                                >
-                                  <LinkIcon className="w-5 h-5" />
-                                </button>
-                              </div>
-                              <p className="text-[10px] text-zinc-600 text-left">QR kod çalışmazsa bu adresi telefonunuzun tarayıcısına elle yazabilirsiniz.</p>
-                            </div>
-
-                            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                              <div className="text-left">
-                                <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">EŞLEŞME KODU</div>
-                                <div className="text-2xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
-                              </div>
-                              <div className={cn(
-                                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest",
-                                isRemoteConnected ? "bg-green-500/20 text-green-500" : "bg-orange-500/20 text-orange-500"
-                              )}>
-                                {isRemoteConnected ? 'BAĞLI' : 'BEKLİYOR'}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className={cn(
-                                "bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors",
-                                isRemoteConnected ? "border-green-500/50 bg-green-500/5" : ""
-                              )}>
-                                <Smartphone className={cn("w-6 h-6", isRemoteConnected ? "text-green-500" : "text-zinc-500")} />
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase">TELEFON</span>
-                                <div className={cn("w-1.5 h-1.5 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-zinc-700")} />
-                              </div>
-                              <div className={cn(
-                                "bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col items-center gap-2 transition-colors",
-                                isTvSocketConnected ? "border-blue-500/50 bg-blue-500/5" : ""
-                              )}>
-                                <Tv className={cn("w-6 h-6", isTvSocketConnected ? "text-blue-500" : "text-zinc-500")} />
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase">TELEVİZYON</span>
-                                <div className={cn("w-1.5 h-1.5 rounded-full", isTvSocketConnected ? "bg-blue-500 animate-pulse" : "bg-zinc-700")} />
-                              </div>
-                            </div>
-                          </div>
-
-                          <p className="text-[10px] text-zinc-600 italic">Kumanda özelliği için cihazların aynı ağda olması gerekmez, bulut üzerinden çalışır.</p>
-                        </section>
-                      </motion.div>
-                    )}
                   </AnimatePresence>
-
                       {/* Universal Back Button for Mobile/Touch/Remote */}
                       <div className="pt-10 space-y-4">
                         <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) ? "true" : "false"}
+                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) ? "true" : "false"}
                           className={cn(
                             "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
-                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) && "bg-white/10 text-white settings-focused"
+                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) && "bg-white/10 text-white settings-focused"
                           )}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
+                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
+                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
                           onClick={() => {
                             if (settingsArea === 'content') setSettingsArea('sections');
                             else setSettingsArea('tabs');
@@ -5920,12 +6184,12 @@ export default function App() {
                           }}
                           onPointerDown={() => {
                             setSettingsArea('content');
-                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 6 : 0);
+                            setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0);
                             setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0);
                           }}
                           onMouseEnter={() => { 
                             setSettingsArea('content'); 
-                            setSettingsSection(activeSettingsTab === 0 ? 4 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 6 : 0);
+                            setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0);
                             setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0); 
                           }}
                           style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0)) ? themeColor : undefined }}
@@ -6174,6 +6438,7 @@ export default function App() {
           isMuted={isMuted}
           onVolumeChange={setGlobalVolume}
           onMuteToggle={setIsMuted}
+          playerEngine={playerEngine}
         />
       </div>
       )}

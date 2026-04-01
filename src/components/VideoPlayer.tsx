@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
-import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star } from 'lucide-react';
+import shaka from 'shaka-player';
+import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
@@ -27,6 +28,7 @@ interface VideoPlayerProps {
   isMuted?: boolean;
   onVolumeChange?: (volume: number) => void;
   onMuteToggle?: (isMuted: boolean) => void;
+  playerEngine?: 'hls' | 'shaka';
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -46,10 +48,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   volume: externalVolume,
   isMuted: externalIsMuted,
   onVolumeChange,
-  onMuteToggle
+  onMuteToggle,
+  playerEngine = 'hls'
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
+  const [shakaInstance, setShakaInstance] = useState<any>(null);
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [subtitleTracks, setSubtitleTracks] = useState<any[]>([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState<number>(-1);
@@ -69,6 +73,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(externalVolume ?? 1);
   const [isMuted, setIsMuted] = useState(externalIsMuted ?? false);
+  const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
+  const volumeIndicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isFirstVolumeChange = useRef(true);
+
+  useEffect(() => {
+    if (isFirstVolumeChange.current) {
+      isFirstVolumeChange.current = false;
+      return;
+    }
+
+    if (activeMenu !== 'volume') {
+      setShowVolumeIndicator(true);
+      if (volumeIndicatorTimeoutRef.current) {
+        clearTimeout(volumeIndicatorTimeoutRef.current);
+      }
+      volumeIndicatorTimeoutRef.current = setTimeout(() => {
+        setShowVolumeIndicator(false);
+      }, 3000);
+    }
+
+    return () => {
+      if (volumeIndicatorTimeoutRef.current) {
+        clearTimeout(volumeIndicatorTimeoutRef.current);
+      }
+    };
+  }, [volume, isMuted, activeMenu]);
 
   useEffect(() => {
     if (externalVolume !== undefined) setVolume(externalVolume);
@@ -414,86 +444,121 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   useEffect(() => {
-    console.log('VideoPlayer initializing for URL:', currentUrl);
+    shaka.polyfill.installAll();
+  }, []);
+
+  useEffect(() => {
+    console.log('VideoPlayer initializing for URL:', currentUrl, 'Engine:', playerEngine);
     const video = videoRef.current;
     if (!video) return;
 
     let hls: Hls | null = null;
     let dash: dashjs.MediaPlayerClass | null = null;
+    let shakaPlayer: any = null;
+
     const lowerUrl = currentUrl.toLowerCase();
     const isHlsUrl = lowerUrl.includes('.m3u8') || lowerUrl.includes('m3u8');
     const isDashUrl = lowerUrl.includes('.mpd') || lowerUrl.includes('mpd');
 
-    if (isHlsUrl) {
-      if (Hls.isSupported()) {
-        hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 60,
-          xhrSetup: (xhr, url) => {
-            const proxyBase = customProxyUrl || '/api/proxy?url=';
-            const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
-            const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
+    const initShaka = async () => {
+      shakaPlayer = new shaka.Player(video);
+      setShakaInstance(shakaPlayer);
 
-            if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
-              const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
-              xhr.open('GET', proxiedUrl, true);
-            }
-          }
-        });
-        hls.loadSource(currentUrl);
-        hls.attachMedia(video);
+      shakaPlayer.addEventListener('error', (event: any) => {
+        console.error('Shaka Player Error:', event.detail);
+        if (event.detail.severity === 2) { // Fatal error
+          handleVideoError();
+        }
+      });
+
+      try {
+        await shakaPlayer.load(currentUrl);
+        console.log('Shaka Player loaded successfully');
+        if (isPlaying) video.play().catch(() => {});
         
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          setAudioTracks(hls?.audioTracks || []);
-          setSubtitleTracks(hls?.subtitleTracks || []);
-          setCurrentAudioTrack(hls?.audioTrack || -1);
-          setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
+        // Shaka handles tracks differently, we can implement track selection later if needed
+        setAudioTracks(shakaPlayer.getVariantTracks() || []);
+        setSubtitleTracks(shakaPlayer.getTextTracks() || []);
+      } catch (e) {
+        console.error('Shaka Player Load Error:', e);
+        handleVideoError();
+      }
+    };
+
+    if (playerEngine === 'shaka') {
+      initShaka();
+    } else {
+      if (isHlsUrl) {
+        if (Hls.isSupported()) {
+          hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 60,
+            xhrSetup: (xhr, url) => {
+              const proxyBase = customProxyUrl || '/api/proxy?url=';
+              const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
+              const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
+
+              if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
+                const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
+                xhr.open('GET', proxiedUrl, true);
+              }
+            }
+          });
+          hls.loadSource(currentUrl);
+          hls.attachMedia(video);
+          
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            setAudioTracks(hls?.audioTracks || []);
+            setSubtitleTracks(hls?.subtitleTracks || []);
+            setCurrentAudioTrack(hls?.audioTrack || -1);
+            setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
+            if (isPlaying) video.play().catch(() => {});
+          });
+
+          hls.on(Hls.Events.ERROR, (_, data) => {
+            if (data.fatal) {
+              handleVideoError();
+            }
+          });
+
+          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+            setCurrentAudioTrack(data.id);
+          });
+
+          hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+            setCurrentSubtitleTrack(data.id);
+          });
+
+          setHlsInstance(hls);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = currentUrl;
+          video.load();
           if (isPlaying) video.play().catch(() => {});
-        });
-
-        hls.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            handleVideoError();
-          }
-        });
-
-        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
-          setCurrentAudioTrack(data.id);
-        });
-
-        hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
-          setCurrentSubtitleTrack(data.id);
-        });
-
-        setHlsInstance(hls);
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        } else {
+          handleVideoError();
+        }
+      } else if (isDashUrl) {
+        dash = dashjs.MediaPlayer().create();
+        dash.initialize(video, currentUrl, isPlaying);
+        
+        // Reset tracks as dash handled differently
+        setAudioTracks([]);
+        setSubtitleTracks([]);
+        setCurrentAudioTrack(-1);
+        setCurrentSubtitleTrack(-1);
+      } else {
+        // Native playback for MP4, WebM, Ogg, and potentially AVI/MKV if browser supports codecs
         video.src = currentUrl;
         video.load();
         if (isPlaying) video.play().catch(() => {});
-      } else {
-        handleVideoError();
+        
+        // Reset tracks as native playback handles them differently or they might not be available via HLS API
+        setAudioTracks([]);
+        setSubtitleTracks([]);
+        setCurrentAudioTrack(-1);
+        setCurrentSubtitleTrack(-1);
       }
-    } else if (isDashUrl) {
-      dash = dashjs.MediaPlayer().create();
-      dash.initialize(video, currentUrl, isPlaying);
-      
-      // Reset tracks as dash handled differently
-      setAudioTracks([]);
-      setSubtitleTracks([]);
-      setCurrentAudioTrack(-1);
-      setCurrentSubtitleTrack(-1);
-    } else {
-      // Native playback for MP4, WebM, Ogg, and potentially AVI/MKV if browser supports codecs
-      video.src = currentUrl;
-      video.load();
-      if (isPlaying) video.play().catch(() => {});
-      
-      // Reset tracks as native playback handles them differently or they might not be available via HLS API
-      setAudioTracks([]);
-      setSubtitleTracks([]);
-      setCurrentAudioTrack(-1);
-      setCurrentSubtitleTrack(-1);
     }
 
     return () => {
@@ -503,13 +568,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (dash) {
         dash.destroy();
       }
+      if (shakaPlayer) {
+        shakaPlayer.destroy();
+      }
       if (video) {
         video.pause();
         video.removeAttribute('src');
         video.load();
       }
     };
-  }, [currentUrl]);
+  }, [currentUrl, playerEngine]);
 
   const handleVideoError = () => {
     console.error('Video error occurred for URL:', currentUrl);
