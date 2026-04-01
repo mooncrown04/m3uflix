@@ -38,14 +38,17 @@ jobs:
           git commit -m "M3U Listesi Güncellendi" || echo "Değişiklik yok"
           git push
 
-      - name: Bağımlılıkları Yükle (Hata Çözücü Ekli)
+      - name: Bağımlılıkları Yükle
         run: npm install --legacy-peer-deps
 
       - name: Web Buildini Yap
         run: npm run build
 
-      - name: Capacitor Sync
-        run: npx cap sync android
+      - name: Capacitor Hazırlık ve Sync
+        run: |
+          # npx'in 'executable' bulamama hatasını önlemek için CLI'ı doğruluyoruz
+          npm install @capacitor/cli @capacitor/android --legacy-peer-deps
+          npx cap sync android
 
       - name: APK Derle
         run: |
