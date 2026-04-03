@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
@@ -15,6 +15,8 @@ import { io } from 'socket.io-client';
 import { QRCodeCanvas } from 'qrcode.react';
 import MobileRemote from './components/MobileRemote';
 
+import { VoiceSearchOverlay } from './components/VoiceSearchOverlay';
+import { AdvancedEPG } from './components/EPG/AdvancedEPG';
 import { BentoDashboard } from './components/Layout/BentoDashboard';
 import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast } from './types';
 import { cn, useContainerWidth } from './lib/utils';
@@ -182,6 +184,7 @@ export default function App() {
     getDominantColor(imageUrl).then(color => {
       if (color) {
         setThemeColor(color);
+        setAmbientColor(color);
         localStorage.setItem('theme_color', color);
       }
     });
@@ -468,15 +471,26 @@ export default function App() {
   const [playerEngine, setPlayerEngine] = useState<'hls' | 'shaka'>(() => 
     (localStorage.getItem('player_engine') as 'hls' | 'shaka') || 'hls'
   );
+  const [ambilightMode, setAmbilightMode] = useState<'none' | 'soft' | 'vibrant' | 'cinema'>(() => 
+    (localStorage.getItem('ambilight_mode') as any) || 'soft'
+  );
+  const [ambientColor, setAmbientColor] = useState<string>('rgba(0, 0, 0, 0)');
+  const [showQuickSettings, setShowQuickSettings] = useState(false);
+  const [quickSettingsFocus, setQuickSettingsFocus] = useState(0);
+  const [transitionKey, setTransitionKey] = useState(0);
 
   useEffect(() => {
     localStorage.setItem('player_engine', playerEngine);
   }, [playerEngine]);
 
+  useEffect(() => {
+    localStorage.setItem('ambilight_mode', ambilightMode);
+  }, [ambilightMode]);
+
   const [clockStyle, setClockStyle] = useState<'original' | 'horizontal' | 'minimal' | 'retro' | 'modern'>(() => 
     (localStorage.getItem('clock_style') as any) || 'original'
   );
-  const [top10Style, setTop10Style] = useState<'original' | 'filled' | 'neon' | 'retro' | 'minimal' | 'theme'>(() => 
+  const [top10Style, setTop10Style] = useState<Top10Style>(() => 
     (localStorage.getItem('top10_style') as any) || 'original'
   );
 
@@ -518,7 +532,49 @@ export default function App() {
   const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
   const [activeCol, setActiveCol] = useState(0);
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
-  const [navContext, setNavContext] = useState<'browse' | 'player' | 'settings' | 'exit-confirm' | 'channel-menu' | 'channel-detail'>('browse');
+  const [lockedCategories, setLockedCategories] = useState<string[]>(() => {
+    const saved = localStorage.getItem('locked_categories');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [parentalPin, setParentalPin] = useState(() => localStorage.getItem('parental_pin') || '');
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const [pinTarget, setPinTarget] = useState<{ type: 'category' | 'channel', id: string } | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('locked_categories', JSON.stringify(lockedCategories));
+  }, [lockedCategories]);
+
+  useEffect(() => {
+    localStorage.setItem('parental_pin', parentalPin);
+  }, [parentalPin]);
+  const [isVoiceSearching, setIsVoiceSearching] = useState(false);
+  const [sleepTimer, setSleepTimer] = useState<number | null>(null); // minutes
+  const [sleepTimerActive, setSleepTimerActive] = useState(false);
+  const sleepTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (sleepTimerActive && sleepTimer !== null) {
+      if (sleepTimerRef.current) clearInterval(sleepTimerRef.current);
+      
+      sleepTimerRef.current = setInterval(() => {
+        setSleepTimer(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(sleepTimerRef.current!);
+            setSleepTimerActive(false);
+            // Logic to "turn off" or stop playback
+            setCurrentChannel(null);
+            setIsMiniPlayer(false);
+            setNavContext('browse');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 60000); // Update every minute
+    }
+    return () => {
+      if (sleepTimerRef.current) clearInterval(sleepTimerRef.current);
+    };
+  }, [sleepTimerActive, sleepTimer]);
   const [channelForDetail, setChannelForDetail] = useState<M3UChannel | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
@@ -946,6 +1002,13 @@ export default function App() {
       }
     });
 
+    // Add Trending (Popüler)
+    const trendingChannels = channels
+      .filter(ch => !brokenChannelIds.has(ch.id))
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 15);
+    addGroup('Popüler', trendingChannels);
+
     // Add Favorites
     if (favoriteSet.size > 0) {
       const favoriteChannels = channels
@@ -1055,7 +1118,7 @@ export default function App() {
         return !specialGroups.includes(group) && !group.endsWith(' (Multi)');
       })
       .sort((a, b) => {
-        const order = ['İzlemeye Devam Et', 'Top 10', 'Multi Kanal', 'Favorilerim', 'Canlı', 'Film', 'Dizi', 'Yayın Akışı'];
+        const order = ['İzlemeye Devam Et', 'Popüler', 'Top 10', 'Multi Kanal', 'Favorilerim', 'Canlı', 'Film', 'Dizi', 'Yayın Akışı'];
         const getOrderIndex = (name: string) => {
           const idx = order.indexOf(name);
           if (idx !== -1) return idx;
@@ -1070,6 +1133,27 @@ export default function App() {
         return b[1].length - a[1].length;
       });
   }, [channels, deferredSearchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds, multiSessions, activeTab, epgData, customOrders]);
+
+  // Ambient UI: Update ambient color when browsing
+  useEffect(() => {
+    if (!dynamicThemeEnabled || navContext !== 'browse') return;
+
+    const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
+    if (!selectedChannel) return;
+
+    const imageUrl = selectedChannel.logo || (selectedChannel.type === 'video' ? `https://picsum.photos/seed/${selectedChannel.name}/800/1200` : null);
+    if (!imageUrl) return;
+
+    const timer = setTimeout(() => {
+      getDominantColor(imageUrl).then(color => {
+        if (color) {
+          setAmbientColor(color);
+        }
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [activeRow, activeCol, navContext, groupedChannels, dynamicThemeEnabled]);
 
   useEffect(() => {
     if (channels.length === 0) {
@@ -1259,6 +1343,19 @@ export default function App() {
   const handleChannelSelect = useCallback((channel: M3UChannel) => {
     console.log('handleChannelSelect called for:', channel.name);
     
+    // Update ambient color based on channel
+    const colors = [
+      'rgba(59, 130, 246, 0.3)', // blue
+      'rgba(16, 185, 129, 0.3)', // green
+      'rgba(245, 158, 11, 0.3)', // amber
+      'rgba(239, 68, 68, 0.3)',  // red
+      'rgba(139, 92, 246, 0.3)', // violet
+      'rgba(236, 72, 153, 0.3)', // pink
+    ];
+    const colorIndex = (channel.name.length + (channel.group?.length || 0)) % colors.length;
+    setAmbientColor(colors[colorIndex]);
+    setTransitionKey(prev => prev + 1);
+
     if (isMiniPlayer) {
       setIsMiniPlayer(false);
       setNavContext('player');
@@ -1506,6 +1603,13 @@ export default function App() {
         action: isListening ? stopListening : startListening,
         isActive: isListening
       },
+      {
+        id: 'remote-toggle',
+        label: isRemoteConnected ? 'Kumanda Bağlı' : 'Kumanda Bağla',
+        icon: Smartphone,
+        action: () => setRemoteControlEnabled(!remoteControlEnabled),
+        isActive: remoteControlEnabled
+      },
       { id: 'sort', label: `Sırala: ${sortBy === 'default' ? 'Varsayılan' : sortBy === 'name' ? 'İsim' : 'Sayı'}`, icon: ArrowUpDown, action: () => {
         const next: Record<SortBy, SortBy> = { 'default': 'name', 'name': 'number', 'number': 'default', 'added': 'default' };
         setSortBy(next[sortBy]);
@@ -1558,20 +1662,9 @@ export default function App() {
         icon: ListIcon,
         action: () => toggleCategory('series'),
         isActive: visibleCategories.includes('Dizi')
-      },
-      {
-        id: 'remote-mode',
-        label: 'Uzaktan Kumanda',
-        icon: Smartphone,
-        action: () => {
-          localStorage.removeItem('m3u_url');
-          localStorage.setItem('is_remote_mode', 'true');
-          window.location.reload();
-        },
-        isActive: false
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
-  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy]);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy, remoteControlEnabled, isRemoteConnected, isListening, voiceControlEnabled]);
 
   // EPG Reminders check
   useEffect(() => {
@@ -1634,6 +1727,82 @@ export default function App() {
           }
           return;
         }
+      }
+
+      // Toggle Advanced EPG with 'E' key
+      if (e.key.toLowerCase() === 'e' && (navContext === 'browse' || navContext === 'player')) {
+        e.preventDefault();
+        setNavContext('advanced-epg');
+        return;
+      }
+
+      // Toggle Voice Search with 'V' key
+      if (e.key.toLowerCase() === 'v' && (navContext === 'browse' || navContext === 'player')) {
+        e.preventDefault();
+        setNavContext('voice-search');
+        return;
+      }
+
+      // Toggle Quick Settings with 'S' key
+      if (e.key.toLowerCase() === 's' && (navContext === 'player' || navContext === 'browse' || navContext === 'quick-settings')) {
+        e.preventDefault();
+        if (navContext === 'quick-settings') {
+          setShowQuickSettings(false);
+          setNavContext(currentChannel ? 'player' : 'browse');
+        } else {
+          setShowQuickSettings(true);
+          setQuickSettingsFocus(0);
+          setNavContext('quick-settings');
+        }
+        return;
+      }
+
+      if (navContext === 'quick-settings') {
+        switch (e.key) {
+          case 'ArrowUp':
+            e.preventDefault();
+            if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(0);
+            else if (quickSettingsFocus >= 6) setQuickSettingsFocus(2);
+            break;
+          case 'ArrowDown':
+            e.preventDefault();
+            if (quickSettingsFocus < 2) setQuickSettingsFocus(2);
+            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(6);
+            break;
+          case 'ArrowLeft':
+            e.preventDefault();
+            if (quickSettingsFocus === 1) setQuickSettingsFocus(0);
+            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(prev => Math.max(2, prev - 1));
+            else if (quickSettingsFocus >= 6 && quickSettingsFocus <= 8) setQuickSettingsFocus(prev => Math.max(6, prev - 1));
+            break;
+          case 'ArrowRight':
+            e.preventDefault();
+            if (quickSettingsFocus === 0) setQuickSettingsFocus(1);
+            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(prev => Math.min(5, prev + 1));
+            else if (quickSettingsFocus >= 6 && quickSettingsFocus <= 8) setQuickSettingsFocus(prev => Math.min(8, prev + 1));
+            break;
+          case 'Enter':
+            e.preventDefault();
+            if (quickSettingsFocus < 2) {
+              const engines = ['hls', 'shaka'];
+              setPlayerEngine(engines[quickSettingsFocus] as any);
+            } else if (quickSettingsFocus < 6) {
+              const modes = ['none', 'soft', 'vibrant', 'cinema'];
+              setAmbilightMode(modes[quickSettingsFocus - 2] as any);
+            } else {
+              const times = [15, 30, 60];
+              setSleepTimer(times[quickSettingsFocus - 6]);
+              setSleepTimerActive(true);
+            }
+            break;
+          case 'Escape':
+          case 'Backspace':
+            e.preventDefault();
+            setShowQuickSettings(false);
+            setNavContext(currentChannel ? 'player' : 'browse');
+            break;
+        }
+        return;
       }
 
       console.log('App handleKeyDown:', e.key, 'navContext:', navContext);
@@ -1931,9 +2100,9 @@ export default function App() {
             if (settingsArea === 'tabs') {
               if (window.innerWidth < 768) {
                 // Mobile: move between tabs
-                const nextFocus = (sidebarFocus + 1) % 4;
+                const nextFocus = (sidebarFocus + 1) % 3;
                 setSidebarFocus(nextFocus);
-                if (nextFocus < 3) setActiveSettingsTab(nextFocus);
+                setActiveSettingsTab(nextFocus);
               } else {
                 // Desktop: move to sections
                 if (sidebarFocus < 3) {
@@ -2016,9 +2185,9 @@ export default function App() {
             } else if (settingsArea === 'tabs') {
               if (window.innerWidth < 768) {
                 // Mobile: move between tabs
-                const nextFocus = (sidebarFocus - 1 + 4) % 4;
+                const nextFocus = (sidebarFocus - 1 + 3) % 3;
                 setSidebarFocus(nextFocus);
-                if (nextFocus < 3) setActiveSettingsTab(nextFocus);
+                setActiveSettingsTab(nextFocus);
               }
             }
             break;
@@ -2032,13 +2201,13 @@ export default function App() {
                 setSettingsSection(0);
               } else {
                 // Desktop: move between tabs
-                if (sidebarFocus === 3) {
+                if (sidebarFocus === 2) {
                   setSettingsArea('sections');
                   setSettingsSection(0);
                 } else {
-                  const nextFocus = (sidebarFocus + 1) % 4;
+                  const nextFocus = (sidebarFocus + 1) % 3;
                   setSidebarFocus(nextFocus);
-                  if (nextFocus < 3) setActiveSettingsTab(nextFocus);
+                  setActiveSettingsTab(nextFocus);
                 }
               }
             } else if (settingsArea === 'sections') {
@@ -2502,52 +2671,54 @@ export default function App() {
 
     const urlsToTry = resolveUrl(rawUrl);
 
-    let successfulResponse = null;
     let finalUrl = '';
+    let content = '';
 
     try {
       for (const url of urlsToTry) {
         try {
-          // Try with proxy first
-          let response = await fetchWithProxy(url);
-          
-          // If proxy fails or returns error, try direct (some URLs might have CORS enabled)
-          if (!response.ok) {
+          // Try with CapacitorHttp on native platforms first
+          if (Capacitor.isNativePlatform()) {
             try {
-              const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
-              if (directResponse.ok) response = directResponse;
-            } catch (e) {
-              // Direct fetch failed, stick with proxy response
+              const response = await CapacitorHttp.get({
+                url: url,
+                connectTimeout: 15000,
+                readTimeout: 15000,
+              });
+              if (response.status === 200 && response.data) {
+                content = response.data;
+                finalUrl = url;
+                break;
+              }
+            } catch (capErr) {
+              console.error(`CapacitorHttp failed for ${url}:`, capErr);
             }
           }
 
+          // Try with proxy
+          const response = await fetchWithProxy(url);
           if (response.ok) {
-            successfulResponse = response;
+            content = await response.text();
+            finalUrl = url;
+            break;
+          }
+          
+          // Try direct
+          const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
+          if (directResponse.ok) {
+            content = await directResponse.text();
             finalUrl = url;
             break;
           }
         } catch (e) {
           console.error(`Failed to load ${url}:`, e);
-          
-          // Last resort: try direct fetch if proxy itself failed
-          try {
-            const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
-            if (directResponse.ok) {
-              successfulResponse = directResponse;
-              finalUrl = url;
-              break;
-            }
-          } catch (directErr) {
-            // Both failed
-          }
         }
       }
 
-      if (!successfulResponse) {
+      if (!content) {
         throw new Error('Oynatma listesi yüklenemedi. URL\'yi kontrol edin.');
       }
 
-      const content = await (successfulResponse as Response).text();
       const { channels: parsedChannels, epgUrl: extractedEpgUrl } = parseM3U(content);
       setChannels(parsedChannels);
       setHasCheckedLinks(false);
@@ -3416,7 +3587,151 @@ export default function App() {
             </div>
           ) : (
             <>
-              {featuredChannel && (
+              {/* Dynamic Ambient Background */}
+              <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+                <motion.div 
+                  animate={{ backgroundColor: ambientColor }}
+                  transition={{ duration: 2, ease: "easeInOut" }}
+                  className="absolute inset-0 opacity-30 blur-[150px]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/60 to-black" />
+              </div>
+
+              {/* Quick Settings Overlay */}
+              <AnimatePresence>
+                {showQuickSettings && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 100, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 100, scale: 0.9 }}
+                    className="fixed right-8 top-1/2 -translate-y-1/2 w-80 z-[200] bg-black/80 backdrop-blur-3xl rounded-[40px] border border-white/10 p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)]"
+                  >
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: themeColor }} />
+                        <h3 className="text-xl font-black uppercase tracking-tighter italic">Hızlı Ayarlar</h3>
+                      </div>
+                      <button onClick={() => { setShowQuickSettings(false); setNavContext(currentChannel ? 'player' : 'browse'); }} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-8">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Play className="w-3 h-3" /> Oynatıcı Motoru
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {['hls', 'shaka'].map((engine, idx) => (
+                            <button
+                              key={engine}
+                              onClick={() => setPlayerEngine(engine as any)}
+                              className={cn(
+                                "py-3 rounded-2xl border-2 transition-all text-xs font-black uppercase tracking-widest relative overflow-hidden",
+                                playerEngine === engine ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
+                                quickSettingsFocus === idx && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
+                              )}
+                            >
+                              {playerEngine === engine && (
+                                <motion.div 
+                                  layoutId="qs-engine-active"
+                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
+                                  style={{ backgroundColor: themeColor }}
+                                />
+                              )}
+                              {engine}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Sun className="w-3 h-3" /> Ambilight Modu
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {['none', 'soft', 'vibrant', 'cinema'].map((mode, idx) => (
+                            <button
+                              key={mode}
+                              onClick={() => setAmbilightMode(mode as any)}
+                              className={cn(
+                                "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
+                                ambilightMode === mode ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
+                                quickSettingsFocus === (idx + 2) && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
+                              )}
+                            >
+                              {ambilightMode === mode && (
+                                <motion.div 
+                                  layoutId="qs-ambi-active"
+                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
+                                  style={{ backgroundColor: themeColor }}
+                                />
+                              )}
+                              {mode}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Clock className="w-3 h-3" /> Uyku Zamanlayıcısı
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[15, 30, 60].map((mins, idx) => (
+                            <button
+                              key={mins}
+                              onClick={() => {
+                                setSleepTimer(mins);
+                                setSleepTimerActive(true);
+                              }}
+                              className={cn(
+                                "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
+                                sleepTimer === mins && sleepTimerActive ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
+                                quickSettingsFocus === (idx + 6) && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
+                              )}
+                            >
+                              {sleepTimer === mins && sleepTimerActive && (
+                                <motion.div 
+                                  layoutId="qs-sleep-active"
+                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
+                                  style={{ backgroundColor: themeColor }}
+                                />
+                              )}
+                              {mins} DK
+                            </button>
+                          ))}
+                        </div>
+                        {sleepTimerActive && sleepTimer !== null && (
+                          <div className="flex items-center justify-between px-4 py-2 bg-white/5 rounded-xl">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Kalan Süre</span>
+                            <span className="text-xs font-black text-white">{sleepTimer} Dakika</span>
+                            <button 
+                              onClick={() => setSleepTimerActive(false)}
+                              className="p-1 hover:bg-white/10 rounded-lg text-red-500 transition-colors"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-8 pt-6 border-t border-white/5 flex items-center gap-3 text-[10px] font-bold text-zinc-500">
+                      <div className="px-1.5 py-0.5 bg-white/10 rounded border border-white/10 text-white">S</div>
+                      <span>Kapatmak için tekrar bas</span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div
+                key={transitionKey}
+                initial={logoStyle === 'glitch' ? { skewX: 20, opacity: 0 } : logoStyle === 'neon' ? { scale: 0.95, opacity: 0 } : { opacity: 0 }}
+                animate={logoStyle === 'glitch' ? { skewX: 0, opacity: 1 } : logoStyle === 'neon' ? { scale: 1, opacity: 1 } : { opacity: 1 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="relative z-10"
+              >
+                {featuredChannel && (
                 <div 
                   className="relative w-full overflow-hidden transition-all duration-700"
                   style={{ height: searchQuery ? '35vh' : '75vh' }}
@@ -3578,7 +3893,7 @@ export default function App() {
 
                     {/* Search Row */}
                     <div className="flex items-center gap-2">
-                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice').map((btn, idx) => {
+                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice' || b.id === 'remote-toggle').map((btn, idx) => {
                         const isFocused = activeRow === -2 && activeCol === idx;
                         
                         return (
@@ -3605,10 +3920,21 @@ export default function App() {
                                 className={cn(
                                   "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
                                   isFocused && "shadow-2xl ring-4 ring-white/20",
-                                  btn.id === 'voice' && isListening && "animate-pulse"
+                                  btn.id === 'voice' && isListening && "animate-pulse",
+                                  btn.id === 'remote-toggle' && remoteControlEnabled && "border-green-500/50"
                                 )}
                               >
-                                <btn.icon className={cn("w-3 h-3", btn.id === 'voice' && isListening && "text-red-500")} />
+                                <div className="relative">
+                                  <btn.icon className={cn("w-3 h-3", btn.id === 'voice' && isListening && "text-red-500")} />
+                                  {btn.id === 'remote-toggle' && isRemoteConnected && (
+                                    <motion.div 
+                                      animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
+                                      transition={{ duration: 2, repeat: Infinity }}
+                                      className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full"
+                                      style={{ backgroundColor: themeColor }}
+                                    />
+                                  )}
+                                </div>
                                 {btn.label}
                               </button>
                               {btn.id === 'search' && (
@@ -3652,7 +3978,7 @@ export default function App() {
                         ref={categoryScrollRef}
                         className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth pb-2"
                       >
-                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice').map((btn, idx) => {
+                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice' && b.id !== 'remote-toggle').map((btn, idx) => {
                           const isFocused = activeRow === -1 && activeCol === idx;
                           
                           return (
@@ -3693,7 +4019,7 @@ export default function App() {
             )}
 
             {/* Rows */}
-              <div className={cn("relative z-20 space-y-4 pb-20 transition-all duration-500", searchQuery ? "mt-8" : "-mt-8 sm:-mt-12")}>
+              <div className={cn("relative z-20 space-y-1 pb-20 transition-all duration-500", searchQuery ? "mt-8" : "-mt-8 sm:-mt-12")}>
               {(groupedChannels as [string, M3UChannel[]][]).map(([group, groupChannels], idx) => (
                 <ChannelRow 
                   key={group} 
@@ -3753,10 +4079,11 @@ export default function App() {
                 />
               ))}
             </div>
-          </>
-        )}
-      </div>
-    </main>
+          </motion.div>
+        </>
+      )}
+    </div>
+  </main>
 
       {/* Mini Player (Floating PIP) */}
       <AnimatePresence>
@@ -3786,6 +4113,7 @@ export default function App() {
               isMuted={isMuted}
               onVolumeChange={setGlobalVolume}
               onMuteToggle={setIsMuted}
+              ambilightMode={ambilightMode}
             />
             <div className="absolute top-2 right-2 opacity-100 flex gap-2 z-[200]">
               <button
@@ -4384,7 +4712,7 @@ export default function App() {
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(20 + idx); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(20 + idx); } }}
                                     className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
                                       uiMode === 'modern' && "rounded-2xl",
                                       uiMode === 'classic' && "rounded-none",
                                       uiMode === 'minimalist' && "rounded-none border-0",
@@ -4394,6 +4722,11 @@ export default function App() {
                                       settingsArea === 'content' && settingsFocus === (20 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
                                     )}
                                   >
+                                    <div className="absolute top-2 right-2">
+                                      {uiMode === mode.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
+                                    </div>
                                     <mode.icon className="w-6 h-6" style={{ color: uiMode === mode.id ? themeColor : undefined }} />
                                     <div>
                                       <div className="font-bold text-sm">{mode.label}</div>
@@ -4522,13 +4855,18 @@ export default function App() {
                                   onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(15); } }}
                                   onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(15); } }}
                                   className={cn(
-                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4",
+                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4 relative",
                                     posterOrientation === 'landscape' 
                                       ? "border-white bg-white/10" 
                                       : "border-white/5 hover:border-white/20 bg-white/5",
                                     settingsArea === 'content' && settingsFocus === 15 && "ring-4 ring-white scale-105 z-10 settings-focused"
                                   )}
                                 >
+                                  <div className="absolute top-3 right-3">
+                                    {posterOrientation === 'landscape' && (
+                                      <div className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_10px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                    )}
+                                  </div>
                                   <div className="w-24 h-16 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
                                   <span className="font-bold text-lg">Yatay</span>
                                 </button>
@@ -4537,13 +4875,18 @@ export default function App() {
                                   onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(16); } }}
                                   onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(16); } }}
                                   className={cn(
-                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4",
+                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4 relative",
                                     posterOrientation === 'portrait' 
                                       ? "border-white bg-white/10" 
                                       : "border-white/5 hover:border-white/20 bg-white/5",
                                     settingsArea === 'content' && settingsFocus === 16 && "ring-4 ring-white scale-105 z-10 settings-focused"
                                   )}
                                 >
+                                  <div className="absolute top-3 right-3">
+                                    {posterOrientation === 'portrait' && (
+                                      <div className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_10px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                    )}
+                                  </div>
                                   <div className="w-16 h-24 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
                                   <span className="font-bold text-lg">Dikey</span>
                                 </button>
@@ -4604,13 +4947,18 @@ export default function App() {
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
                                     className={cn(
-                                      "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                      "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center relative",
                                       logoStyle === style.id 
                                         ? "border-white bg-white/10" 
                                         : "border-white/5 hover:border-white/20 bg-white/5",
                                       settingsArea === 'content' && settingsFocus === (40 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
                                     )}
                                   >
+                                    <div className="absolute top-2 right-2">
+                                      {logoStyle === style.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
+                                    </div>
                                     <div className="font-bold text-sm">{style.label}</div>
                                     <div className="text-[10px] opacity-50">{style.desc}</div>
                                   </button>
@@ -4666,7 +5014,7 @@ export default function App() {
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(50 + idx); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(50 + idx); } }}
                                     className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-4 text-center",
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-4 text-center relative",
                                       uiMode === 'modern' && "rounded-2xl",
                                       uiMode === 'classic' && "rounded-none",
                                       uiMode === 'minimalist' && "rounded-none border-0",
@@ -4676,6 +5024,11 @@ export default function App() {
                                       settingsArea === 'content' && settingsFocus === (50 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
                                     )}
                                   >
+                                    <div className="absolute top-2 right-2">
+                                      {clockStyle === style.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
+                                    </div>
                                     <div className="scale-75 origin-center">
                                       <DigitalClock themeColor={themeColor} style={style.id as any} />
                                     </div>
@@ -4723,10 +5076,9 @@ export default function App() {
                                 {[
                                   { id: 'original', label: 'Orijinal' },
                                   { id: 'filled', label: 'Dolu' },
-                                  { id: 'neon', label: 'Neon' },
-                                  { id: 'retro', label: 'Retro' },
-                                  { id: 'minimal', label: 'Minimal' },
-                                  { id: 'theme', label: 'Tema Uyumlu' }
+                                  { id: 'theme', label: 'Dolu (Tema)' },
+                                  { id: 'outline-theme', label: 'İçi Boş (Tema)' },
+                                  { id: 'neon', label: 'Neon (Tema)' }
                                 ].map((style, idx) => (
                                   <button
                                     key={style.id}
@@ -4734,7 +5086,7 @@ export default function App() {
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(60 + idx); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(60 + idx); } }}
                                     className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
                                       uiMode === 'modern' && "rounded-2xl",
                                       uiMode === 'classic' && "rounded-none",
                                       uiMode === 'minimalist' && "rounded-none border-0",
@@ -4744,9 +5096,14 @@ export default function App() {
                                       settingsArea === 'content' && settingsFocus === (60 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
                                     )}
                                   >
+                                    <div className="absolute top-2 right-2">
+                                      {top10Style === style.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
+                                    </div>
                                     <div className="text-4xl font-black italic" style={{ 
-                                      color: style.id === 'theme' ? themeColor : (style.id === 'original' ? 'transparent' : 'white'),
-                                      WebkitTextStroke: style.id === 'original' ? '1px rgba(255,255,255,0.5)' : 'none',
+                                      color: (style.id === 'theme' || style.id === 'outline-theme' || style.id === 'neon') ? (style.id === 'theme' ? themeColor : 'transparent') : (style.id === 'original' ? 'transparent' : 'white'),
+                                      WebkitTextStroke: (style.id === 'original' || style.id === 'outline-theme' || style.id === 'neon') ? `1px ${style.id === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` : 'none',
                                       textShadow: style.id === 'neon' ? `0 0 10px ${themeColor}, 0 0 20px ${themeColor}` : 'none'
                                     }}>
                                       1
@@ -4805,7 +5162,7 @@ export default function App() {
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
                                     className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center",
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
                                       uiMode === 'modern' && "rounded-2xl",
                                       uiMode === 'classic' && "rounded-none",
                                       uiMode === 'minimalist' && "rounded-none border-0",
@@ -4815,6 +5172,11 @@ export default function App() {
                                       settingsArea === 'content' && settingsFocus === (70 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
                                     )}
                                   >
+                                    <div className="absolute top-2 right-2">
+                                      {focusEffect === effect.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
+                                    </div>
                                     <div className="font-bold text-sm">{effect.label}</div>
                                     <div className="text-[10px] opacity-50">{effect.desc}</div>
                                   </button>
@@ -5893,10 +6255,52 @@ export default function App() {
                                             {engine.name}
                                           </span>
                                           {playerEngine === engine.id && (
-                                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
+                                            <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
                                           )}
                                         </div>
                                         <span className="text-[10px] text-white/40 font-medium">{engine.desc}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="mt-4 space-y-2 px-2">
+                                  <div className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">
+                                    <Monitor className="w-3 h-3" />
+                                    Ambilight (Sinematik Işık)
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {[
+                                      { id: 'none', name: 'Kapalı', desc: 'Standart' },
+                                      { id: 'soft', name: 'Yumuşak', desc: 'Göz Dostu' },
+                                      { id: 'vibrant', name: 'Canlı', desc: 'Dinamik' },
+                                      { id: 'cinema', name: 'Sinema', desc: 'Geniş' }
+                                    ].map((mode, idx) => (
+                                      <button
+                                        key={mode.id}
+                                        onClick={() => setAmbilightMode(mode.id as any)}
+                                        onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(6 + idx); }}
+                                        onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(6 + idx); }}
+                                        className={cn(
+                                          "flex flex-col items-start p-3 rounded-xl border transition-all duration-300 text-left",
+                                          ambilightMode === mode.id
+                                            ? "bg-white/10 border-white/20 ring-1 ring-white/20"
+                                            : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10",
+                                          settingsArea === 'content' && settingsFocus === (6 + idx) ? "border-white ring-2 ring-white/20 scale-105 bg-white/20 settings-focused" : ""
+                                        )}
+                                      >
+                                        <div className="flex items-center justify-between w-full mb-0.5">
+                                          <span className={cn(
+                                            "font-bold text-sm",
+                                            ambilightMode === mode.id ? "text-white" : "text-white/60"
+                                          )}>
+                                            {mode.name}
+                                          </span>
+                                          {ambilightMode === mode.id && (
+                                            <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                          )}
+                                        </div>
+                                        <span className="text-[10px] text-white/40 font-medium">{mode.desc}</span>
                                       </button>
                                     ))}
                                   </div>
@@ -6439,8 +6843,33 @@ export default function App() {
           onVolumeChange={setGlobalVolume}
           onMuteToggle={setIsMuted}
           playerEngine={playerEngine}
+          ambilightMode={ambilightMode}
         />
       </div>
+      )}
+      {navContext === 'advanced-epg' && (
+        <AdvancedEPG 
+          channels={channels}
+          epgData={epgData}
+          themeColor={themeColor}
+          onClose={() => setNavContext(currentChannel ? 'player' : 'browse')}
+          onPlay={(channel) => {
+            setCurrentChannel(channel);
+            setNavContext('player');
+          }}
+        />
+      )}
+      {navContext === 'voice-search' && (
+        <VoiceSearchOverlay 
+          themeColor={themeColor}
+          onClose={() => setNavContext(currentChannel ? 'player' : 'browse')}
+          onResult={(text) => {
+            setSearchQuery(text);
+            setNavContext('browse');
+            setActiveRow(0);
+            setActiveCol(0);
+          }}
+        />
       )}
     </div>
   );

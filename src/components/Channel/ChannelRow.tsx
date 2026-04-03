@@ -170,7 +170,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   return (
     <div 
       ref={rowRef} 
-      className="space-y-2 group/row relative"
+      className={cn("space-y-2 group/row relative", title === 'Top 10' ? "mb-8" : "mb-2")}
     >
       <div className="flex items-center px-4 md:px-12">
         <div 
@@ -216,7 +216,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="relative"
           >
-            <div ref={listContainerRef} className="px-4 md:px-12 pt-0 pb-6 -mt-6">
+            <div ref={listContainerRef} className="px-4 md:px-12 pt-0 pb-2 -mt-6">
               <List
                 ref={listRef}
                 height={listHeight + 80}

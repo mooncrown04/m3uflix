@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
 import shaka from 'shaka-player';
+import mpegts from 'mpegts.js';
 import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
@@ -29,6 +30,7 @@ interface VideoPlayerProps {
   onVolumeChange?: (volume: number) => void;
   onMuteToggle?: (isMuted: boolean) => void;
   playerEngine?: 'hls' | 'shaka';
+  ambilightMode?: 'none' | 'soft' | 'vibrant' | 'cinema';
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -49,11 +51,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   isMuted: externalIsMuted,
   onVolumeChange,
   onMuteToggle,
-  playerEngine = 'hls'
+  playerEngine = 'hls',
+  ambilightMode = 'soft'
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null);
   const [shakaInstance, setShakaInstance] = useState<any>(null);
+  const [mpegtsInstance, setMpegtsInstance] = useState<mpegts.Player | null>(null);
   const [audioTracks, setAudioTracks] = useState<any[]>([]);
   const [subtitleTracks, setSubtitleTracks] = useState<any[]>([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState<number>(-1);
@@ -61,6 +66,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(true);
   const [isBuffering, setIsBuffering] = useState(true);
   const [showControls, setShowControls] = useState(true);
+  const [showExtraControls, setShowExtraControls] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels' | 'sources' | 'details' | 'volume'>('none');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Details, 10: Category Selector, 11+: Menu items
@@ -444,6 +450,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   };
 
   useEffect(() => {
+    if (ambilightMode === 'none' || !videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    let animationId: number;
+
+    const updateAmbilight = () => {
+      if (video.paused || video.ended) {
+        animationId = requestAnimationFrame(updateAmbilight);
+        return;
+      }
+
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      animationId = requestAnimationFrame(updateAmbilight);
+    };
+
+    updateAmbilight();
+    return () => cancelAnimationFrame(animationId);
+  }, [ambilightMode]);
+
+  useEffect(() => {
     shaka.polyfill.installAll();
   }, []);
 
@@ -455,10 +485,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     let hls: Hls | null = null;
     let dash: dashjs.MediaPlayerClass | null = null;
     let shakaPlayer: any = null;
+    let mpegtsPlayer: mpegts.Player | null = null;
 
     const lowerUrl = currentUrl.toLowerCase();
     const isHlsUrl = lowerUrl.includes('.m3u8') || lowerUrl.includes('m3u8');
     const isDashUrl = lowerUrl.includes('.mpd') || lowerUrl.includes('mpd');
+    const isTsUrl = lowerUrl.includes('.ts') || lowerUrl.includes('ts=') || lowerUrl.includes('/ts/') || lowerUrl.endsWith('.ts');
+    const isFlvUrl = lowerUrl.includes('.flv') || lowerUrl.includes('flv=') || lowerUrl.endsWith('.flv');
 
     const initShaka = async () => {
       shakaPlayer = new shaka.Player(video);
@@ -471,17 +504,144 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       });
 
+      // Shaka Configuration for better compatibility
+      shakaPlayer.configure({
+        streaming: {
+          bufferingGoal: 30,
+          rebufferingGoal: 15,
+          bufferBehind: 30,
+          lowLatencyMode: true,
+          autoLowLatencyMode: true,
+        },
+        manifest: {
+          dash: {
+            ignoreMinBufferTime: true,
+          },
+          hls: {
+            ignoreTextStreamFailures: true,
+          }
+        }
+      });
+
       try {
         await shakaPlayer.load(currentUrl);
         console.log('Shaka Player loaded successfully');
         if (isPlaying) video.play().catch(() => {});
         
-        // Shaka handles tracks differently, we can implement track selection later if needed
-        setAudioTracks(shakaPlayer.getVariantTracks() || []);
+        // Shaka handles tracks differently
+        const tracks = shakaPlayer.getVariantTracks() || [];
+        setAudioTracks(tracks);
         setSubtitleTracks(shakaPlayer.getTextTracks() || []);
       } catch (e) {
         console.error('Shaka Player Load Error:', e);
+        // Fallback to HLS.js if Shaka fails on HLS
+        if (isHlsUrl && playerEngine === 'shaka') {
+          console.log('Shaka failed on HLS, trying HLS.js fallback...');
+          initHls();
+        } else {
+          handleVideoError();
+        }
+      }
+    };
+
+    const initHls = () => {
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 60,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 600,
+          manifestLoadingMaxRetry: 4,
+          levelLoadingMaxRetry: 4,
+          xhrSetup: (xhr, url) => {
+            const proxyBase = customProxyUrl || '/api/proxy?url=';
+            const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
+            const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
+
+            if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
+              const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
+              xhr.open('GET', proxiedUrl, true);
+            }
+          }
+        });
+        hls.loadSource(currentUrl);
+        hls.attachMedia(video);
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setAudioTracks(hls?.audioTracks || []);
+          setSubtitleTracks(hls?.subtitleTracks || []);
+          setCurrentAudioTrack(hls?.audioTrack || -1);
+          setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
+          if (isPlaying) video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.log('HLS Network error, trying to recover...');
+                hls?.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.log('HLS Media error, trying to recover...');
+                hls?.recoverMediaError();
+                break;
+              default:
+                handleVideoError();
+                break;
+            }
+          }
+        });
+
+        hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
+          setCurrentAudioTrack(data.id);
+        });
+
+        hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
+          setCurrentSubtitleTrack(data.id);
+        });
+
+        setHlsInstance(hls);
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = currentUrl;
+        video.load();
+        if (isPlaying) video.play().catch(() => {});
+      } else {
         handleVideoError();
+      }
+    };
+
+    const initMpegTs = () => {
+      if (mpegts.getFeatureList().mseLivePlayback) {
+        mpegtsPlayer = mpegts.createPlayer({
+          type: isFlvUrl ? 'flv' : 'mse',
+          url: currentUrl,
+          isLive: true,
+        }, {
+          enableStashBuffer: false,
+          stashInitialSize: 128,
+        });
+        mpegtsPlayer.attachMediaElement(video);
+        mpegtsPlayer.load();
+        if (isPlaying) {
+          const playPromise = mpegtsPlayer.play();
+          if (playPromise && typeof (playPromise as any).catch === 'function') {
+            (playPromise as any).catch(() => {});
+          }
+        }
+        
+        mpegtsPlayer.on(mpegts.Events.ERROR, (type, detail, info) => {
+          console.error('MpegTS Error:', type, detail, info);
+          handleVideoError();
+        });
+
+        setMpegtsInstance(mpegtsPlayer);
+      } else {
+        // Fallback to native
+        video.src = currentUrl;
+        video.load();
+        if (isPlaying) video.play().catch(() => {});
       }
     };
 
@@ -489,71 +649,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       initShaka();
     } else {
       if (isHlsUrl) {
-        if (Hls.isSupported()) {
-          hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            backBufferLength: 60,
-            xhrSetup: (xhr, url) => {
-              const proxyBase = customProxyUrl || '/api/proxy?url=';
-              const isProxied = currentUrl.includes('/api/proxy') || (customProxyUrl && currentUrl.includes(customProxyUrl));
-              const isAlreadyProxied = url.includes('/api/proxy') || (customProxyUrl && url.includes(customProxyUrl));
-
-              if (isProxied && !isAlreadyProxied && url.startsWith('http')) {
-                const proxiedUrl = `${proxyBase}${encodeURIComponent(url)}`;
-                xhr.open('GET', proxiedUrl, true);
-              }
-            }
-          });
-          hls.loadSource(currentUrl);
-          hls.attachMedia(video);
-          
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            setAudioTracks(hls?.audioTracks || []);
-            setSubtitleTracks(hls?.subtitleTracks || []);
-            setCurrentAudioTrack(hls?.audioTrack || -1);
-            setCurrentSubtitleTrack(hls?.subtitleTrack || -1);
-            if (isPlaying) video.play().catch(() => {});
-          });
-
-          hls.on(Hls.Events.ERROR, (_, data) => {
-            if (data.fatal) {
-              handleVideoError();
-            }
-          });
-
-          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_, data) => {
-            setCurrentAudioTrack(data.id);
-          });
-
-          hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_, data) => {
-            setCurrentSubtitleTrack(data.id);
-          });
-
-          setHlsInstance(hls);
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = currentUrl;
-          video.load();
-          if (isPlaying) video.play().catch(() => {});
-        } else {
-          handleVideoError();
-        }
+        initHls();
       } else if (isDashUrl) {
         dash = dashjs.MediaPlayer().create();
         dash.initialize(video, currentUrl, isPlaying);
         
-        // Reset tracks as dash handled differently
-        setAudioTracks([]);
-        setSubtitleTracks([]);
-        setCurrentAudioTrack(-1);
-        setCurrentSubtitleTrack(-1);
+        dash.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+          const audioTracks = dash?.getTracksFor('audio') || [];
+          const textTracks = dash?.getTracksFor('text') || [];
+          setAudioTracks(audioTracks);
+          setSubtitleTracks(textTracks);
+        });
+
+        dash.on(dashjs.MediaPlayer.events.ERROR, (e: any) => {
+          console.error('Dash.js Error:', e);
+          handleVideoError();
+        });
+      } else if (isTsUrl || isFlvUrl) {
+        initMpegTs();
       } else {
-        // Native playback for MP4, WebM, Ogg, and potentially AVI/MKV if browser supports codecs
+        // Native playback for MP4, WebM, Ogg, etc.
         video.src = currentUrl;
         video.load();
         if (isPlaying) video.play().catch(() => {});
         
-        // Reset tracks as native playback handles them differently or they might not be available via HLS API
         setAudioTracks([]);
         setSubtitleTracks([]);
         setCurrentAudioTrack(-1);
@@ -570,6 +689,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
       if (shakaPlayer) {
         shakaPlayer.destroy();
+      }
+      if (mpegtsPlayer) {
+        mpegtsPlayer.destroy();
       }
       if (video) {
         video.pause();
@@ -752,7 +874,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setFocusIndex(prev => Math.max(0, prev - 1));
         } else if (key === 'ArrowRight') {
           e.preventDefault();
-          setFocusIndex(prev => Math.min(8, prev + 1));
+          const maxIdx = showExtraControls ? 8 : 1;
+          setFocusIndex(prev => Math.min(maxIdx, prev + 1));
         } else if (key === 'ArrowUp') {
           e.preventDefault();
           // Stay in Layer 1, do nothing
@@ -762,7 +885,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         } else if (key === 'Enter') {
           e.preventDefault();
           if (focusIndex === 0) onClose?.();
-          else if (focusIndex === 1) onToggleMini?.();
+          else if (focusIndex === 1) setShowExtraControls(!showExtraControls);
           else if (focusIndex === 2) {
             setActiveMenu('volume');
             setFocusIndex(60);
@@ -927,9 +1050,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           setShowControls(true);
         }}
       >
+        {/* Ambilight Effect */}
+        {ambilightMode !== 'none' && !isMini && (
+          <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center">
+            <canvas 
+              ref={canvasRef}
+              width={20}
+              height={20}
+              className={cn(
+                "w-full h-full opacity-50 transition-all duration-1000",
+                ambilightMode === 'soft' && "blur-[120px] scale-150",
+                ambilightMode === 'vibrant' && "blur-[80px] scale-125 opacity-70",
+                ambilightMode === 'cinema' && "blur-[150px] scale-110 opacity-40"
+              )}
+            />
+          </div>
+        )}
+
         <video
           ref={videoRef}
-          className="w-full h-full max-h-screen object-contain"
+          className={cn(
+            "w-full h-full max-h-screen relative z-10",
+            ambilightMode === 'none' ? "object-fill" : "object-contain",
+            ambilightMode !== 'none' && !isMini && "shadow-[0_0_100px_rgba(0,0,0,0.5)]"
+          )}
           autoPlay
           playsInline
           muted={isMuted}
@@ -1133,107 +1277,110 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   >
                     <X className="w-8 h-8" />
                   </button>
-                  {onToggleMini && (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleMini();
-                      }}
-                      onPointerDown={() => setFocusIndex(1)}
-                      className={cn(
-                        "p-3 rounded-full transition-all",
-                        focusIndex === 1 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                      )}
-                      title="Mini Oynatıcı (P)"
-                    >
-                      <Monitor className="w-8 h-8" />
-                    </button>
-                  )}
-                  <h2 className="text-2xl font-bold text-white drop-shadow-lg">
-                    {channel?.name || "Canlı Yayın"}
-                  </h2>
+                  <button 
+                    onClick={() => setShowExtraControls(!showExtraControls)}
+                    onPointerDown={() => setFocusIndex(1)}
+                    className={cn(
+                      "p-3 rounded-full transition-all",
+                      focusIndex === 1 ? "bg-white text-black scale-110 ring-4 ring-white/30" : (showExtraControls ? "bg-red-500 text-white" : "bg-black/40 text-white hover:bg-black/60")
+                    )}
+                    title={showExtraControls ? "Ayarları Gizle" : "Ayarları Göster"}
+                  >
+                    <Settings className={cn("w-8 h-8 transition-transform duration-500", showExtraControls && "rotate-90")} />
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <button 
-                    onClick={() => setActiveMenu('volume')}
-                    onPointerDown={() => setFocusIndex(2)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                  <AnimatePresence>
+                    {showExtraControls && (
+                      <motion.div 
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
+                        className="flex items-center gap-4"
+                      >
+                        <button 
+                          onClick={() => setActiveMenu('volume')}
+                          onPointerDown={() => setFocusIndex(2)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <Volume2 className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Ses</span>
+                        </button>
+                        <button 
+                          onClick={() => setActiveMenu('audio')}
+                          onPointerDown={() => setFocusIndex(3)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <Volume2 className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Dil</span>
+                        </button>
+                        <button 
+                          onClick={() => setActiveMenu('subtitle')}
+                          onPointerDown={() => setFocusIndex(4)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <Languages className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Altyazı</span>
+                        </button>
+                        <button 
+                          onClick={() => setActiveMenu('channels')}
+                          onPointerDown={() => setFocusIndex(5)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <List className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Kanallar</span>
+                        </button>
+                        <button 
+                          onClick={() => setActiveMenu('sources')}
+                          onPointerDown={() => setFocusIndex(6)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 6 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <Link2 className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
+                        </button>
+                        <button 
+                          onClick={() => setActiveMenu('details')}
+                          onPointerDown={() => setFocusIndex(7)}
+                          className={cn(
+                            "p-3 rounded-full transition-all flex items-center gap-2",
+                            focusIndex === 7 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                          )}
+                        >
+                          <Settings2 className="w-8 h-8" />
+                          <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
+                        </button>
+                        {isPipSupported && (
+                          <button 
+                            onClick={togglePip}
+                            onPointerDown={() => setFocusIndex(8)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 8 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <Monitor className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">PIP</span>
+                          </button>
+                        )}
+                      </motion.div>
                     )}
-                  >
-                    <Volume2 className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Ses</span>
-                  </button>
-                  <button 
-                    onClick={() => setActiveMenu('audio')}
-                    onPointerDown={() => setFocusIndex(3)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                    )}
-                  >
-                    <Volume2 className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Dil</span>
-                  </button>
-                  <button 
-                    onClick={() => setActiveMenu('subtitle')}
-                    onPointerDown={() => setFocusIndex(4)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                    )}
-                  >
-                    <Languages className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Altyazı</span>
-                  </button>
-                  <button 
-                    onClick={() => setActiveMenu('channels')}
-                    onPointerDown={() => setFocusIndex(5)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                    )}
-                  >
-                    <List className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Kanallar</span>
-                  </button>
-                  <button 
-                    onClick={() => setActiveMenu('sources')}
-                    onPointerDown={() => setFocusIndex(6)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 6 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                    )}
-                  >
-                    <Link2 className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
-                  </button>
-                  <button 
-                    onClick={() => setActiveMenu('details')}
-                    onPointerDown={() => setFocusIndex(7)}
-                    className={cn(
-                      "p-3 rounded-full transition-all flex items-center gap-2",
-                      focusIndex === 7 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                    )}
-                  >
-                    <Settings2 className="w-8 h-8" />
-                    <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
-                  </button>
-                  {isPipSupported && (
-                    <button 
-                      onClick={togglePip}
-                      onPointerDown={() => setFocusIndex(8)}
-                      className={cn(
-                        "p-3 rounded-full transition-all flex items-center gap-2",
-                        focusIndex === 8 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                      )}
-                    >
-                      <Monitor className="w-8 h-8" />
-                      <span className="text-sm font-bold uppercase tracking-tighter">PIP</span>
-                    </button>
-                  )}
+                  </AnimatePresence>
                 </div>
               </div>
 

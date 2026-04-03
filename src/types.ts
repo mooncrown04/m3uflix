@@ -12,7 +12,7 @@ export interface Playlist {
 export type UIMode = 'modern' | 'classic' | 'minimalist' | 'bento';
 export type SortBy = 'default' | 'name' | 'number' | 'added';
 export type LogoStyle = 'default' | 'mooncrown' | 'mooncrown-gold' | 'mooncrown-silver' | 'mooncrown-neon' | 'mooncrown-glass' | 'mooncrown-fire' | 'minimal' | 'neon' | 'retro' | 'glitch';
-export type Top10Style = 'original' | 'filled' | 'neon' | 'retro' | 'minimal' | 'theme';
+export type Top10Style = 'original' | 'filled' | 'neon' | 'theme' | 'outline-theme';
 export type FocusEffect = 'default' | 'glow' | 'pulse' | 'border' | 'scale';
 
 export interface Toast {

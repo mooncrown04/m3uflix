@@ -175,18 +175,19 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       {title === 'Top 10' && (
         <div className="absolute left-[-60px] bottom-[-5px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
           <span 
-            className={cn(
-              "font-black italic leading-none",
-              top10Style === 'retro' && "font-mono not-italic",
-              top10Style === 'minimal' && "font-light"
-            )}
+            className="font-black italic leading-none"
             style={{ 
-              WebkitTextStroke: top10Style === 'original' ? '5px rgba(255,255,255,0.5)' : (top10Style === 'minimal' ? '2px rgba(255,255,255,0.2)' : 'none'),
-              color: top10Style === 'original' || top10Style === 'minimal' ? 'transparent' : (top10Style === 'theme' ? themeColor : 'white'),
+              WebkitTextStroke: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
+                ? `5px ${top10Style === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` 
+                : 'none',
+              color: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
+                ? 'transparent' 
+                : (top10Style === 'theme' ? themeColor : 'white'),
               fontSize: '160px',
-              fontWeight: top10Style === 'minimal' ? '100' : '900',
-              textShadow: top10Style === 'neon' ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` : (top10Style === 'filled' ? '0 15px 30px rgba(0,0,0,0.8)' : 'none'),
-              opacity: top10Style === 'minimal' ? 0.45 : 1
+              fontWeight: '900',
+              textShadow: top10Style === 'neon' 
+                ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` 
+                : (top10Style === 'filled' ? '0 15px 30px rgba(0,0,0,0.8)' : 'none')
             }}
           >
             {colIndex + 1}
