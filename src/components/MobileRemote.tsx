@@ -310,6 +310,15 @@ const MobileRemote: React.FC<MobileRemoteProps> = ({ roomId, appUrl }) => {
             <RemoteButton icon={Settings} className="flex-1 py-4 sm:py-6" action={() => sendCommand('open-settings')} />
           </div>
 
+          {/* Quick Actions - Moved to top for easier access */}
+          <div className="grid grid-cols-5 gap-1.5 sm:gap-3">
+            <RemoteButton icon={Home} label="ANA" className="py-4" action={() => sendCommand('exit')} />
+            <RemoteButton icon={Star} label="FAV" className="py-4" action={() => setShowFavoritePrompt(true)} />
+            <RemoteButton icon={Keyboard} label="YAZ" className="py-4" action={() => setShowKeyboard(true)} />
+            <RemoteButton icon={List} label="KANAL" className="py-4" action={() => setShowChannels(true)} />
+            <RemoteButton icon={X} label="KAPAT" className="py-4" action={() => sendCommand('close')} />
+          </div>
+
           {/* Navigation D-Pad with Side Controls */}
           <div className="flex items-center justify-center gap-4 sm:gap-8 py-2 sm:py-4">
             {/* Volume Controls (Left) */}
@@ -412,15 +421,6 @@ const MobileRemote: React.FC<MobileRemoteProps> = ({ roomId, appUrl }) => {
             <RemoteButton icon={SkipBack} className="py-4" action={() => sendCommand('nav-left')} />
             <RemoteButton icon={Play} variant="primary" className="col-span-2 py-4" action={() => sendCommand('nav-ok')} />
             <RemoteButton icon={SkipForward} className="py-4" action={() => sendCommand('nav-right')} />
-          </div>
-
-          {/* Quick Actions */}
-          <div className="grid grid-cols-5 gap-1.5 sm:gap-3">
-            <RemoteButton icon={X} label="KAPAT" className="py-4" action={() => sendCommand('close')} />
-            <RemoteButton icon={List} label="KANAL" className="py-4" action={() => setShowChannels(true)} />
-            <RemoteButton icon={Keyboard} label="YAZ" className="py-4" action={() => setShowKeyboard(true)} />
-            <RemoteButton icon={Star} label="FAV" className="py-4" action={() => setShowFavoritePrompt(true)} />
-            <RemoteButton icon={Home} label="ANA" className="py-4" action={() => sendCommand('exit')} />
           </div>
 
           {/* Voice Control */}

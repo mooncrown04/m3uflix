@@ -31,6 +31,21 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   const httpServer = http.createServer(app);
+
+  // Permissive headers for AI Studio preview
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    
+    // Remove headers that might block iframing
+    res.removeHeader("X-Frame-Options");
+    res.removeHeader("Content-Security-Policy");
+    
+    next();
+  });
+
   const io = new Server(httpServer, {
     cors: {
       origin: "*",
@@ -41,6 +56,9 @@ async function startServer() {
   // Socket.io logic for remote control
   io.on("connection", (socket) => {
     console.log("A user connected:", socket.id);
+    
+    // Broadcast active user count to all clients
+    io.emit("user-count", io.engine.clientsCount);
 
     socket.on("join-room", (roomId) => {
       socket.join(roomId);
@@ -65,6 +83,7 @@ async function startServer() {
 
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
+      io.emit("user-count", io.engine.clientsCount);
     });
   });
 

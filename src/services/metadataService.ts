@@ -12,6 +12,7 @@ export interface MediaMetadata {
   summary?: string;
   posterUrl?: string;
   backdropUrl?: string;
+  logoUrl?: string;
   imdbScore?: string;
   duration?: string;
   tmdbId?: number;
@@ -20,7 +21,7 @@ export interface MediaMetadata {
 }
 
 const getGeminiApiKey = () => {
-  return localStorage.getItem('gemini_api_key') || process.env.GEMINI_API_KEY || '';
+  return localStorage.getItem('gemini_api_key') || '';
 };
 
 const metadataCache: Record<string, MediaMetadata> = JSON.parse(localStorage.getItem('media_metadata_cache') || '{}');
@@ -29,7 +30,7 @@ const saveCache = () => {
   localStorage.setItem('media_metadata_cache', JSON.stringify(metadataCache));
 };
 
-export async function fetchMediaMetadata(title: string, group?: string, type?: string): Promise<MediaMetadata | null> {
+export async function fetchMediaMetadata(title: string, group?: string, type?: string, tmdbEnabled: boolean = true): Promise<MediaMetadata | null> {
   // Only fetch extra metadata for VOD content (marked as type="video" in M3U)
   if (type !== 'video') {
     return { title };
@@ -40,14 +41,17 @@ export async function fetchMediaMetadata(title: string, group?: string, type?: s
   
   const ai = new GoogleGenAI({ apiKey });
 
-  const cacheKey = `${title}_${group || ''}`;
+  const cacheKey = `${title}_${group || ''}_tmdb_${tmdbEnabled}`;
   if (metadataCache[cacheKey]) {
     return metadataCache[cacheKey];
   }
 
   try {
-    // 1. Try TMDb first for posters and ratings
-    const tmdbData = await fetchTMDBData(title);
+    // 1. Try TMDb first for posters and ratings if enabled
+    let tmdbData = null;
+    if (tmdbEnabled) {
+      tmdbData = await fetchTMDBData(title);
+    }
     
     let metadata: MediaMetadata = {
       title: title,
@@ -61,6 +65,7 @@ export async function fetchMediaMetadata(title: string, group?: string, type?: s
         summary: tmdbData.overview,
         posterUrl: getTMDBImageUrl(tmdbData.poster_path || '') || undefined,
         backdropUrl: getTMDBImageUrl(tmdbData.backdrop_path || '', 'original') || undefined,
+        logoUrl: getTMDBImageUrl(tmdbData.logo_path || '', 'w500') || undefined,
         cast: tmdbData.cast?.map(c => c.name),
         tmdbCast: tmdbData.cast,
         genre: tmdbData.genres?.map(g => g.name),

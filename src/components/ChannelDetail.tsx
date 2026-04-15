@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, X, Star, Users, Clock, Calendar, Film, Info, Monitor, Bell, BellOff, ExternalLink, User, Youtube, ChevronRight } from 'lucide-react';
+import { Play, X, Star, Users, Clock, Calendar, Film, Info, Monitor, Bell, BellOff, ExternalLink, User, Youtube, ChevronRight, ChevronUp, ChevronDown, Search } from 'lucide-react';
 import { M3UChannel } from '../utils/m3uParser';
 import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
 import { fetchActorDetails, fetchActorMovies, fetchTMDBTrailers, fetchTMDBSimilar, ActorDetails, ActorMovie, TMDBTrailer, TMDBData, getTMDBImageUrl } from '../services/tmdbService';
@@ -25,6 +25,12 @@ interface ChannelDetailProps {
   onFocusChange?: (index: number) => void;
   playbackProgress?: Record<string, { currentTime: number; duration: number }>;
   epgData?: EPGData | null;
+  onNext?: () => void;
+  onPrev?: () => void;
+  cinemaModeEnabled?: boolean;
+  tmdbEnabled?: boolean;
+  onActorFilter?: (actorName: string) => void;
+  onNavContextChange?: (context: any) => void;
 }
 
 export const ChannelDetail: React.FC<ChannelDetailProps> = ({ 
@@ -38,7 +44,13 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
   activeFocus = 0,
   onFocusChange,
   playbackProgress = {},
-  epgData
+  epgData,
+  onNext,
+  onPrev,
+  cinemaModeEnabled = false,
+  tmdbEnabled = true,
+  onActorFilter,
+  onNavContextChange
 }) => {
   const [metadata, setMetadata] = useState<MediaMetadata | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +71,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
 
   const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
   const hasReminder = reminders.includes(channel.id);
+  const isCinemaMode = cinemaModeEnabled && channel.type === 'video' && metadata?.tmdbId;
 
   const channelPrograms = useMemo(() => {
     if (!epgData || !epgData.programs[channel.id]) return [];
@@ -79,10 +92,10 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
   useEffect(() => {
     const loadMetadata = async () => {
       setLoading(true);
-      const data = await fetchMediaMetadata(channel.name, channel.group, channel.type);
+      const data = await fetchMediaMetadata(channel.name, channel.group, channel.type, tmdbEnabled);
       if (data) {
         setMetadata(data);
-        if (data.tmdbId && data.mediaType) {
+        if (tmdbEnabled && data.tmdbId && data.mediaType) {
           const [trailerData, similarData] = await Promise.all([
             fetchTMDBTrailers(data.tmdbId, data.mediaType),
             fetchTMDBSimilar(data.tmdbId, data.mediaType)
@@ -98,6 +111,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
 
   const handleActorClick = async (actorId: number) => {
     setLoadingActor(true);
+    onNavContextChange?.('actor-detail');
     const [details, movies] = await Promise.all([
       fetchActorDetails(actorId),
       fetchActorMovies(actorId)
@@ -120,34 +134,298 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[150] bg-black/95 backdrop-blur-xl flex items-center justify-center p-0 sm:p-4"
+      className={cn(
+        "fixed inset-0 z-[150] flex items-center justify-center overflow-hidden",
+        isCinemaMode ? "bg-black" : "bg-black/95 backdrop-blur-xl p-0 sm:p-4"
+      )}
       onClick={onClose}
     >
-        <motion.div
-          initial={{ y: 50, opacity: 0, scale: 0.95 }}
-          animate={{ y: 0, opacity: 1, scale: 1 }}
-          exit={{ y: 50, opacity: 0, scale: 0.95 }}
-          className={cn(
-            "w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-5xl shadow-2xl overflow-hidden flex flex-col md:flex-row relative transition-all duration-500",
-            uiMode === 'modern' && "bg-zinc-900/60 border border-white/20 sm:rounded-[40px] backdrop-blur-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)]",
-            uiMode === 'classic' && "bg-zinc-950 border-4 border-zinc-800 sm:rounded-none shadow-none",
-            uiMode === 'minimalist' && "bg-black border-0 sm:rounded-none shadow-none"
-          )}
-          onClick={e => e.stopPropagation()}
-        >
-        {uiMode === 'modern' && (
-          <div 
-            className="absolute -top-48 -right-48 w-96 h-96 rounded-full blur-[120px] opacity-30 animate-pulse"
-            style={{ backgroundColor: themeColor }}
-          />
+      <motion.div
+        initial={isCinemaMode ? { opacity: 0 } : { y: 50, opacity: 0, scale: 0.95 }}
+        animate={isCinemaMode ? { opacity: 1 } : { y: 0, opacity: 1, scale: 1 }}
+        exit={isCinemaMode ? { opacity: 0 } : { y: 50, opacity: 0, scale: 0.95 }}
+        className={cn(
+          "relative w-full h-full overflow-hidden flex flex-col md:flex-row transition-all duration-500",
+          !isCinemaMode && uiMode === 'modern' && "bg-zinc-900/60 border border-white/20 sm:rounded-[40px] backdrop-blur-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] sm:max-h-[90vh] sm:max-w-5xl",
+          !isCinemaMode && uiMode === 'classic' && "bg-zinc-950 border-4 border-zinc-800 sm:rounded-none shadow-none sm:max-h-[90vh] sm:max-w-5xl",
+          !isCinemaMode && uiMode === 'minimalist' && "bg-black border-0 sm:rounded-none shadow-none sm:max-h-[90vh] sm:max-w-5xl",
+          isCinemaMode && "bg-black"
         )}
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-6 right-6 z-50 p-2 rounded-full bg-black/40 hover:bg-white/10 text-white transition-all backdrop-blur-md border border-white/10"
-        >
-          <X className="w-6 h-6" />
-        </button>
+        onClick={e => e.stopPropagation()}
+      >
+        {isCinemaMode ? (
+          <>
+            {/* Cinema Mode Background */}
+            <div className="absolute inset-0 z-0">
+              <motion.div 
+                initial={{ opacity: 0, scale: 1.1 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="relative w-full h-full"
+              >
+                <img 
+                  src={metadata?.backdropUrl || metadata?.posterUrl || channel.logo} 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                  alt="Background"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/40" />
+                <div className="absolute inset-0 bg-gradient-to-r from-black via-black/20 to-transparent" />
+              </motion.div>
+            </div>
+
+            {/* Cinema Mode Content */}
+            <div className="relative z-10 flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar p-6 md:p-16">
+              {/* Top Bar */}
+              <div className="flex justify-between items-start mb-12">
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={onClose}
+                    className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all backdrop-blur-md border border-white/10"
+                  >
+                    <X className="w-6 h-6" />
+                  </button>
+                  <div className="flex flex-col">
+                    <span className="text-white/40 text-[10px] font-black uppercase tracking-widest">Sinema Modu</span>
+                    <span className="text-white font-bold text-sm">{channel.group}</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  {trailers.length > 0 && (
+                    <button
+                      onClick={() => setShowTrailer(trailers[0].key)}
+                      className="flex items-center gap-2 px-6 py-3 rounded-full bg-red-600 text-white font-black uppercase tracking-widest text-xs hover:bg-red-700 transition-all shadow-lg shadow-red-600/20"
+                    >
+                      <Youtube className="w-4 h-4" />
+                      Fragman
+                    </button>
+                  )}
+                  {(onNext || onPrev) && (
+                    <div className="flex gap-2">
+                      <button onClick={onPrev} className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10"><ChevronUp className="w-5 h-5" /></button>
+                      <button onClick={onNext} className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white border border-white/10"><ChevronDown className="w-5 h-5" /></button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row gap-12 flex-1">
+                {/* Left: Poster & Quick Info */}
+                <div className="w-full md:w-80 shrink-0 space-y-6">
+                  <motion.div 
+                    initial={{ x: -50, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    className="aspect-[2/3] rounded-[32px] overflow-hidden shadow-2xl border border-white/10 relative"
+                  >
+                    <img 
+                      src={metadata?.posterUrl || channel.logo} 
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                      alt="Poster"
+                    />
+                    {metadata?.logoUrl && (
+                      <div className="absolute inset-0 flex items-end justify-center p-6 bg-gradient-to-t from-black/80 via-transparent to-transparent">
+                        <img 
+                          src={metadata.logoUrl} 
+                          className="w-full h-auto max-h-16 object-contain drop-shadow-2xl"
+                          referrerPolicy="no-referrer"
+                          alt="Logo"
+                        />
+                      </div>
+                    )}
+                  </motion.div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/5 backdrop-blur-md">
+                      <div className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1">IMDb</div>
+                      <div className="text-xl font-black text-yellow-500 flex items-center gap-1">
+                        <Star className="w-4 h-4 fill-current" />
+                        {metadata?.imdbScore || 'N/A'}
+                      </div>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/5 backdrop-blur-md">
+                      <div className="text-white/40 text-[8px] font-black uppercase tracking-widest mb-1">Yıl</div>
+                      <div className="text-xl font-black text-white">{metadata?.year || 'N/A'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Main Info */}
+                <div className="flex-1 space-y-10">
+                  <motion.div
+                    initial={{ y: 30, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                  >
+                    {metadata?.logoUrl ? (
+                      <img 
+                        src={metadata.logoUrl} 
+                        alt={channel.name} 
+                        className="h-24 md:h-40 object-contain mb-8 filter drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <h1 className="text-5xl md:text-8xl font-black text-white mb-6 tracking-tighter leading-none">
+                        {channel.name}
+                      </h1>
+                    )}
+                    <div className="flex flex-wrap gap-3 mb-8">
+                      {metadata?.genre?.map((g, i) => (
+                        <span key={i} className="px-4 py-1.5 rounded-full bg-white/10 text-white/80 text-xs font-bold border border-white/10">
+                          {g}
+                        </span>
+                      ))}
+                      {metadata?.duration && (
+                        <span className="px-4 py-1.5 rounded-full bg-white/5 text-white/40 text-xs font-bold border border-white/5">
+                          {metadata.duration}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xl md:text-2xl text-white/70 leading-relaxed font-medium max-w-3xl italic">
+                      {metadata?.summary || 'Bu içerik için henüz bir özet bulunmuyor.'}
+                    </p>
+                  </motion.div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap gap-4 pt-4">
+                    <button
+                      onClick={() => onPlay(channel)}
+                      style={{ backgroundColor: themeColor }}
+                      className="flex items-center gap-3 px-12 py-5 rounded-full text-white font-black text-xl shadow-2xl hover:scale-105 active:scale-95 transition-all"
+                    >
+                      <Play className="w-6 h-6 fill-current" />
+                      {playbackProgress[channel.id] ? 'Devam Et' : 'Hemen İzle'}
+                    </button>
+                    <button
+                      onClick={toggleReminder}
+                      className={cn(
+                        "px-8 py-5 rounded-full flex items-center gap-3 font-bold transition-all border-2",
+                        hasReminder ? "bg-white text-black border-white" : "bg-white/5 text-white border-white/10 hover:bg-white/10"
+                      )}
+                    >
+                      <Bell className={cn("w-5 h-5", hasReminder && "fill-current")} />
+                      {hasReminder ? 'Hatırlatıcıda' : 'Hatırlatıcı'}
+                    </button>
+                  </div>
+
+                  {/* Cast */}
+                  {metadata?.tmdbCast && (
+                    <div className="pt-8">
+                      <h3 className="text-white/40 text-[10px] font-black uppercase tracking-[0.3em] mb-6">Oyuncu Kadrosu</h3>
+                      <div className="flex flex-wrap gap-4">
+                        {metadata.tmdbCast.slice(0, 6).map((actor, i) => (
+                          <button 
+                            key={i} 
+                            onClick={() => handleActorClick(actor.id)}
+                            onMouseEnter={() => onFocusChange?.(6 + i)}
+                            className={cn(
+                              "group flex flex-col items-center gap-3 w-24 transition-all",
+                              activeFocus === 6 + i && "scale-110 detail-focused"
+                            )}
+                          >
+                            <div className={cn(
+                              "w-20 h-20 rounded-full overflow-hidden border-2 transition-all shadow-xl",
+                              activeFocus === 6 + i ? "border-white ring-4 ring-white/20" : "border-white/10 group-hover:border-white/40"
+                            )}>
+                              {actor.profile_path ? (
+                                <img 
+                                  src={getTMDBImageUrl(actor.profile_path)} 
+                                  className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" 
+                                  alt={actor.name}
+                                />
+                              ) : (
+                                <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                  <User className="w-8 h-8 text-white/20" />
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-bold text-white/60 text-center group-hover:text-white transition-colors line-clamp-2">
+                              {actor.name}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Similar Content Carousel */}
+              {similarContent.length > 0 && (
+                <div className="mt-20 pt-10 border-t border-white/10">
+                  <h3 className="text-white/40 text-[10px] font-black uppercase tracking-[0.3em] mb-8">Benzer İçerikler</h3>
+                  <div className="flex gap-6 overflow-x-auto pb-8 custom-scrollbar">
+                    {similarContent.map((item, i) => (
+                      <div 
+                        key={item.id} 
+                        className={cn(
+                          "w-40 shrink-0 group cursor-pointer space-y-3 transition-all",
+                          activeFocus === 16 + i && "scale-105 detail-focused"
+                        )}
+                        onClick={() => console.log("Navigate to:", item.title || item.name)}
+                        onMouseEnter={() => onFocusChange?.(16 + i)}
+                      >
+                        <div className={cn(
+                          "aspect-[2/3] rounded-2xl overflow-hidden border transition-all relative shadow-xl",
+                          activeFocus === 16 + i ? "border-white ring-4 ring-white/20" : "border-white/5 group-hover:border-white/20"
+                        )}>
+                          <img 
+                            src={getTMDBImageUrl(item.poster_path || '') || ''} 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                            alt={item.title || item.name}
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <ChevronRight className="w-6 h-6 text-white" />
+                          </div>
+                        </div>
+                        <p className="text-[10px] font-bold text-white/40 truncate group-hover:text-white transition-colors">
+                          {item.title || item.name}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {uiMode === 'modern' && (
+              <div 
+                className="absolute -top-48 -right-48 w-96 h-96 rounded-full blur-[120px] opacity-30 animate-pulse"
+                style={{ backgroundColor: themeColor }}
+              />
+            )}
+            {/* Close Button */}
+            <div className="absolute top-6 right-6 z-50 flex flex-col gap-3">
+              <button
+                onClick={onClose}
+                className="p-2 rounded-full bg-black/40 hover:bg-white/10 text-white transition-all backdrop-blur-md border border-white/10"
+            title="Kapat"
+          >
+            <X className="w-6 h-6" />
+          </button>
+          
+          {(onNext || onPrev) && (
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); onPrev?.(); }}
+                className="p-2 rounded-full bg-black/40 hover:bg-white/10 text-white transition-all backdrop-blur-md border border-white/10"
+                title="Önceki Kanal"
+              >
+                <ChevronUp className="w-6 h-6" />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onNext?.(); }}
+                className="p-2 rounded-full bg-black/40 hover:bg-white/10 text-white transition-all backdrop-blur-md border border-white/10"
+                title="Sonraki Kanal"
+              >
+                <ChevronDown className="w-6 h-6" />
+              </button>
+            </div>
+          )}
+        </div>
 
         {/* Poster / Image Section */}
         <div className="w-full md:w-2/5 h-64 md:h-auto relative overflow-hidden">
@@ -240,7 +518,11 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                     <button 
                       key={i} 
                       onClick={() => handleActorClick(actor.id)}
-                      className="group flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/5 text-sm font-bold text-white/70 hover:bg-white/10 hover:border-white/20 transition-all"
+                      onMouseEnter={() => onFocusChange?.(6 + i)}
+                      className={cn(
+                        "group flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 border border-white/5 text-sm font-bold text-white/70 hover:bg-white/10 hover:border-white/20 transition-all",
+                        activeFocus === 6 + i && "bg-white text-black border-white scale-105 detail-focused"
+                      )}
                     >
                       {actor.profile_path ? (
                         <img 
@@ -392,7 +674,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                   uiMode === 'modern' && "rounded-full",
                   uiMode === 'classic' && "rounded-none border-4 border-white/20",
                   uiMode === 'minimalist' && "rounded-none border-0 text-black",
-                  activeFocus === 0 && "ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                  activeFocus === 0 && "ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)] detail-focused"
                 )}
               >
                 <Play className={cn("w-6 h-6 fill-current group-hover:scale-110 transition-transform", uiMode === 'minimalist' && "fill-black")} />
@@ -401,12 +683,12 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
 
               <button
                 onClick={toggleReminder}
-                onMouseEnter={() => onFocusChange?.(4)}
+                onMouseEnter={() => onFocusChange?.(1)}
                 className={cn(
                   "px-8 py-5 flex items-center gap-3 font-bold transition-all border-2",
                   hasReminder ? "bg-white text-black border-white" : "bg-white/5 text-white border-white/10 hover:bg-white/10",
                   uiMode === 'modern' && "rounded-full",
-                  activeFocus === 4 && "ring-4 ring-white/20 scale-105"
+                  activeFocus === 1 && "ring-4 ring-white/20 scale-105 detail-focused"
                 )}
               >
                 <Bell className={cn("w-5 h-5", hasReminder && "fill-current")} />
@@ -416,11 +698,11 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
               {trailers.length > 0 && (
                 <button
                   onClick={() => setShowTrailer(trailers[0].key)}
-                  onMouseEnter={() => onFocusChange?.(5)}
+                  onMouseEnter={() => onFocusChange?.(2)}
                   className={cn(
                     "px-8 py-5 flex items-center gap-3 font-bold transition-all border-2 bg-red-600/10 text-red-500 border-red-600/20 hover:bg-red-600/20",
                     uiMode === 'modern' && "rounded-full",
-                    activeFocus === 5 && "ring-4 ring-red-600/40 scale-105"
+                    activeFocus === 2 && "ring-4 ring-red-600/40 scale-105 detail-focused"
                   )}
                 >
                   <Youtube className="w-5 h-5" />
@@ -434,7 +716,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                   onMouseEnter={() => onFocusChange?.(3)}
                   className={cn(
                     "px-6 py-5 text-white/60 font-bold hover:text-white transition-all",
-                    activeFocus === 3 && "text-white underline underline-offset-8"
+                    activeFocus === 3 && "text-white underline underline-offset-8 detail-focused"
                   )}
                 >
                   Baştan İzle
@@ -445,9 +727,9 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
             <div className="flex items-center gap-4">
               <button
                 onClick={() => onToggleMultiChannel?.(channel.id)}
-                onMouseEnter={() => onFocusChange?.(1)}
+                onMouseEnter={() => onFocusChange?.(4)}
                 style={{
-                  transform: activeFocus === 1 ? 'scale(1.05)' : 'scale(1)'
+                  transform: activeFocus === 4 ? 'scale(1.05)' : 'scale(1)'
                 }}
                 className={cn(
                   "flex-1 md:flex-none flex items-center justify-center gap-3 px-8 py-5 font-black text-lg shadow-2xl active:scale-95 transition-all border-2",
@@ -455,7 +737,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                   uiMode === 'modern' && "rounded-full",
                   uiMode === 'classic' && "rounded-none border-4 border-white/20",
                   uiMode === 'minimalist' && "rounded-none border-2 border-white",
-                  activeFocus === 1 && "ring-4 ring-white/20 bg-white text-black border-white shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                  activeFocus === 4 && "ring-4 ring-white/20 bg-white text-black border-white shadow-[0_0_30px_rgba(255,255,255,0.2)] detail-focused"
                 )}
               >
                 <Monitor className="w-6 h-6" />
@@ -463,16 +745,16 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
               </button>
               <button
                 onClick={onClose}
-                onMouseEnter={() => onFocusChange?.(2)}
+                onMouseEnter={() => onFocusChange?.(5)}
                 style={{
-                  transform: activeFocus === 2 ? 'scale(1.05)' : 'scale(1)'
+                  transform: activeFocus === 5 ? 'scale(1.05)' : 'scale(1)'
                 }}
                 className={cn(
                   "px-8 py-5 text-white font-bold transition-all",
                   uiMode === 'modern' && "rounded-full bg-white/5 border border-white/10",
                   uiMode === 'classic' && "rounded-none bg-zinc-900 border-4 border-zinc-800",
                   uiMode === 'minimalist' && "rounded-none bg-transparent border-0 underline underline-offset-8",
-                  activeFocus === 2 && "bg-white text-black border-white ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                  activeFocus === 5 && "bg-white text-black border-white ring-4 ring-white/20 shadow-[0_0_30px_rgba(255,255,255,0.2)] detail-focused"
                 )}
               >
                 Kapat
@@ -488,17 +770,24 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                 <span className="text-[8px] opacity-50">TMDb Önerileri</span>
               </h3>
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
-                {similarContent.map((item) => (
+                {similarContent.map((item, i) => (
                   <div 
                     key={item.id} 
-                    className="group cursor-pointer space-y-2"
+                    className={cn(
+                      "group cursor-pointer space-y-2 transition-all",
+                      activeFocus === 16 + i && "scale-105 detail-focused"
+                    )}
                     onClick={() => {
                       // In a real app, we would navigate to this channel or fetch its metadata
                       // For now, we just show a hint
                       console.log("Navigate to:", item.title || item.name);
                     }}
+                    onMouseEnter={() => onFocusChange?.(16 + i)}
                   >
-                    <div className="aspect-[2/3] rounded-2xl overflow-hidden border border-white/5 group-hover:border-white/20 transition-all relative">
+                    <div className={cn(
+                      "aspect-[2/3] rounded-2xl overflow-hidden border transition-all relative",
+                      activeFocus === 16 + i ? "border-white shadow-[0_0_30px_rgba(255,255,255,0.2)]" : "border-white/5 group-hover:border-white/20"
+                    )}>
                       <img 
                         src={getTMDBImageUrl(item.poster_path || '') || ''} 
                         className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
@@ -518,7 +807,9 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
             </div>
           )}
         </div>
-        </motion.div>
+      </>
+    )}
+  </motion.div>
 
         {/* Trailer Modal */}
         <AnimatePresence>
@@ -579,14 +870,36 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent" />
                   <button 
-                    onClick={() => setSelectedActor(null)}
-                    className="absolute top-6 left-6 p-2 rounded-full bg-black/40 text-white border border-white/10"
+                    onClick={() => {
+                      setSelectedActor(null);
+                      onNavContextChange?.('channel-detail');
+                    }}
+                    onMouseEnter={() => onFocusChange?.(100)}
+                    className={cn(
+                      "absolute top-6 left-6 p-2 rounded-full bg-black/40 text-white border border-white/10 transition-all",
+                      activeFocus === 100 && "bg-white text-black border-white ring-4 ring-white/20 scale-110 actor-focused"
+                    )}
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
                 <div className="flex-1 p-8 md:p-12 overflow-y-auto custom-scrollbar">
-                  <h2 className="text-4xl font-black text-white mb-2">{selectedActor.name}</h2>
+                  <div className="flex items-center justify-between mb-2">
+                    <h2 className="text-4xl font-black text-white">{selectedActor.name}</h2>
+                    {onActorFilter && (
+                      <button
+                        onClick={() => onActorFilter(selectedActor.name)}
+                        onMouseEnter={() => onFocusChange?.(101)}
+                        className={cn(
+                          "flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-lg",
+                          activeFocus === 101 ? "bg-white text-black scale-110 actor-focused" : "bg-white/10 text-white hover:bg-white/20"
+                        )}
+                      >
+                        <Search className="w-4 h-4" />
+                        Listede Ara
+                      </button>
+                    )}
+                  </div>
                   <div className="flex flex-wrap gap-4 text-white/40 text-xs font-bold mb-8 uppercase tracking-widest">
                     {selectedActor.birthday && (
                       <span className="flex items-center gap-2"><Calendar className="w-3 h-3" /> {selectedActor.birthday}</span>
@@ -606,9 +919,19 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
                   <div>
                     <h3 className="text-white/20 text-[10px] font-black uppercase tracking-[0.3em] mb-6">Diğer Yapımları</h3>
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
-                      {actorMovies.map((movie) => (
-                        <div key={movie.id} className="group cursor-pointer space-y-2">
-                          <div className="aspect-[2/3] rounded-xl overflow-hidden border border-white/5 group-hover:border-white/20 transition-all">
+                      {actorMovies.map((movie, i) => (
+                        <div 
+                          key={movie.id} 
+                          className={cn(
+                            "group cursor-pointer space-y-2 transition-all",
+                            activeFocus === 102 + i && "scale-105 actor-focused"
+                          )}
+                          onMouseEnter={() => onFocusChange?.(102 + i)}
+                        >
+                          <div className={cn(
+                            "aspect-[2/3] rounded-xl overflow-hidden border transition-all",
+                            activeFocus === 102 + i ? "border-white ring-4 ring-white/20" : "border-white/5 group-hover:border-white/20"
+                          )}>
                             <img 
                               src={getTMDBImageUrl(movie.poster_path)} 
                               className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 

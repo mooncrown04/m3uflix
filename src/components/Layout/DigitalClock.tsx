@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { cn } from '../../lib/utils';
 
 interface DigitalClockProps {
   themeColor: string;
   style?: 'original' | 'horizontal' | 'minimal' | 'retro' | 'modern';
+  className?: string;
 }
 
-export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 'original' }) => {
+export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 'original', className }) => {
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -30,7 +32,7 @@ export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 
 
   if (style === 'horizontal') {
     return (
-      <div className="flex items-center gap-3 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10 select-none">
+      <div className={cn("flex items-center gap-3 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full border border-white/10 select-none", className)}>
         <div style={{ color: themeColor }} className="text-xl font-black italic tracking-tighter">
           {formatTime(time)}
         </div>
@@ -49,7 +51,7 @@ export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 
 
   if (style === 'minimal') {
     return (
-      <div className="flex flex-col items-end justify-center leading-none select-none">
+      <div className={cn("flex flex-col items-end justify-center leading-none select-none", className)}>
         <div style={{ color: themeColor }} className="text-xl font-black tracking-tighter">
           {time.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', hour12: false })}
         </div>
@@ -62,7 +64,7 @@ export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 
 
   if (style === 'retro') {
     return (
-      <div className="bg-zinc-900 border-2 border-zinc-800 p-2 font-mono select-none">
+      <div className={cn("bg-zinc-900 border-2 border-zinc-800 p-2 font-mono select-none", className)}>
         <div style={{ color: themeColor }} className="text-2xl font-bold tracking-widest drop-shadow-[0_0_5px_rgba(255,255,255,0.2)]">
           {formatTime(time)}
         </div>
@@ -76,7 +78,7 @@ export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 
 
   if (style === 'modern') {
     return (
-      <div className="flex items-baseline gap-2 select-none">
+      <div className={cn("flex items-baseline gap-2 select-none", className)}>
         <div className="text-3xl font-light tracking-tighter text-white">
           {time.getHours().toString().padStart(2, '0')}
           <span className="animate-pulse opacity-50">:</span>
@@ -95,7 +97,7 @@ export const DigitalClock: React.FC<DigitalClockProps> = ({ themeColor, style = 
   }
 
   return (
-    <div className="flex flex-col items-end justify-center leading-none mr-2 select-none">
+    <div className={cn("flex flex-col items-end justify-center leading-none select-none", className)}>
       <div 
         style={{ color: themeColor }}
         className="text-2xl font-black italic tracking-tighter drop-shadow-[0_0_10px_rgba(0,0,0,0.5)] animate-pulse"

@@ -35,10 +35,12 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
   handlePressStart,
   handlePressEnd,
   customProxyUrl,
+  layoutMode = 'scroll',
   style,
   channels,
   top10Style = 'original',
-  focusEffect = 'default'
+  focusEffect = 'default',
+  channelNumbers = {}
 }) => {
   const isFocused = activeRow === rowIndex && colIndex === activeCol;
   const isPreviewing = isFocused && previewChannelId === channel.id;
@@ -48,29 +50,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
   const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
   const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
   const isPressing = pressingId === channel.id;
-
-  const clickTimer = React.useRef<NodeJS.Timeout | null>(null);
-
-  const handleInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    e.stopPropagation();
-    
-    // For mouse, we now handle selection in onPointerDown for instant response
-    if (e.type === 'click' && (e.nativeEvent instanceof MouseEvent)) {
-      return;
-    }
-
-    // For Touch/TV users, maintain the double-click for details logic
-    if (clickTimer.current) {
-      clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-      onDetail?.(channel);
-    } else {
-      clickTimer.current = setTimeout(() => {
-        onSelect(channel);
-        clickTimer.current = null;
-      }, 250);
-    }
-  };
+  const pressStartTime = React.useRef<number>(0);
 
   // Find current EPG program
   const currentProgram = useMemo(() => {
@@ -164,7 +144,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       style={style}
       className={cn(
         "flex flex-col gap-2 snap-start relative", 
-        title === 'Top 10' && "pl-20",
+        title === 'Top 10' && (layoutMode === 'fixed-focus' ? "pl-14" : "pl-20"),
         deviceType === 'tv' 
           ? (orientation === 'landscape' ? "w-48 md:w-72" : "w-40 md:w-56")
           : deviceType === 'phone'
@@ -173,17 +153,22 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
       )}
     >
       {title === 'Top 10' && (
-        <div className="absolute left-[-60px] bottom-[-5px] z-0 pointer-events-none select-none flex items-end justify-center h-full overflow-visible">
+        <div className={cn(
+          "absolute z-0 pointer-events-none select-none flex overflow-visible",
+          layoutMode === 'fixed-focus' 
+            ? "left-0 w-12 top-0 h-[70%] items-center justify-center" 
+            : "left-[-60px] bottom-[-5px] h-full items-end justify-center"
+        )}>
           <span 
             className="font-black italic leading-none"
             style={{ 
               WebkitTextStroke: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
-                ? `5px ${top10Style === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` 
+                ? `${layoutMode === 'fixed-focus' ? '2px' : '5px'} ${top10Style === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` 
                 : 'none',
               color: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
                 ? 'transparent' 
                 : (top10Style === 'theme' ? themeColor : 'white'),
-              fontSize: '160px',
+              fontSize: layoutMode === 'fixed-focus' ? '60px' : '160px',
               fontWeight: '900',
               textShadow: top10Style === 'neon' 
                 ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` 
@@ -195,10 +180,10 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         </div>
       )}
       <motion.div
+        layoutId={`channel-${channel.id}-${rowIndex}-${colIndex}`}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         animate={getFocusAnimation()}
-        onClick={handleInteraction}
         onContextMenu={(e) => {
           if (deviceType !== 'tv') {
             e.preventDefault();
@@ -206,19 +191,6 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
             onLongPress?.(channel.id, title);
           }
         }}
-        onPointerDown={(e) => {
-          if (e.pointerType === 'mouse') {
-            onSelect(channel);
-          }
-          if (activeRow !== rowIndex || activeCol !== colIndex) {
-            onFocus(rowIndex, colIndex);
-          }
-        }}
-        onMouseDown={() => handlePressStart(channel.id)}
-        onMouseUp={handlePressEnd}
-        onMouseLeave={handlePressEnd}
-        onTouchStart={() => handlePressStart(channel.id)}
-        onTouchEnd={handlePressEnd}
         onMouseEnter={() => onFocus(rowIndex, colIndex)}
         style={{ 
           boxShadow: isFocused && focusEffect === 'default'
@@ -233,7 +205,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
             : (uiMode === 'minimalist' ? 'transparent' : 'rgba(255,255,255,0.05)')
         }}
         className={cn(
-          "relative w-full transition-all duration-300 border-4 cursor-pointer overflow-hidden",
+          "relative w-full transition-all duration-300 border-4 cursor-pointer overflow-hidden group/card",
           uiMode === 'modern' && "rounded-2xl border-white/10 bg-white/5 backdrop-blur-xl bg-zinc-900",
           uiMode === 'classic' && "rounded-none border-zinc-800 bg-zinc-950",
           uiMode === 'minimalist' && "rounded-none border-transparent bg-transparent",
@@ -244,6 +216,28 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
           !isFocused && uiMode === 'minimalist' && "opacity-60"
         )}
       >
+        {/* Clickable Overlay - Handles all card interactions */}
+        <div 
+          className="absolute inset-0 z-0 cursor-pointer"
+          onPointerDown={(e) => {
+            pressStartTime.current = Date.now();
+            if (activeRow !== rowIndex || activeCol !== colIndex) {
+              onFocus(rowIndex, colIndex);
+            }
+            handlePressStart(channel.id);
+          }}
+          onPointerUp={handlePressEnd}
+          onClick={(e) => {
+            e.stopPropagation();
+            const duration = Date.now() - pressStartTime.current;
+            // Only trigger if it was a short click (less than 500ms)
+            if (duration < 500 && duration > 0) {
+              onSelect(channel);
+            }
+          }}
+          onPointerLeave={handlePressEnd}
+          onPointerCancel={handlePressEnd}
+        />
         {isFocused && uiMode === 'modern' && (
           <div 
             className="absolute inset-0 blur-2xl opacity-20 pointer-events-none"
@@ -257,7 +251,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
           />
         )}
         {playbackProgress[channel.id] && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-[70]">
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-[70] pointer-events-none">
             <div 
               className="h-full transition-all duration-300"
               style={{ 
@@ -267,76 +261,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
             />
           </div>
         )}
-        {(isFocused || deviceType !== 'tv') && (
-          <div 
-            className={cn(
-              "absolute bottom-2 right-2 z-[60] transition-all duration-300",
-              isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
-            )}
-          >
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleMini?.(channel);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-              className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer z-[100]"
-              title="Picture in Picture (P)"
-            >
-              <Monitor className="w-4 h-4" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onLongPress?.(channel.id, title);
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              onPointerUp={(e) => e.stopPropagation()}
-              onMouseUp={(e) => e.stopPropagation()}
-              className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-white hover:text-black border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer z-[100]"
-              title="Daha Fazla (Favori/Multi)"
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-        {isPressing && (
-          <motion.div 
-            initial={{ width: 0 }}
-            animate={{ width: '100%' }}
-            transition={{ duration: 0.8, ease: "linear" }}
-            className="absolute bottom-0 left-0 h-1.5 bg-white z-50"
-          />
-        )}
-        <div className="absolute top-2 left-2 z-40 flex flex-col gap-1.5">
-          {badges.map((b, i) => (
-            <div 
-              key={i}
-              style={{ backgroundColor: themeColor }}
-              className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
-            >
-              {b}
-            </div>
-          ))}
-        </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDeleteChannel(channel.id);
-          }}
-          className={cn(
-            "absolute top-2 right-2 z-40 w-6 h-6 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center transition-all hover:bg-red-600 group/delete",
-            isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50"
-          )}
-        >
-          <X className="w-3.5 h-3.5 text-white group-hover/delete:scale-110 transition-transform" />
-        </button>
+        {/* Overlays and Content */}
         {isPreviewing ? (
           <div className="w-full h-full bg-black pointer-events-none">
             <PreviewPlayer urls={channel.urls} customProxyUrl={customProxyUrl} />
@@ -351,7 +276,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         ) : (
           <>
             {channel.isMultiView ? (
-              <div className="w-full h-full grid grid-cols-2 gap-0.5 bg-zinc-950 p-1">
+              <div className="w-full h-full grid grid-cols-2 gap-0.5 bg-zinc-950 p-1 pointer-events-none">
                 {(channel.sessionChannels || []).slice(0, 4).map((id: string) => {
                   const ch = channels.find(c => c.id === id);
                   return (
@@ -374,14 +299,14 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
               <img 
                 src={channel.logo} 
                 alt={channel.name} 
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover pointer-events-none"
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=101010&color=fff&size=512`;
                 }}
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
+              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 pointer-events-none">
                 <Tv className="w-8 h-8 text-zinc-700" />
               </div>
             )}
@@ -390,7 +315,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
 
         {/* EPG Info Overlay */}
         {currentProgram && (
-          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-[60]">
+          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-[60] pointer-events-none">
             <div className="text-[10px] font-bold text-white truncate mb-1">
               {currentProgram.title}
             </div>
@@ -408,7 +333,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         {/* Play Icon Overlay (if no EPG) */}
         {!currentProgram && uiMode !== 'minimalist' && (
           <div className={cn(
-            "absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3 transition-opacity duration-300",
+            "absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3 transition-opacity duration-300 pointer-events-none",
             isFocused ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"
           )}>
             <div className="flex items-center gap-2">
@@ -421,30 +346,139 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
         )}
         {isFocused && uiMode === 'minimalist' && (
           <div 
-            className="absolute bottom-0 left-0 right-0 h-1 z-[70]"
+            className="absolute bottom-0 left-0 right-0 h-1 z-[70] pointer-events-none"
             style={{ backgroundColor: themeColor }}
           />
         )}
+
+        {/* Interactive Elements (Buttons) - Placed last with high z-index to ensure clickability */}
+        {(isFocused || deviceType !== 'tv') && (
+          <>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelect(channel);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute bottom-2 right-[88px] z-[100] p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-green-600 border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer group/play",
+                isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
+              )}
+              title="Oynat (Enter)"
+            >
+              <Play className="w-4 h-4 group-hover/play:scale-110 transition-transform fill-current" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleMini?.(channel);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute bottom-2 right-12 z-[100] p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-600 border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer group/pip",
+                isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
+              )}
+              title="Picture in Picture (P)"
+            >
+              <Monitor className="w-4 h-4 group-hover/pip:scale-110 transition-transform" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onLongPress?.(channel.id, title);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute bottom-2 right-2 z-[100] p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-600 border border-white/10 shadow-xl transition-all active:scale-90 cursor-pointer group/more",
+                isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50 group-hover/card:opacity-100 group-hover/card:scale-100"
+              )}
+              title="Daha Fazla (Favori/Multi)"
+            >
+              <MoreVertical className="w-4 h-4 group-hover/more:scale-110 transition-transform" />
+            </button>
+          </>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDeleteChannel(channel.id);
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute top-2 right-2 z-[100] w-6 h-6 rounded-full bg-black/60 backdrop-blur-md border border-white/20 flex items-center justify-center transition-all hover:bg-red-600 group/delete",
+            isFocused ? "opacity-100 scale-100" : "opacity-0 scale-50"
+          )}
+        >
+          <X className="w-3.5 h-3.5 text-white group-hover/delete:scale-110 transition-transform" />
+        </button>
+
+        {isPressing && (
+          <motion.div 
+            initial={{ width: 0 }}
+            animate={{ width: '100%' }}
+            transition={{ duration: 0.8, ease: "linear" }}
+            className="absolute bottom-0 left-0 h-1.5 bg-white z-[110] pointer-events-none"
+          />
+        )}
+        <div className="absolute top-2 left-2 z-[100] flex flex-col gap-1.5 pointer-events-none">
+          {channelNumbers[channel.id] && (
+            <div 
+              style={{ backgroundColor: themeColor }}
+              className="text-[10px] font-black text-white px-2 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
+            >
+              {channelNumbers[channel.id]}
+            </div>
+          )}
+          {badges.map((b, i) => (
+            <div 
+              key={i}
+              style={{ backgroundColor: themeColor }}
+              className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
+            >
+              {b}
+            </div>
+          ))}
+        </div>
       </motion.div>
       <div className={cn(
-        "mt-2 transition-all duration-300",
+        "mt-0.5 transition-all duration-300 relative z-10",
         uiMode === 'minimalist' && "mt-0"
       )}>
         <p className={cn(
-          "text-xs font-medium truncate transition-all duration-300",
-          orientation === 'landscape' ? "w-40 md:w-56" : "w-32 md:w-44",
-          isFocused ? "text-white font-bold translate-y-[-2px]" : "text-zinc-400",
+          "text-sm font-bold truncate transition-all duration-300",
+          orientation === 'landscape' ? "w-full" : "w-full",
+          isFocused ? "text-white translate-y-[-2px]" : "text-zinc-300",
           uiMode === 'minimalist' && isFocused && "text-white tracking-widest uppercase",
           uiMode === 'classic' && isFocused && "text-white"
         )}>
           {channel.name}
         </p>
+        {currentProgram && (
+          <p className={cn(
+            "text-[10px] truncate mt-0.5 flex items-center gap-1.5",
+            isFocused ? "text-zinc-200" : "text-zinc-400"
+          )}>
+            <span className="opacity-60 font-mono shrink-0">
+              {currentProgram.start.getHours().toString().padStart(2, '0')}:
+              {currentProgram.start.getMinutes().toString().padStart(2, '0')}
+            </span>
+            <span className="truncate font-medium">{currentProgram.title}</span>
+          </p>
+        )}
         {nextProgram && (
           <p className={cn(
-            "text-[10px] text-zinc-500 truncate mt-0.5 flex items-center gap-1.5",
+            "text-[9px] text-zinc-500 truncate mt-0.5 flex items-center gap-1.5",
             uiMode === 'minimalist' && "opacity-60 italic"
           )}>
-            <span className="opacity-40 font-black text-[8px] uppercase tracking-tighter shrink-0">Sonraki</span>
+            <span className="opacity-40 font-black text-[7px] uppercase tracking-tighter shrink-0">Sonraki</span>
             <span className="opacity-60 font-mono shrink-0">
               {nextProgram.start.getHours().toString().padStart(2, '0')}:
               {nextProgram.start.getMinutes().toString().padStart(2, '0')}

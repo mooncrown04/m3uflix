@@ -9,6 +9,7 @@ export interface TMDBData {
   media_type?: 'movie' | 'tv';
   poster_path?: string;
   backdrop_path?: string;
+  logo_path?: string;
   vote_average?: number;
   overview?: string;
   release_date?: string;
@@ -82,9 +83,20 @@ export async function fetchTMDBData(name: string, type: 'movie' | 'tv' | 'auto' 
       
       const director = creditsData.crew?.find((c: any) => c.job === 'Director');
       
+      // Fetch images for logos
+      const imagesUrl = `${BASE_URL}/${searchType}/${result.id}/images?api_key=${apiKey}`;
+      const imagesResponse = await fetch(imagesUrl);
+      const imagesData = await imagesResponse.json();
+      
+      // Find a logo (prefer Turkish, then English, then any)
+      const logo = imagesData.logos?.find((l: any) => l.iso_639_1 === 'tr') || 
+                   imagesData.logos?.find((l: any) => l.iso_639_1 === 'en') || 
+                   imagesData.logos?.[0];
+
       const tmdbData: TMDBData = {
         ...result,
         media_type: searchType as 'movie' | 'tv',
+        logo_path: logo?.file_path,
         cast: creditsData.cast?.slice(0, 10).map((c: any) => ({
           id: c.id,
           name: c.name,

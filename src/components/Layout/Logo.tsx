@@ -222,7 +222,7 @@ export const Logo: React.FC<LogoProps> = ({ uiMode, logoStyle }) => {
               uiMode === 'minimalist' && "gap-1"
             )}
           >
-            {uiMode !== 'minimalist' && <Tv className="text-yellow-400 w-8 h-8 md:w-10 md:h-10 fill-current" />}
+            <Tv className="text-yellow-400 w-8 h-8 md:w-10 md:h-10 fill-current" />
             <span className={cn(
               "font-black text-2xl md:text-3xl tracking-tighter uppercase italic flex",
               uiMode === 'minimalist' && "not-italic tracking-normal font-bold"

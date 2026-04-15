@@ -1,3 +1,5 @@
+import { getProxiedUrl } from './fetchUtils';
+
 export interface EPGProgram {
   start: Date;
   stop: Date;
@@ -11,9 +13,9 @@ export interface EPGData {
   programs: Record<string, EPGProgram[]>; // channelId -> programs
 }
 
-export async function fetchAndParseEPG(url: string): Promise<EPGData> {
+export async function fetchAndParseEPG(url: string, customProxyUrl?: string): Promise<EPGData> {
   try {
-    const response = await fetch(url);
+    const response = await fetch(getProxiedUrl(url, customProxyUrl));
     if (!response.ok) throw new Error('EPG fetch failed');
     const xmlText = await response.text();
     

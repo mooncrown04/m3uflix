@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu, Hash, Volume2, VolumeX, Key, Globe, Mail, ExternalLink, CircleDashed, Activity, Sparkles, Copy, Database, Pipette } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
+import { performAISearch } from './services/aiSearchService';
+import { getProxiedUrl } from './utils/fetchUtils';
 import { fetchAndParseEPG, EPGData } from './utils/epgParser';
 import { VideoPlayer } from './components/VideoPlayer';
 import { PreviewPlayer } from './components/PreviewPlayer';
@@ -11,6 +14,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getDominantColor } from './utils/colorExtractor';
 import { FixedSizeList as List } from 'react-window';
 import { useVoiceControl } from './hooks/useVoiceControl';
+import { useToasts } from './hooks/useToasts';
+import { useRemoteControl } from './hooks/useRemoteControl';
+import { useSettings } from './hooks/useSettings';
+import { usePlaylists } from './hooks/usePlaylists';
 import { io } from 'socket.io-client';
 import { QRCodeCanvas } from 'qrcode.react';
 import MobileRemote from './components/MobileRemote';
@@ -18,28 +25,71 @@ import MobileRemote from './components/MobileRemote';
 import { VoiceSearchOverlay } from './components/VoiceSearchOverlay';
 import { AdvancedEPG } from './components/EPG/AdvancedEPG';
 import { BentoDashboard } from './components/Layout/BentoDashboard';
-import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast } from './types';
+import { Playlist, UIMode, LayoutMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast, NavContext, WatcherRule, WatcherNotification, LiveMatch, LiveSubtitle, ProgramSummary as ProgramSummaryType } from './types';
 import { cn, useContainerWidth } from './lib/utils';
 import { ChannelRow } from './components/Channel/ChannelRow';
 import { Logo } from './components/Layout/Logo';
 import { WeatherWidget } from './components/Layout/WeatherWidget';
 import { DigitalClock } from './components/Layout/DigitalClock';
 import { EPGTimeline } from './components/EPG/EPGTimeline';
-
-const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
-
-const PROFILE_PICS = [
-  'THEME_COLOR',
-  'https://upload.wikimedia.org/wikipedia/commons/0/0b/Netflix-avatar.png',
-  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/1bdc9a33850498.56ba69ac2ba5b.png',
-  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/bf6e4a33850498.56ba69ac3064f.png',
-  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/64623a33850498.56ba69ac2a6f7.png',
-  'https://images.weserv.nl/?url=https://mir-s3-cdn-cf.behance.net/project_modules/disp/e70b1333850498.56ba69ac32ae3.png'
-];
-
-const MULTI_CATEGORIES = ['HABER', 'SPOR', 'ULUSAL', 'SİNEMA', 'BELGESEL'];
+import { ToastContainer } from './components/Layout/ToastContainer';
+import { RemotePairingModal } from './components/Modals/RemotePairingModal';
+import { SettingsModal } from './components/Modals/SettingsModal';
+import { SportsDashboard } from './components/SportsDashboard';
+import { LiveSubtitleOverlay } from './components/Player/LiveSubtitleOverlay';
+import { ProgramSummary } from './components/ProgramSummary';
+import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
+import { DEFAULT_M3U_URL, MULTI_CATEGORIES, PROFILE_PICS } from './constants';
 
 export default function App() {
+  const { toasts, showToast } = useToasts();
+  const {
+    remoteRoomId,
+    isRemoteConnected,
+    setIsRemoteConnected,
+    isTvSocketConnected,
+    setIsTvSocketConnected,
+    remoteControlEnabled,
+    setRemoteControlEnabled,
+    appUrl,
+    setAppUrl,
+    socketRef
+  } = useRemoteControl();
+
+  const {
+    themeColor, setThemeColor,
+    uiMode, setUiMode,
+    layoutMode, setLayoutMode,
+    logoStyle, setLogoStyle,
+    focusEffect, setFocusEffect,
+    posterOrientation, setPosterOrientation,
+    clockStyle, setClockStyle,
+    top10Style, setTop10Style,
+    profilePic, setProfilePic,
+    deviceType, setDeviceType,
+    dynamicThemeEnabled, setDynamicThemeEnabled,
+    voiceControlEnabled, setVoiceControlEnabled,
+    cinemaModeEnabled, setCinemaModeEnabled,
+    tmdbEnabled, setTmdbEnabled,
+    tmdbApiKey, setTmdbApiKey,
+    geminiApiKey, setGeminiApiKey,
+    customProxyUrl, setCustomProxyUrl,
+    playerEngine, setPlayerEngine,
+    ambilightMode, setAmbilightMode,
+    mixColor1, setMixColor1,
+    mixColor2, setMixColor2,
+    mixedColor
+  } = useSettings();
+
+  const {
+    playlists, setPlaylists,
+    currentPlaylistId, setCurrentPlaylistId,
+    channels, setChannels,
+    epgData, setEpgData,
+    isLoading, setIsLoading,
+    loadPlaylist
+  } = usePlaylists(customProxyUrl);
+
   const [isRemoteMode, setIsRemoteMode] = useState(() => localStorage.getItem('is_remote_mode') === 'true');
   const [playbackProgress, setPlaybackProgress] = useState<Record<string, { currentTime: number; duration: number }>>(() => {
     try {
@@ -54,7 +104,17 @@ export default function App() {
     return {};
   });
 
-  // Check if we are in remote control mode
+  const [watcherRules, setWatcherRules] = useState<WatcherRule[]>(() => {
+    const saved = localStorage.getItem('watcher_rules');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [watcherNotifications, setWatcherNotifications] = useState<WatcherNotification[]>([]);
+  const notifiedProgramsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem('watcher_rules', JSON.stringify(watcherRules));
+  }, [watcherRules]);
+
   const urlParams = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
   const remoteRoomIdFromUrl = urlParams.get('remote')?.trim().toUpperCase() || null;
   const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -71,30 +131,13 @@ export default function App() {
     }));
   };
 
-  const [channels, setChannels] = useState<M3UChannel[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentChannel, setCurrentChannel] = useState<M3UChannel | null>(null);
-  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
-    try {
-      const saved = localStorage.getItem('playlists');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse playlists:', e);
-    }
-    return [];
-  });
-  const [currentPlaylistId, setCurrentPlaylistId] = useState<string | null>(() => 
-    localStorage.getItem('current_playlist_id')
-  );
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [epgUrl, setEpgUrl] = useState('');
   const [extraUrl, setExtraUrl] = useState('');
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [newPlaylistUrl, setNewPlaylistUrl] = useState('');
-  const [epgData, setEpgData] = useState<EPGData | null>(null);
   const [globalVolume, setGlobalVolume] = useState(() => {
     const saved = localStorage.getItem('global_volume');
     return saved ? parseFloat(saved) : 1;
@@ -104,34 +147,81 @@ export default function App() {
     return saved === 'true';
   });
 
+  const globalVolumeRef = useRef(globalVolume);
+  useEffect(() => {
+    globalVolumeRef.current = globalVolume;
+  }, [globalVolume]);
+
+  const updateGlobalVolume = useCallback((newVolume: number) => {
+    setGlobalVolume(newVolume);
+    
+    if (socketRef.current) {
+      socketRef.current.emit('sync-state', { volume: newVolume, isMuted: false });
+    }
+  }, []);
+
   useEffect(() => {
     localStorage.setItem('global_volume', globalVolume.toString());
   }, [globalVolume]);
+
+  // AI Gözcü (Watcher) Logic
+  useEffect(() => {
+    if (!epgData || watcherRules.length === 0) return;
+
+    const scanInterval = setInterval(() => {
+      const now = new Date();
+      const newNotifications: WatcherNotification[] = [];
+      const activeRules = watcherRules.filter(r => r.isActive);
+      
+      if (activeRules.length === 0) return;
+
+      Object.entries(epgData.programs).forEach(([channelId, programs]) => {
+        const currentProgram = programs.find(p => now >= p.start && now <= p.stop);
+        if (currentProgram) {
+          const titleLower = currentProgram.title.toLowerCase();
+          const descLower = (currentProgram.description || '').toLowerCase();
+
+          activeRules.forEach(rule => {
+            const keywordLower = rule.keyword.toLowerCase();
+            const matches = titleLower.includes(keywordLower) || descLower.includes(keywordLower);
+
+            if (matches) {
+              const notificationId = `${rule.id}-${channelId}-${currentProgram.start.getTime()}`;
+              if (!notifiedProgramsRef.current.has(notificationId)) {
+                notifiedProgramsRef.current.add(notificationId);
+                const channelName = epgData.channels[channelId] || channelId;
+                newNotifications.push({
+                  id: notificationId,
+                  ruleId: rule.id,
+                  programTitle: currentProgram.title,
+                  channelName,
+                  channelId,
+                  startTime: currentProgram.start,
+                  timestamp: Date.now()
+                });
+              }
+            }
+          });
+        }
+      });
+
+      if (newNotifications.length > 0) {
+        setWatcherNotifications(prev => [...newNotifications, ...prev].slice(0, 10));
+      }
+    }, 60000); // Scan every minute
+
+    return () => clearInterval(scanInterval);
+  }, [epgData, watcherRules]);
 
   useEffect(() => {
     localStorage.setItem('is_muted', String(isMuted));
   }, [isMuted]);
 
-  const [isLoading, setIsLoading] = useState(() => {
-    const saved = localStorage.getItem('m3u_url');
-    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
-    return !!saved && !isDeleted;
-  });
-  const [toasts, setToasts] = useState<Toast[]>([]);
-
-  const showToast = useCallback((message: string, type: 'error' | 'success' | 'info' = 'info') => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts(prev => prev.filter(t => t.id !== id));
-    }, 3000);
-  }, []);
+  const [userCount, setUserCount] = useState<number>(1);
   const [scrolled, setScrolled] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showRemotePairingModal, setShowRemotePairingModal] = useState(false);
   const [showEPGTimeline, setShowEPGTimeline] = useState(false);
-  const [posterOrientation, setPosterOrientation] = useState<'landscape' | 'portrait'>(() => 
-    (localStorage.getItem('poster_orientation') as 'landscape' | 'portrait') || 'landscape'
-  );
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
   const [savedUrl, setSavedUrl] = useState<string | null>(() => {
     const saved = localStorage.getItem('m3u_url');
@@ -140,40 +230,6 @@ export default function App() {
     if (isDeleted) return null;
     return DEFAULT_M3U_URL;
   });
-  const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626'); // Default red-600
-  const [uiMode, setUiMode] = useState<UIMode>(() => {
-    const saved = localStorage.getItem('ui_mode');
-    return (saved as UIMode) || 'modern';
-  });
-  const [logoStyle, setLogoStyle] = useState<LogoStyle>(() => {
-    const saved = localStorage.getItem('logo_style');
-    return (saved as LogoStyle) || 'default';
-  });
-  const [dynamicThemeEnabled, setDynamicThemeEnabled] = useState(() => 
-    localStorage.getItem('dynamic_theme_enabled') === 'true'
-  );
-  const [voiceControlEnabled, setVoiceControlEnabled] = useState(() => 
-    localStorage.getItem('voice_control_enabled') !== 'false' // Default to true
-  );
-  const [remoteControlEnabled, setRemoteControlEnabled] = useState(() => 
-    localStorage.getItem('remote_control_enabled') !== 'false' // Default to true
-  );
-  const [focusEffect, setFocusEffect] = useState<FocusEffect>(() => {
-    const saved = localStorage.getItem('focus_effect');
-    return (saved as FocusEffect) || 'default';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('voice_control_enabled', String(voiceControlEnabled));
-  }, [voiceControlEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('remote_control_enabled', String(remoteControlEnabled));
-  }, [remoteControlEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('dynamic_theme_enabled', String(dynamicThemeEnabled));
-  }, [dynamicThemeEnabled]);
 
   useEffect(() => {
     if (!dynamicThemeEnabled || !currentChannel) return;
@@ -185,17 +241,10 @@ export default function App() {
       if (color) {
         setThemeColor(color);
         setAmbientColor(color);
-        localStorage.setItem('theme_color', color);
       }
     });
-  }, [currentChannel, dynamicThemeEnabled]);
+  }, [currentChannel, dynamicThemeEnabled, setThemeColor]);
 
-  useEffect(() => {
-    localStorage.setItem('focus_effect', focusEffect);
-  }, [focusEffect]);
-
-  const [mixColor1, setMixColor1] = useState<string>(() => localStorage.getItem('mix_color_1') || '#dc2626');
-  const [mixColor2, setMixColor2] = useState<string>(() => localStorage.getItem('mix_color_2') || '#2563eb');
   const [favorites, setFavorites] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('favorites');
@@ -308,37 +357,6 @@ export default function App() {
     return [];
   });
 
-  const [remoteRoomId] = useState(() => {
-    const saved = localStorage.getItem('remote_room_id');
-    if (saved) return saved;
-    const newId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    localStorage.setItem('remote_room_id', newId);
-    return newId;
-  });
-  const [isRemoteConnected, setIsRemoteConnected] = useState(false);
-  const [isTvSocketConnected, setIsTvSocketConnected] = useState(false);
-  const [appUrl, setAppUrl] = useState<string>(() => localStorage.getItem('manual_app_url') || window.location.origin);
-  const socketRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (localStorage.getItem('manual_app_url')) return;
-    
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(data => {
-        if (data.appUrl) {
-          setAppUrl(data.appUrl);
-        }
-      })
-      .catch(err => console.error('Failed to fetch app config:', err));
-  }, []);
-
-  useEffect(() => {
-    if (appUrl !== window.location.origin) {
-      localStorage.setItem('manual_app_url', appUrl);
-    }
-  }, [appUrl]);
-
   const [isMultiPlayerOpen, setIsMultiPlayerOpen] = useState(false);
   const [multiPlayerChannels, setMultiPlayerChannels] = useState<M3UChannel[]>([]);
   const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
@@ -444,63 +462,62 @@ export default function App() {
     const saved = localStorage.getItem('auto_preview_enabled');
     return saved === null ? false : saved === 'true';
   });
-  const [customProxyUrl, setCustomProxyUrl] = useState<string>(() => 
-    localStorage.getItem('custom_proxy_url') || ''
-  );
-  const [deviceType, setDeviceType] = useState<'pc' | 'tv' | 'tablet' | 'phone'>(() => 
-    (localStorage.getItem('device_type') as 'pc' | 'tv' | 'tablet' | 'phone') || 'pc'
-  );
-  const [profilePic, setProfilePic] = useState<string>(() => 
-    localStorage.getItem('profile_pic') || PROFILE_PICS[0]
-  );
-  const [tmdbApiKey, setTmdbApiKey] = useState<string>(() => 
-    localStorage.getItem('tmdb_api_key') || ''
-  );
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => 
-    localStorage.getItem('gemini_api_key') || ''
-  );
-
-  useEffect(() => {
-    localStorage.setItem('tmdb_api_key', tmdbApiKey);
-  }, [tmdbApiKey]);
-
-  useEffect(() => {
-    localStorage.setItem('gemini_api_key', geminiApiKey);
-  }, [geminiApiKey]);
-
-  const [playerEngine, setPlayerEngine] = useState<'hls' | 'shaka'>(() => 
-    (localStorage.getItem('player_engine') as 'hls' | 'shaka') || 'hls'
-  );
-  const [ambilightMode, setAmbilightMode] = useState<'none' | 'soft' | 'vibrant' | 'cinema'>(() => 
-    (localStorage.getItem('ambilight_mode') as any) || 'soft'
-  );
   const [ambientColor, setAmbientColor] = useState<string>('rgba(0, 0, 0, 0)');
   const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [quickSettingsFocus, setQuickSettingsFocus] = useState(0);
   const [transitionKey, setTransitionKey] = useState(0);
 
-  useEffect(() => {
-    localStorage.setItem('player_engine', playerEngine);
-  }, [playerEngine]);
+  const [showDeviceInfo, setShowDeviceInfo] = useState(false);
+  const [showGlobalVolumeIndicator, setShowGlobalVolumeIndicator] = useState(false);
+  const volumeIndicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isFirstVolumeChange = useRef(true);
 
-  useEffect(() => {
-    localStorage.setItem('ambilight_mode', ambilightMode);
-  }, [ambilightMode]);
+  const getDeviceInfo = () => {
+    const ua = navigator.userAgent;
+    let browser = "Bilinmiyor";
+    let device = "Bilinmiyor";
 
-  const [clockStyle, setClockStyle] = useState<'original' | 'horizontal' | 'minimal' | 'retro' | 'modern'>(() => 
-    (localStorage.getItem('clock_style') as any) || 'original'
+    if (ua.includes("Firefox")) browser = "Firefox";
+    else if (ua.includes("Edg")) browser = "Edge";
+    else if (ua.includes("Chrome")) browser = "Chrome";
+    else if (ua.includes("Safari")) browser = "Safari";
+
+    if (ua.includes("Windows")) device = "Windows";
+    else if (ua.includes("Android")) device = "Android";
+    else if (ua.includes("iPhone")) device = "iPhone";
+    else if (ua.includes("iPad")) device = "iPad";
+    else if (ua.includes("Macintosh")) device = "Mac";
+    else if (ua.includes("Linux")) device = "Linux";
+
+    // Technical details for debugging/optimization
+    const screenRes = `${window.screen.width}x${window.screen.height}`;
+    const windowSize = `${window.innerWidth}x${window.innerHeight}`;
+    const pixelRatio = window.devicePixelRatio;
+    const memory = (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'Bilinmiyor';
+    const connection = (navigator as any).connection ? (navigator as any).connection.effectiveType : 'Bilinmiyor';
+    const language = navigator.language;
+    const cores = navigator.hardwareConcurrency || 'Bilinmiyor';
+
+    return { 
+      browser, 
+      device, 
+      raw: ua,
+      screenRes,
+      windowSize,
+      pixelRatio,
+      memory,
+      connection,
+      language,
+      cores
+    };
+  };
+
+  const [loadingStyle, setLoadingStyle] = useState<'classic' | 'minimal' | 'pulse' | 'bars' | 'orbit' | 'glitch'>(() => 
+    (localStorage.getItem('player_loading_style') as any) || 'classic'
   );
-  const [top10Style, setTop10Style] = useState<Top10Style>(() => 
-    (localStorage.getItem('top10_style') as any) || 'original'
-  );
 
   useEffect(() => {
-    localStorage.setItem('clock_style', clockStyle);
-  }, [clockStyle]);
-
-  useEffect(() => {
-    localStorage.setItem('top10_style', top10Style);
-  }, [top10Style]);
+    localStorage.setItem('player_loading_style', loadingStyle);
+  }, [loadingStyle]);
   const [customOrders, setCustomOrders] = useState<Record<string, string[]>>(() => {
     try {
       const saved = localStorage.getItem('custom_orders');
@@ -528,9 +545,6 @@ export default function App() {
     return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
   };
 
-  // TV Navigation State
-  const [activeRow, setActiveRow] = useState(0); // -1: Top Bar, 0+: Channel Rows
-  const [activeCol, setActiveCol] = useState(0);
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
   const [lockedCategories, setLockedCategories] = useState<string[]>(() => {
     const saved = localStorage.getItem('locked_categories');
@@ -575,22 +589,81 @@ export default function App() {
       if (sleepTimerRef.current) clearInterval(sleepTimerRef.current);
     };
   }, [sleepTimerActive, sleepTimer]);
+
   const [channelForDetail, setChannelForDetail] = useState<M3UChannel | null>(null);
+  const [detailFocus, setDetailFocus] = useState(0); // 0: Play, 1: Multi, 2: Close
+
+  const handleActorFilter = useCallback((actorName: string) => {
+    setSearchQuery(actorName);
+    setActiveTab('Tümü');
+    setChannelForDetail(null);
+    setNavContext('browse');
+    setActiveRow(0);
+    setActiveCol(0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast(`${actorName} için sonuçlar filtrelendi`, "info");
+  }, [showToast]);
+
+  const [isMiniPlayer, setIsMiniPlayer] = useState(false);
+  const [isGlobalPlaying, setIsGlobalPlaying] = useState(true);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
-  const [detailFocus, setDetailFocus] = useState(0); // 0: Play, 1: Multi, 2: Close
-  const [settingsFocus, setSettingsFocus] = useState(0); 
-  const [settingsSection, setSettingsSection] = useState(0);
-  const [isMiniPlayer, setIsMiniPlayer] = useState(false);
+  const [channelNumbers, setChannelNumbers] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('channel_numbers');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [typedNumber, setTypedNumber] = useState<string>('');
+  const [showNumberInput, setShowNumberInput] = useState(false);
+  const [numberInputChannelId, setNumberInputChannelId] = useState<string | null>(null);
+  const typedNumberTimeout = useRef<NodeJS.Timeout | null>(null);
   const [featuredChannel, setFeaturedChannel] = useState<M3UChannel | null>(null);
-  const [activeSettingsTab, setActiveSettingsTab] = useState(0); // 0: Görünüm, 1: Liste, 2: Genel
   const [activeTab, setActiveTab] = useState('Tümü');
   const [sortBy, setSortBy] = useState<SortBy>('default');
   const categoryScrollRef = useRef<HTMLDivElement>(null);
 
-  const checkScroll = () => {
-    // Placeholder for scroll check logic
-  };
+  const checkScroll = useCallback(() => {
+    const el = categoryScrollRef.current;
+    if (el) {
+      // Scroll indicator logic can be added here if needed
+    }
+  }, []);
+
+  const [navContext, setNavContext] = useState<NavContext>('browse');
+  const [activeRow, setActiveRow] = useState(0);
+  const [activeCol, setActiveCol] = useState(0);
+  const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
+  const [settingsSection, setSettingsSection] = useState(0);
+  const [settingsFocus, setSettingsFocus] = useState(0);
+  const [sidebarFocus, setSidebarFocus] = useState(0);
+  const [channelMenuFocus, setChannelMenuFocus] = useState(0);
+  const [quickSettingsFocus, setQuickSettingsFocus] = useState(0);
+  const [quickSwitchFocus, setQuickSwitchFocus] = useState(0);
+  const [showQuickSwitch, setShowQuickSwitch] = useState(false);
+  const [isAISearching, setIsAISearching] = useState(false);
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null);
+  const [showSportsDashboard, setShowSportsDashboard] = useState(false);
+
+  useEffect(() => {
+    if (showSportsDashboard) {
+      setNavContext('sports-dashboard');
+    } else if (navContext === 'sports-dashboard') {
+      setNavContext('browse');
+    }
+  }, [showSportsDashboard]);
+
+  const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([]);
+  const [isLiveTranslationEnabled, setIsLiveTranslationEnabled] = useState(false);
+  const [currentSubtitle, setCurrentSubtitle] = useState<LiveSubtitle | null>(null);
+  const [isTranslationProcessing, setIsTranslationProcessing] = useState(false);
+  const [currentSummary, setCurrentSummary] = useState<ProgramSummaryType | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState(0);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  const [multiSessionMenuOpen, setMultiSessionMenuOpen] = useState(false);
+  const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
+  const [channelMenuCategory, setChannelMenuCategory] = useState<string | null>(null);
 
   const selectCategory = useCallback((category: string) => {
     const categoryMap: Record<string, string> = {
@@ -616,30 +689,8 @@ export default function App() {
           : [...prev, targetTab]
       );
     }
-  }, [visibleCategories]);
+  }, [visibleCategories, setActiveRow, setActiveCol]);
 
-  const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
-
-  const toggleSection = useCallback((tabIndex: number, sectionIndex: number) => {
-    const key = `${tabIndex}-${sectionIndex}`;
-    setExpandedSections(prev => {
-      const isOpening = !prev[key];
-      if (isOpening) {
-        // Close all others and open this one
-        return { [key]: true };
-      } else {
-        // Just close this one
-        return { ...prev, [key]: false };
-      }
-    });
-  }, []);
-
-  const [sidebarFocus, setSidebarFocus] = useState(0); // 0-2: Tabs, 3: Close Button
-  const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
-  const [channelMenuCategory, setChannelMenuCategory] = useState<string | null>(null);
-  const [channelMenuFocus, setChannelMenuFocus] = useState(0);
-  const [multiSessionMenuOpen, setMultiSessionMenuOpen] = useState(false);
   const settingsContentRef = useRef<HTMLDivElement>(null);
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
 
@@ -725,14 +776,6 @@ export default function App() {
   const urlInputRef = useRef<HTMLInputElement>(null);
   const epgInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    localStorage.setItem('ui_mode', uiMode);
-  }, [uiMode]);
-
-  useEffect(() => {
-    localStorage.setItem('logo_style', logoStyle);
-  }, [logoStyle]);
-
   // Dynamic Theme Logic for Modern Mode
   useEffect(() => {
     if (uiMode !== 'modern') return;
@@ -766,14 +809,10 @@ export default function App() {
     (metaThemeColor as HTMLMetaElement).content = themeColor;
   }, [themeColor]);
 
-  useEffect(() => {
-    localStorage.setItem('mix_color_1', mixColor1);
-    localStorage.setItem('mix_color_2', mixColor2);
-  }, [mixColor1, mixColor2]);
-
   const uiClasses = useMemo(() => ({
     container: cn(
       "min-h-screen text-white font-sans selection:bg-red-600/30 overflow-x-hidden transition-all duration-1000 relative bg-[#0a0a0a]",
+      layoutMode === 'fixed-focus' && "h-screen overflow-hidden",
       deviceType === 'tv' && "text-lg",
       deviceType === 'phone' && "text-sm"
     ),
@@ -795,23 +834,7 @@ export default function App() {
       uiMode === 'classic' && "rounded-md bg-zinc-900 border-zinc-700",
       uiMode === 'minimalist' && "rounded-none bg-transparent border-b border-white/20"
     )
-  }), [uiMode]);
-
-  const mixedColor = useMemo(() => {
-    const r1 = parseInt(mixColor1.substring(1, 3), 16);
-    const g1 = parseInt(mixColor1.substring(3, 5), 16);
-    const b1 = parseInt(mixColor1.substring(5, 7), 16);
-
-    const r2 = parseInt(mixColor2.substring(1, 3), 16);
-    const g2 = parseInt(mixColor2.substring(3, 5), 16);
-    const b2 = parseInt(mixColor2.substring(5, 7), 16);
-
-    const r = Math.round((r1 + r2) / 2).toString(16).padStart(2, '0');
-    const g = Math.round((g1 + g2) / 2).toString(16).padStart(2, '0');
-    const b = Math.round((b1 + b2) / 2).toString(16).padStart(2, '0');
-
-    return `#${r}${g}${b}`;
-  }, [mixColor1, mixColor2]);
+  }), [uiMode, layoutMode, deviceType]);
 
   useEffect(() => {
     localStorage.setItem('weather_city', weatherCity);
@@ -1133,6 +1156,10 @@ export default function App() {
         return b[1].length - a[1].length;
       });
   }, [channels, deferredSearchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds, multiSessions, activeTab, epgData, customOrders]);
+  
+  const allFlattenedChannels = useMemo(() => {
+    return groupedChannels.flatMap(([_, groupChannels]) => groupChannels);
+  }, [groupedChannels]);
 
   // Ambient UI: Update ambient color when browsing
   useEffect(() => {
@@ -1333,6 +1360,22 @@ export default function App() {
     console.log('navContext changed to:', navContext);
   }, [navContext]);
 
+  const handleNextFeatured = useCallback(() => {
+    if (!featuredChannel || allFlattenedChannels.length === 0) return;
+    const currentIndex = allFlattenedChannels.findIndex(ch => ch.id === featuredChannel.id);
+    if (currentIndex === -1) return;
+    const nextIndex = (currentIndex + 1) % allFlattenedChannels.length;
+    setFeaturedChannel(allFlattenedChannels[nextIndex]);
+  }, [featuredChannel, allFlattenedChannels]);
+
+  const handlePrevFeatured = useCallback(() => {
+    if (!featuredChannel || allFlattenedChannels.length === 0) return;
+    const currentIndex = allFlattenedChannels.findIndex(ch => ch.id === featuredChannel.id);
+    if (currentIndex === -1) return;
+    const prevIndex = (currentIndex - 1 + allFlattenedChannels.length) % allFlattenedChannels.length;
+    setFeaturedChannel(allFlattenedChannels[prevIndex]);
+  }, [featuredChannel, allFlattenedChannels]);
+
   const handleChannelDetail = useCallback((channel: M3UChannel, category?: string) => {
     setChannelMenuId(channel.id);
     setChannelMenuCategory(category || '');
@@ -1355,12 +1398,6 @@ export default function App() {
     const colorIndex = (channel.name.length + (channel.group?.length || 0)) % colors.length;
     setAmbientColor(colors[colorIndex]);
     setTransitionKey(prev => prev + 1);
-
-    if (isMiniPlayer) {
-      setIsMiniPlayer(false);
-      setNavContext('player');
-      return;
-    }
 
     setIsMiniPlayer(false);
 
@@ -1386,6 +1423,238 @@ export default function App() {
     setCurrentChannel(channel);
     setNavContext('player');
   }, [isMiniPlayer, channels, setRecentlyWatched, setCurrentChannel, setNavContext, setIsMiniPlayer]);
+
+  useEffect(() => {
+    if (!showSportsDashboard) return;
+
+    const fetchScores = () => {
+      // Mock data for live matches
+      // In a real app, you would fetch this from an API
+      const mockMatches: LiveMatch[] = [
+        {
+          id: '1',
+          homeTeam: 'Galatasaray',
+          awayTeam: 'Fenerbahçe',
+          homeScore: 2,
+          awayScore: 1,
+          status: '2. Yarı',
+          minute: 78,
+          league: 'Trendyol Süper Lig',
+          channelId: channels.find(c => c.name.toLowerCase().includes('bein sports 1'))?.id
+        },
+        {
+          id: '2',
+          homeTeam: 'Real Madrid',
+          awayTeam: 'Barcelona',
+          homeScore: 0,
+          awayScore: 0,
+          status: '1. Yarı',
+          minute: 24,
+          league: 'La Liga',
+          channelId: channels.find(c => c.name.toLowerCase().includes('s sport'))?.id
+        },
+        {
+          id: '3',
+          homeTeam: 'Manchester City',
+          awayTeam: 'Liverpool',
+          homeScore: 1,
+          awayScore: 1,
+          status: 'İY',
+          minute: 45,
+          league: 'Premier League',
+          channelId: channels.find(c => c.name.toLowerCase().includes('beIN Sports 3'))?.id
+        },
+        {
+          id: '4',
+          homeTeam: 'Anadolu Efes',
+          awayTeam: 'Real Madrid',
+          homeScore: 84,
+          awayScore: 82,
+          status: '4. Çeyrek',
+          minute: 38,
+          league: 'EuroLeague',
+          channelId: channels.find(c => c.name.toLowerCase().includes('s sport 2'))?.id
+        }
+      ];
+      setLiveMatches(mockMatches);
+    };
+
+    fetchScores();
+    const interval = setInterval(fetchScores, 30000);
+    return () => clearInterval(interval);
+  }, [showSportsDashboard, channels]);
+
+  useEffect(() => {
+    if (!isLiveTranslationEnabled || !currentChannel) {
+      setCurrentSubtitle(null);
+      return;
+    }
+
+    const isForeign = currentChannel.name.toLowerCase().match(/cnn|bbc|france|sky|al jazeera|discovery|nat geo|hbo|netflix|disney|fox|mtv|vh1|eurosport|espn/);
+    
+    if (!isForeign) {
+      setIsLiveTranslationEnabled(false);
+      showToast("Bu kanal için canlı çeviri şu an desteklenmiyor.", "info");
+      return;
+    }
+
+    setIsTranslationProcessing(true);
+    
+    const generateSubtitles = async () => {
+      if (!geminiApiKey) return;
+      
+      const channelName = currentChannel.name;
+      const currentProgram = epgData?.programs[currentChannel.id]?.find(p => new Date() >= p.start && new Date() <= p.stop);
+      const context = currentProgram ? `${currentProgram.title}: ${currentProgram.description}` : channelName;
+
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+      const prompt = `
+        Sen bir canlı TV çevirmenisin. Şu an "${channelName}" kanalında "${context}" yayını yapılıyor.
+        Bu yayının içeriğine uygun, o an konuşuluyor olabilecek 3-4 saniyelik, çok kısa ve doğal bir Türkçe çeviri cümlesi yaz.
+        Sadece çeviriyi yaz, başka bir şey yazma.
+        Örn: "Bugün ekonomideki son gelişmeleri aktarıyoruz." veya "Savunma oyuncusu topu kornere çeldi."
+      `;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt,
+          config: { maxOutputTokens: 50 }
+        });
+        
+        const text = response.text || "Ses analiz ediliyor...";
+        setCurrentSubtitle({
+          id: Math.random().toString(36).substr(2, 9),
+          text: text.trim(),
+          timestamp: Date.now()
+        });
+        setIsTranslationProcessing(false);
+      } catch (error) {
+        console.error("Subtitle generation failed:", error);
+      }
+    };
+
+    generateSubtitles();
+    const interval = setInterval(generateSubtitles, 6000);
+    return () => clearInterval(interval);
+  }, [isLiveTranslationEnabled, currentChannel, epgData, geminiApiKey]);
+
+  const handleToggleSummary = useCallback(async () => {
+    if (!currentChannel || !geminiApiKey) return;
+    
+    if (showSummary) {
+      setShowSummary(false);
+      return;
+    }
+
+    setShowSummary(true);
+    setIsSummaryLoading(true);
+    setCurrentSummary(null);
+
+    try {
+      const channelName = currentChannel.name;
+      const currentProgram = epgData?.programs[currentChannel.id]?.find(p => new Date() >= p.start && new Date() <= p.stop);
+      const context = currentProgram ? `${currentProgram.title}: ${currentProgram.description}` : channelName;
+
+      const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+      const prompt = `
+        Şu an "${channelName}" kanalında "${context}" yayını yapılıyor. 
+        Bu programın içeriğini, o an ne konuşuluyor olabileceğini veya genel konusunu analiz et.
+        Kullanıcıya programın gidişatı hakkında bilgi veren 3 maddelik çok kısa, öz ve samimi bir özet çıkar.
+        Her madde en fazla 10-12 kelime olsun.
+        Yanıtı JSON formatında ver: { "title": "Program Adı", "summary": ["madde 1", "madde 2", "madde 3"] }
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { 
+          responseMimeType: "application/json",
+          maxOutputTokens: 200 
+        }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      setCurrentSummary({
+        id: Math.random().toString(36).substr(2, 9),
+        title: data.title || currentProgram?.title || channelName,
+        summary: data.summary || ["İçerik analiz edilemedi."],
+        timestamp: Date.now()
+      });
+    } catch (error) {
+      console.error("Summary generation failed:", error);
+      showToast("Özet oluşturulamadı.", "error");
+      setShowSummary(false);
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  }, [currentChannel, geminiApiKey, epgData, showSummary, showToast]);
+
+  const handleAISearch = async (query: string) => {
+    if (!query.trim() || !geminiApiKey) return;
+    
+    setIsAISearching(true);
+    setAiExplanation(null);
+    
+    try {
+      const result = await performAISearch(query, visibleCategories, geminiApiKey);
+      
+      if (result.category) {
+        selectCategory(result.category);
+      }
+      
+      if (result.searchQuery) {
+        setSearchQuery(result.searchQuery);
+      }
+
+      // Handle System Actions
+      if (result.actions) {
+        if (result.actions.volume !== undefined) {
+          setGlobalVolume(result.actions.volume / 100);
+          setIsMuted(false);
+        }
+        if (result.actions.sleepTimer !== undefined) {
+          setSleepTimer(result.actions.sleepTimer);
+          setSleepTimerActive(true);
+        }
+        if (result.actions.mute === true) {
+          setIsMuted(true);
+        }
+        if (result.actions.unmute === true) {
+          setIsMuted(false);
+        }
+        if (result.actions.addWatcher) {
+          const newRule: WatcherRule = {
+            id: Math.random().toString(36).substr(2, 9),
+            keyword: result.actions.addWatcher.keyword,
+            type: result.actions.addWatcher.type,
+            createdAt: Date.now(),
+            isActive: true
+          };
+          setWatcherRules(prev => [...prev, newRule]);
+        }
+        if (result.actions.showSportsDashboard === true) {
+          setShowSportsDashboard(true);
+        }
+        if (result.actions.toggleTranslation === true) {
+          setIsLiveTranslationEnabled(prev => !prev);
+        }
+        if (result.actions.toggleSummary === true) {
+          handleToggleSummary();
+        }
+      }
+      
+      if (result.explanation) {
+        setAiExplanation(result.explanation);
+        // Clear explanation after 5 seconds
+        setTimeout(() => setAiExplanation(null), 5000);
+      }
+    } catch (error) {
+      console.error('AI Search failed:', error);
+    } finally {
+      setIsAISearching(false);
+    }
+  };
 
   const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
 
@@ -1504,6 +1773,25 @@ export default function App() {
   useEffect(() => { channelForDetailRef.current = channelForDetail; }, [channelForDetail]);
   useEffect(() => { currentChannelRef.current = currentChannel; }, [currentChannel]);
 
+  // Scroll category filters into view when navigating via DPAD
+  useEffect(() => {
+    if (navContext === 'browse' && activeRow === -1 && categoryScrollRef.current) {
+      const container = categoryScrollRef.current;
+      const focusedElement = container.children[activeCol] as HTMLElement;
+      if (focusedElement) {
+        const containerWidth = container.offsetWidth;
+        const elementLeft = focusedElement.offsetLeft;
+        const elementWidth = focusedElement.offsetWidth;
+        
+        // Center the focused element
+        container.scrollTo({
+          left: elementLeft - (containerWidth / 2) + (elementWidth / 2),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [activeRow, activeCol, navContext]);
+
   // handleRemoteCommand moved down to after handleUrlSubmit definition
 
   // Auto-preview logic
@@ -1536,18 +1824,155 @@ export default function App() {
     }
   }, [channels]);
 
-  const getProxiedUrl = (url: string) => {
-    if (Capacitor.isNativePlatform()) {
-      return url;
-    }
-    if (customProxyUrl) {
-      return `${customProxyUrl}${encodeURIComponent(url)}`;
-    }
-    return `/api/proxy?url=${encodeURIComponent(url)}`;
+  const fetchWithProxy = async (url: string) => {
+    return fetch(getProxiedUrl(url, customProxyUrl));
   };
 
-  const fetchWithProxy = async (url: string) => {
-    return fetch(getProxiedUrl(url));
+  const resolveUrl = (rawUrl: string) => {
+    if (!rawUrl) return [];
+    const trimmed = rawUrl.trim();
+    if (trimmed.startsWith('http')) return [trimmed];
+    // If it's a code, try cutt.ly first, then the raw string
+    return [`https://cutt.ly/${trimmed}`, trimmed];
+  };
+
+  const handleLoadEPG = useCallback(async (url?: string) => {
+    const targetUrl = url || epgUrl;
+    if (!targetUrl) return;
+
+    setIsLoading(true);
+    try {
+      const urlsToTry = resolveUrl(targetUrl);
+      let epg = null;
+      let successUrl = '';
+      for (const u of urlsToTry) {
+        try {
+          epg = await fetchAndParseEPG(u, customProxyUrl);
+          if (epg) {
+            successUrl = u;
+            break;
+          }
+        } catch (e) {
+          console.error(`EPG load failed for ${u}:`, e);
+        }
+      }
+      
+      if (epg) {
+        setEpgData(epg);
+        setEpgUrl(successUrl);
+        localStorage.setItem('epg_url', successUrl);
+        showToast('EPG başarıyla yüklendi!', 'success');
+      } else {
+        throw new Error('EPG yüklenemedi.');
+      }
+    } catch (err) {
+      console.error('EPG loading error:', err);
+      showToast(err instanceof Error ? err.message : 'EPG yüklenirken bir hata oluştu.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [epgUrl, customProxyUrl]);
+
+  const handleUrlSubmit = async (urlOverride?: string) => {
+    const rawUrl = urlOverride || playlistUrl;
+    if (!rawUrl) return;
+
+    setIsLoading(true);
+    setChannels([]); // Clear current channels while loading new ones
+
+    const urlsToTry = resolveUrl(rawUrl);
+
+    let finalUrl = '';
+    let content = '';
+
+    try {
+      for (const url of urlsToTry) {
+        try {
+          // Try with CapacitorHttp on native platforms first
+          if (Capacitor.isNativePlatform()) {
+            try {
+              const response = await CapacitorHttp.get({
+                url: url,
+                connectTimeout: 15000,
+                readTimeout: 15000,
+              });
+              if (response.status === 200 && response.data) {
+                content = response.data;
+                finalUrl = url;
+                break;
+              }
+            } catch (e) {
+              console.warn(`CapacitorHttp failed for ${url}:`, e);
+            }
+          }
+
+          // Fallback to standard fetch (or if not native)
+          const response = await fetch(getProxiedUrl(url, customProxyUrl));
+          if (response.ok) {
+            content = await response.text();
+            finalUrl = url;
+            break;
+          }
+        } catch (e) {
+          console.warn(`Fetch failed for ${url}:`, e);
+        }
+      }
+
+      if (!content) {
+        throw new Error('Playlist içeriği alınamadı. Lütfen URL\'yi kontrol edin.');
+      }
+
+      const result = parseM3U(content);
+      setChannels(result.channels);
+      
+      // Extract and load EPG if present in M3U header and not already set
+      if (result.epgUrl && !epgUrl) {
+        handleLoadEPG(result.epgUrl);
+      }
+      
+      if (!urlOverride) {
+        localStorage.setItem('m3u_url', rawUrl);
+        localStorage.removeItem('m3u_deleted');
+        setSavedUrl(rawUrl);
+      }
+
+      showToast(`${result.channels.length} kanal başarıyla yüklendi.`, 'success');
+    } catch (error) {
+      console.error('Playlist loading error:', error);
+      showToast(error instanceof Error ? error.message : 'Playlist yüklenirken bir hata oluştu.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addPlaylist = (name: string, url: string) => {
+    const newPlaylist: Playlist = {
+      id: crypto.randomUUID(),
+      name,
+      url
+    };
+    const updatedPlaylists = [...playlists, newPlaylist];
+    setPlaylists(updatedPlaylists);
+    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
+    return newPlaylist;
+  };
+
+  const removePlaylist = (id: string) => {
+    const updatedPlaylists = playlists.filter(p => p.id !== id);
+    setPlaylists(updatedPlaylists);
+    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
+    if (currentPlaylistId === id) {
+      setCurrentPlaylistId(null);
+      localStorage.removeItem('current_playlist_id');
+    }
+  };
+
+  const switchPlaylist = async (playlist: Playlist) => {
+    setCurrentPlaylistId(playlist.id);
+    localStorage.setItem('current_playlist_id', playlist.id);
+    setPlaylistUrl(playlist.url);
+    if (playlist.epgUrl) setEpgUrl(playlist.epgUrl);
+    await handleUrlSubmit(playlist.url);
   };
 
   const primaryHeroButtons = useMemo(() => {
@@ -1596,6 +2021,21 @@ export default function App() {
         const searchInput = document.getElementById('hero-search-input');
         if (searchInput) searchInput.focus();
       }, isActive: true },
+      geminiApiKey && {
+        id: 'ai-discovery',
+        label: isAISearching ? 'Analiz Ediliyor...' : 'Yapay Zeka Keşfi',
+        icon: Sparkles,
+        action: () => {
+          const searchInput = document.getElementById('hero-search-input');
+          if (searchInput) {
+            searchInput.focus();
+            if (searchQuery.length > 5) {
+              handleAISearch(searchQuery);
+            }
+          }
+        },
+        isActive: isAISearching
+      },
       voiceControlEnabled && {
         id: 'voice',
         label: isListening ? 'Dinliyor...' : 'Sesli Kontrol',
@@ -1607,8 +2047,21 @@ export default function App() {
         id: 'remote-toggle',
         label: isRemoteConnected ? 'Kumanda Bağlı' : 'Kumanda Bağla',
         icon: Smartphone,
-        action: () => setRemoteControlEnabled(!remoteControlEnabled),
+        action: () => {
+          setShowRemotePairingModal(true);
+          setNavContext('browse');
+        },
         isActive: remoteControlEnabled
+      },
+      {
+        id: 'device-info',
+        label: 'Cihaz',
+        icon: Monitor,
+        action: () => {
+          setShowDeviceInfo(!showDeviceInfo);
+          if (!showDeviceInfo) setNavContext('browse');
+        },
+        isActive: showDeviceInfo
       },
       { id: 'sort', label: `Sırala: ${sortBy === 'default' ? 'Varsayılan' : sortBy === 'name' ? 'İsim' : 'Sayı'}`, icon: ArrowUpDown, action: () => {
         const next: Record<SortBy, SortBy> = { 'default': 'name', 'name': 'number', 'number': 'default', 'added': 'default' };
@@ -1631,7 +2084,7 @@ export default function App() {
       Object.keys(multiSessions).length > 0 && {
         id: 'multi',
         label: 'Multi Kanal',
-        icon: Monitor,
+        icon: Grid,
         action: () => toggleCategory('multi'),
         isActive: visibleCategories.includes('Multi Kanal')
       },
@@ -1699,911 +2152,113 @@ export default function App() {
     return () => clearInterval(timer);
   }, [channels]);
 
-  // Remote Control Navigation
-  const keyHoldTimer = useRef<NodeJS.Timeout | null>(null);
-  const isKeyHeld = useRef(false);
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    // Toggle Mini Player with 'M' key
-      if (e.key.toLowerCase() === 'm' && currentChannel && navContext !== 'player') {
-        e.preventDefault();
-        setIsMiniPlayer(!isMiniPlayer);
-        if (isMiniPlayer) setCurrentChannel(null);
-        return;
-      }
-
-      // Toggle Mini Player with 'P' key on focused channel
-      if (e.key.toLowerCase() === 'p' && navContext === 'browse' && activeRow >= 0 && activeCol >= 0) {
-        e.preventDefault();
-        e.stopPropagation();
-        const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
-        if (selectedChannel) {
-          if (isMiniPlayer && currentChannel?.id === selectedChannel.id) {
-            setIsMiniPlayer(false);
-            setCurrentChannel(null);
-          } else {
-            setCurrentChannel(selectedChannel);
-            setIsMiniPlayer(true);
-          }
-          return;
-        }
-      }
-
-      // Toggle Advanced EPG with 'E' key
-      if (e.key.toLowerCase() === 'e' && (navContext === 'browse' || navContext === 'player')) {
-        e.preventDefault();
-        setNavContext('advanced-epg');
-        return;
-      }
-
-      // Toggle Voice Search with 'V' key
-      if (e.key.toLowerCase() === 'v' && (navContext === 'browse' || navContext === 'player')) {
-        e.preventDefault();
-        setNavContext('voice-search');
-        return;
-      }
-
-      // Toggle Quick Settings with 'S' key
-      if (e.key.toLowerCase() === 's' && (navContext === 'player' || navContext === 'browse' || navContext === 'quick-settings')) {
-        e.preventDefault();
-        if (navContext === 'quick-settings') {
-          setShowQuickSettings(false);
-          setNavContext(currentChannel ? 'player' : 'browse');
-        } else {
-          setShowQuickSettings(true);
-          setQuickSettingsFocus(0);
-          setNavContext('quick-settings');
-        }
-        return;
-      }
-
-      if (navContext === 'quick-settings') {
-        switch (e.key) {
-          case 'ArrowUp':
-            e.preventDefault();
-            if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(0);
-            else if (quickSettingsFocus >= 6) setQuickSettingsFocus(2);
-            break;
-          case 'ArrowDown':
-            e.preventDefault();
-            if (quickSettingsFocus < 2) setQuickSettingsFocus(2);
-            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(6);
-            break;
-          case 'ArrowLeft':
-            e.preventDefault();
-            if (quickSettingsFocus === 1) setQuickSettingsFocus(0);
-            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(prev => Math.max(2, prev - 1));
-            else if (quickSettingsFocus >= 6 && quickSettingsFocus <= 8) setQuickSettingsFocus(prev => Math.max(6, prev - 1));
-            break;
-          case 'ArrowRight':
-            e.preventDefault();
-            if (quickSettingsFocus === 0) setQuickSettingsFocus(1);
-            else if (quickSettingsFocus >= 2 && quickSettingsFocus <= 5) setQuickSettingsFocus(prev => Math.min(5, prev + 1));
-            else if (quickSettingsFocus >= 6 && quickSettingsFocus <= 8) setQuickSettingsFocus(prev => Math.min(8, prev + 1));
-            break;
-          case 'Enter':
-            e.preventDefault();
-            if (quickSettingsFocus < 2) {
-              const engines = ['hls', 'shaka'];
-              setPlayerEngine(engines[quickSettingsFocus] as any);
-            } else if (quickSettingsFocus < 6) {
-              const modes = ['none', 'soft', 'vibrant', 'cinema'];
-              setAmbilightMode(modes[quickSettingsFocus - 2] as any);
-            } else {
-              const times = [15, 30, 60];
-              setSleepTimer(times[quickSettingsFocus - 6]);
-              setSleepTimerActive(true);
-            }
-            break;
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            setShowQuickSettings(false);
-            setNavContext(currentChannel ? 'player' : 'browse');
-            break;
-        }
-        return;
-      }
-
-      console.log('App handleKeyDown:', e.key, 'navContext:', navContext);
-      if (navContext === 'player') return;
-
-      let key = e.key;
-      // Normalize TV remote keys
-      if (key === 'Select' || key === 'OK') key = 'Enter';
-      if (key === 'Back' || key === 'GoBack' || key === 'XF86Back' || key === 'MediaStop') key = 'Backspace';
-      if (key === 'Up') key = 'ArrowUp';
-      if (key === 'Down') key = 'ArrowDown';
-      if (key === 'Left') key = 'ArrowLeft';
-      if (key === 'Right') key = 'ArrowRight';
-      if (key === 'Tab') {
-        e.preventDefault();
-        key = e.shiftKey ? 'ArrowLeft' : 'ArrowRight';
-      }
-      if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = 'Enter';
-
-      // Toggle EPG Timeline with 'G' key
-      if (key.toLowerCase() === 'g') {
-        e.preventDefault();
-        setShowEPGTimeline(prev => !prev);
-        return;
-      }
-
-      // Detect long press for Enter/OK
-      if (key === 'Enter' && !isKeyHeld.current) {
-        isKeyHeld.current = true;
-        keyHoldTimer.current = setTimeout(() => {
-          if (navContext === 'browse' && activeRow !== -1) {
-            const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
-            if (selectedChannel) {
-              toggleFavorite(selectedChannel.id);
-            }
-          }
-        }, 800);
-      }
-
-      // Global Back/Escape
-      if (key === 'Escape' || key === 'Backspace') {
-        // Prevent default backspace behavior in inputs unless they are focused
-        if (key === 'Backspace' && (document.activeElement?.tagName === 'INPUT')) {
-          return;
-        }
-
-        if (isMiniPlayer) {
-          setIsMiniPlayer(false);
-          setCurrentChannel(null);
-          return;
-        }
-
-        if (currentChannel) {
-          setCurrentChannel(null);
-          setNavContext('browse');
-          return;
-        }
-
-        if (showSettings) {
-          setShowSettings(false);
-          setNavContext('browse');
-          setActiveRow(0);
-          setActiveCol(0);
-          return;
-        }
-        if (navContext === 'browse' && activeRow !== -1) {
-          setActiveRow(-1);
-          return;
-        }
-        if (navContext === 'browse' && activeRow === -1 && channels.length > 0) {
-          return;
-        }
-      }
-
-      if (navContext === 'browse' && channels.length === 0) {
-        switch (key) {
-          case 'ArrowDown':
-            e.preventDefault();
-            if (activeRow === 1) setActiveRow(3);
-            else setActiveRow(prev => Math.min(4, prev + 1));
-            break;
-          case 'ArrowUp':
-            e.preventDefault();
-            if (activeRow === 3) setActiveRow(1);
-            else setActiveRow(prev => Math.max(0, prev - 1));
-            break;
-          case 'ArrowRight':
-            if (activeRow === 1) {
-              e.preventDefault();
-              setActiveCol(1);
-            }
-            break;
-          case 'ArrowLeft':
-            if (activeRow === 1) {
-              e.preventDefault();
-              setActiveCol(0);
-            }
-            break;
-          case 'Enter':
-            e.preventDefault();
-            if (activeRow === 0) {
-              document.getElementById('empty-file-upload')?.click();
-            } else if (activeRow === 1) {
-              if (extraUrl) {
-                setPlaylistUrl(extraUrl);
-                handleUrlSubmit(extraUrl);
-              } else if (activeCol === 0) {
-                document.getElementById('empty-url-input')?.focus();
-              }
-            } else if (activeRow === 3) {
-              localStorage.removeItem('m3u_deleted');
-              localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
-              setSavedUrl(DEFAULT_M3U_URL);
-              setPlaylistUrl(DEFAULT_M3U_URL);
-              handleUrlSubmit(DEFAULT_M3U_URL);
-            } else if (activeRow === 4) {
-              setShowSettings(true);
-              setNavContext('settings');
-              setSettingsArea('content');
-              setSidebarFocus(0);
-              setActiveSettingsTab(0);
-              setSettingsSection(0);
-              setSettingsFocus(0);
-            }
-            break;
-        }
-        return;
-      }
-
-      if (navContext === 'channel-menu') {
-        const options = multiSessionMenuOpen 
-          ? [...MULTI_CATEGORIES, 'cancel']
-          : ['favorite', 'canli', 'film', 'dizi', 'multi', 'move-left', 'move-right', 'close'];
-        
-        switch (key) {
-          case 'ArrowLeft':
-          case 'ArrowUp':
-            e.preventDefault();
-            setChannelMenuFocus(prev => Math.max(0, prev - 1));
-            break;
-          case 'ArrowRight':
-          case 'ArrowDown':
-            e.preventDefault();
-            setChannelMenuFocus(prev => Math.min(options.length - 1, prev + 1));
-            break;
-          case 'Enter':
-            e.preventDefault();
-            if (multiSessionMenuOpen) {
-              const option = options[channelMenuFocus];
-              if (option === 'cancel') {
-                setMultiSessionMenuOpen(false);
-                setChannelMenuFocus(0);
-              } else {
-                toggleManualCategory(channelMenuId!, 'multi', option as string);
-                setMultiSessionMenuOpen(false);
-                setChannelMenuId(null);
-                setNavContext('browse');
-              }
-              return;
-            }
-            
-            const option = options[channelMenuFocus];
-            if (option === 'close') {
-              setChannelMenuId(null);
-              setNavContext('browse');
-              return;
-            }
-            if (option === 'favorite') {
-              toggleFavorite(channelMenuId!);
-            } else if (option === 'move-left') {
-              moveChannel(channelMenuId!, 'left', channelMenuCategory || '');
-            } else if (option === 'move-right') {
-              moveChannel(channelMenuId!, 'right', channelMenuCategory || '');
-            } else if (option === 'multi') {
-              setMultiSessionMenuOpen(true);
-              setChannelMenuFocus(0);
-              return;
-            } else {
-              toggleManualCategory(channelMenuId!, option as any);
-            }
-            
-            if (option !== 'move-left' && option !== 'move-right') {
-              setChannelMenuId(null);
-              setNavContext('browse');
-            }
-            break;
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            if (multiSessionMenuOpen) {
-              setMultiSessionMenuOpen(false);
-              setChannelMenuFocus(0);
-            } else {
-              setChannelMenuId(null);
-              setNavContext('browse');
-            }
-            break;
-        }
-        return;
-      }
-
-      if (navContext === 'channel-detail') {
-        switch (key) {
-          case 'ArrowLeft':
-            e.preventDefault();
-            setDetailFocus(prev => Math.max(0, prev - 1));
-            break;
-          case 'ArrowRight':
-            e.preventDefault();
-            setDetailFocus(prev => Math.min(2, prev + 1));
-            break;
-          case 'Enter':
-            e.preventDefault();
-            if (detailFocus === 0 && channelForDetail) {
-              // Force play by bypassing the VOD check in handleChannelSelect
-              setRecentlyWatched(prev => {
-                const filtered = prev.filter(ch => 
-                  ch.id !== channelForDetail.id && 
-                  !ch.urls.some(url => channelForDetail.urls.includes(url))
-                );
-                return [channelForDetail, ...filtered].slice(0, 20);
-              });
-              setCurrentChannel(channelForDetail);
-              setNavContext('player');
-              setChannelForDetail(null);
-            } else if (detailFocus === 1 && channelForDetail) {
-              toggleManualCategory(channelForDetail.id, 'multi');
-            } else if (detailFocus === 2) {
-              setChannelForDetail(null);
-              setNavContext('browse');
-            }
-            break;
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            setChannelForDetail(null);
-            setNavContext('browse');
-            break;
-        }
-        return;
-      }
-
-      if (navContext === 'settings') {
-        switch (key) {
-          case 'Enter':
-          case 'OK':
-            e.preventDefault();
-            if (settingsArea === 'tabs') {
-              if (sidebarFocus < 3) {
-                setSettingsArea('sections');
-                setSettingsSection(0);
-                // Auto-expand when entering via Enter
-                const key = `${activeSettingsTab}-0`;
-                if (!expandedSections[key]) {
-                  setExpandedSections(prev => ({ ...prev, [key]: true }));
-                }
-              } else {
-                setShowSettings(false);
-                setNavContext('browse');
-                setActiveRow(0);
-                setActiveCol(0);
-              }
-            } else if (settingsArea === 'sections') {
-              toggleSection(activeSettingsTab, settingsSection);
-            } else if (settingsArea === 'content') {
-              const focusedElement = document.querySelector('.settings-focused') as HTMLElement;
-              if (focusedElement) {
-                focusedElement.click();
-                if (focusedElement.tagName === 'INPUT') {
-                  focusedElement.focus();
-                }
-              }
-            }
-            break;
-
-          case 'Escape':
-          case 'Back':
-          case 'Backspace':
-          case 'GoBack':
-            e.preventDefault();
-            if (settingsArea === 'content') {
-              setSettingsArea('sections');
-            } else if (settingsArea === 'sections') {
-              setSettingsArea('tabs');
-            } else {
-              setShowSettings(false);
-              setNavContext('browse');
-              setActiveRow(0);
-              setActiveCol(0);
-            }
-            break;
-
-          case 'ArrowRight':
-            e.preventDefault();
-            if (settingsArea === 'tabs') {
-              if (window.innerWidth < 768) {
-                // Mobile: move between tabs
-                const nextFocus = (sidebarFocus + 1) % 3;
-                setSidebarFocus(nextFocus);
-                setActiveSettingsTab(nextFocus);
-              } else {
-                // Desktop: move to sections
-                if (sidebarFocus < 3) {
-                  setSettingsArea('sections');
-                  setSettingsSection(0);
-                }
-              }
-            } else if (settingsArea === 'sections') {
-              const key = `${activeSettingsTab}-${settingsSection}`;
-              if (!expandedSections[key]) {
-                toggleSection(activeSettingsTab, settingsSection);
-              } else {
-                setSettingsArea('content');
-                // Initialize focus based on section
-                if (activeSettingsTab === 0) {
-                  if (settingsSection === 0) setSettingsFocus(0);
-                  else if (settingsSection === 1) setSettingsFocus(20);
-                  else if (settingsSection === 2) setSettingsFocus(13);
-                  else if (settingsSection === 3) setSettingsFocus(15);
-                  else if (settingsSection === 4) setSettingsFocus(40);
-                  else if (settingsSection === 5) setSettingsFocus(50);
-                  else if (settingsSection === 6) setSettingsFocus(60);
-                  else if (settingsSection === 7) setSettingsFocus(70);
-                  else if (settingsSection === 8) setSettingsFocus(80);
-                  else if (settingsSection === 9) setSettingsFocus(90);
-                  else if (settingsSection === 10) setSettingsFocus(100);
-                  else if (settingsSection === 11) setSettingsFocus(17);
-                } else if (activeSettingsTab === 1) {
-                  if (settingsSection === 0) setSettingsFocus(0);
-                  else if (settingsSection === 1) setSettingsFocus(1);
-                  else if (settingsSection === 2) setSettingsFocus(4);
-                  else if (settingsSection === 3) setSettingsFocus(6);
-                  else if (settingsSection === 4) setSettingsFocus(8);
-                  else if (settingsSection === 5) setSettingsFocus(20);
-                  else if (settingsSection === 6) setSettingsFocus(14);
-                } else if (activeSettingsTab === 2) {
-                  if (settingsSection === 0) setSettingsFocus(0);
-                  else if (settingsSection === 1) setSettingsFocus(1);
-                  else if (settingsSection === 2) setSettingsFocus(2);
-                  else if (settingsSection === 3) setSettingsFocus(3);
-                  else if (settingsSection === 4) setSettingsFocus(11);
-                  else if (settingsSection === 5) setSettingsFocus(15);
-                  else if (settingsSection === 6) setSettingsFocus(16);
-                }
-              }
-            } else if (settingsArea === 'content') {
-              if (activeSettingsTab === 0) {
-                if (settingsSection === 0 && settingsFocus < 12) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 1 && settingsFocus < 23) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
-                else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
-                else if (settingsSection === 4 && settingsFocus < 50) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 5 && settingsFocus < 54) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 6 && settingsFocus < 65) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 7 && settingsFocus < 74) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 10 && settingsFocus === 100) setSettingsFocus(101);
-              } else if (activeSettingsTab === 1) {
-                if (settingsSection === 1 && settingsFocus === 1) setSettingsFocus(2);
-                else if (settingsSection === 2 && settingsFocus === 4) setSettingsFocus(5);
-                else if (settingsSection === 3 && settingsFocus === 6) setSettingsFocus(7);
-                else if (settingsSection === 4 && settingsFocus < 13) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 5) {
-                  if (settingsFocus === 20) setSettingsFocus(21);
-                  else if (settingsFocus >= 30 && settingsFocus % 2 === 0) setSettingsFocus(prev => prev + 1);
-                }
-              } else if (activeSettingsTab === 2) {
-                if (settingsSection === 3 && settingsFocus < 10) setSettingsFocus(prev => prev + 1);
-                else if (settingsSection === 4 && settingsFocus < 14) setSettingsFocus(prev => prev + 1);
-              }
-            }
-            break;
-
-          case 'ArrowLeft':
-            e.preventDefault();
-            if (settingsArea === 'content') {
-              setSettingsArea('sections');
-            } else if (settingsArea === 'sections') {
-              setSettingsArea('tabs');
-              setSidebarFocus(activeSettingsTab);
-            } else if (settingsArea === 'tabs') {
-              if (window.innerWidth < 768) {
-                // Mobile: move between tabs
-                const nextFocus = (sidebarFocus - 1 + 3) % 3;
-                setSidebarFocus(nextFocus);
-                setActiveSettingsTab(nextFocus);
-              }
-            }
-            break;
-
-          case 'ArrowDown':
-            e.preventDefault();
-            if (settingsArea === 'tabs') {
-              if (window.innerWidth < 768) {
-                // Mobile: move to sections
-                setSettingsArea('sections');
-                setSettingsSection(0);
-              } else {
-                // Desktop: move between tabs
-                if (sidebarFocus === 2) {
-                  setSettingsArea('sections');
-                  setSettingsSection(0);
-                } else {
-                  const nextFocus = (sidebarFocus + 1) % 3;
-                  setSidebarFocus(nextFocus);
-                  setActiveSettingsTab(nextFocus);
-                }
-              }
-            } else if (settingsArea === 'sections') {
-              const maxSections = activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : 7;
-              if (settingsSection === maxSections) {
-                // Stay or cycle? User said "pass to side section"
-                // Maybe they want to cycle back to tabs?
-                setSettingsArea('tabs');
-                setSidebarFocus(0);
-              } else {
-                setSettingsSection(prev => prev + 1);
-              }
-            } else if (settingsArea === 'content') {
-              if (activeSettingsTab === 0) {
-                if (settingsSection === 0) {
-                  if (settingsFocus <= 8) setSettingsFocus(prev => prev + 4);
-                  else if (settingsFocus < 12) setSettingsFocus(12);
-                  else { setSettingsSection(1); setSettingsFocus(20); }
-                } else if (settingsSection === 1) {
-                  if (settingsFocus <= 20) setSettingsFocus(prev => prev + 3);
-                  else if (settingsFocus < 23) setSettingsFocus(23);
-                  else { setSettingsSection(2); setSettingsFocus(13); }
-                } else if (settingsSection === 2) {
-                  if (settingsFocus === 13) setSettingsFocus(14);
-                  else { setSettingsSection(3); setSettingsFocus(15); }
-                } else if (settingsSection === 3) {
-                  if (settingsFocus === 15) setSettingsFocus(16);
-                  else { setSettingsSection(4); setSettingsFocus(40); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus <= 47) setSettingsFocus(prev => prev + 3);
-                  else { setSettingsSection(5); setSettingsFocus(50); }
-                } else if (settingsSection === 5) {
-                  if (settingsFocus <= 51) setSettingsFocus(prev => prev + 3);
-                  else { setSettingsSection(6); setSettingsFocus(60); }
-                } else if (settingsSection === 6) {
-                  if (settingsFocus <= 62) setSettingsFocus(prev => prev + 3);
-                  else { setSettingsSection(7); setSettingsFocus(70); }
-                } else if (settingsSection === 7) {
-                  if (settingsFocus <= 71) setSettingsFocus(prev => prev + 3);
-                  else { setSettingsSection(8); setSettingsFocus(80); }
-                } else if (settingsSection === 8) {
-                  setSettingsSection(9); setSettingsFocus(90);
-                } else if (settingsSection === 9) {
-                  setSettingsSection(10); setSettingsFocus(100);
-                } else if (settingsSection === 10) {
-                  if (settingsFocus === 100) setSettingsFocus(101);
-                  else { setSettingsSection(11); setSettingsFocus(17); }
-                } else if (settingsSection === 11) {
-                  // Back button, do nothing
-                }
-              } else if (activeSettingsTab === 1) {
-                if (settingsSection === 0) {
-                  setSettingsSection(1); setSettingsFocus(1);
-                } else if (settingsSection === 1) {
-                  if ((settingsFocus === 1 || settingsFocus === 2) && epgData) setSettingsFocus(3);
-                  else { setSettingsSection(2); setSettingsFocus(4); }
-                } else if (settingsSection === 2) {
-                  if (settingsFocus === 4) setSettingsFocus(5);
-                  else { setSettingsSection(3); setSettingsFocus(6); }
-                } else if (settingsSection === 3) {
-                  if (settingsFocus === 6) setSettingsFocus(7);
-                  else { setSettingsSection(4); setSettingsFocus(8); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus <= 10) setSettingsFocus(prev => prev + 3);
-                  else { setSettingsSection(5); setSettingsFocus(20); }
-                } else if (settingsSection === 5) {
-                  if (settingsFocus < 22) setSettingsFocus(prev => prev + 1);
-                  else if (settingsFocus === 22 && playlists.length > 0) setSettingsFocus(30);
-                  else if (settingsFocus >= 30 && settingsFocus < 30 + (playlists.length - 1) * 2) setSettingsFocus(prev => prev + 2);
-                  else { setSettingsSection(6); setSettingsFocus(14); }
-                }
-              } else if (activeSettingsTab === 2) {
-                if (settingsSection === 0) { setSettingsSection(1); setSettingsFocus(1); }
-                else if (settingsSection === 1) { setSettingsSection(2); setSettingsFocus(2); }
-                else if (settingsSection === 2) {
-                  if (settingsFocus === 2) setSettingsFocus(3);
-                  else { setSettingsSection(3); setSettingsFocus(4); }
-                }
-                else if (settingsSection === 3) {
-                  if (settingsFocus <= 6) setSettingsFocus(prev => prev + 4);
-                  else { setSettingsSection(4); setSettingsFocus(11); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus <= 12) setSettingsFocus(prev => prev + 2);
-                  else { setSettingsSection(5); setSettingsFocus(15); }
-                } else if (settingsSection === 5) {
-                  setSettingsSection(6); setSettingsFocus(16);
-                } else if (settingsSection === 6) {
-                  if (settingsFocus === 16) setSettingsFocus(17);
-                }
-              }
-            }
-            break;
-
-          case 'ArrowUp':
-            e.preventDefault();
-            if (settingsArea === 'tabs') {
-              if (window.innerWidth < 768) {
-                // Mobile: do nothing
-              } else {
-                // Desktop: move between tabs
-                if (sidebarFocus === 0) {
-                  setSettingsArea('sections');
-                  const maxSections = activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : 7;
-                  setSettingsSection(maxSections);
-                } else {
-                  const nextFocus = (sidebarFocus - 1 + 4) % 4;
-                  setSidebarFocus(nextFocus);
-                  if (nextFocus < 3) setActiveSettingsTab(nextFocus);
-                }
-              }
-            } else if (settingsArea === 'sections') {
-              if (window.innerWidth < 768 && settingsSection === 0) {
-                // Mobile: move to tabs
-                setSettingsArea('tabs');
-                setSidebarFocus(activeSettingsTab);
-              } else if (settingsSection === 0) {
-                // Desktop: move to tabs
-                setSettingsArea('tabs');
-                setSidebarFocus(3);
-              } else {
-                setSettingsSection(prev => prev - 1);
-              }
-            } else if (settingsArea === 'content') {
-              if (activeSettingsTab === 0) {
-                if (settingsSection === 0) {
-                  if (settingsFocus >= 4 && settingsFocus <= 11) setSettingsFocus(prev => prev - 4);
-                  else if (settingsFocus === 12) setSettingsFocus(8);
-                } else if (settingsSection === 1) {
-                  if (settingsFocus >= 23) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(0); setSettingsFocus(12); }
-                } else if (settingsSection === 2) {
-                  if (settingsFocus === 14) setSettingsFocus(13);
-                  else { setSettingsSection(1); setSettingsFocus(23); }
-                } else if (settingsSection === 3) {
-                  if (settingsFocus === 16) setSettingsFocus(15);
-                  else { setSettingsSection(2); setSettingsFocus(14); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus >= 43) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(3); setSettingsFocus(16); }
-                } else if (settingsSection === 5) {
-                  if (settingsFocus >= 53) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(4); setSettingsFocus(40); }
-                } else if (settingsSection === 6) {
-                  if (settingsFocus >= 63) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(5); setSettingsFocus(50); }
-                } else if (settingsSection === 7) {
-                  if (settingsFocus >= 73) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(6); setSettingsFocus(60); }
-                } else if (settingsSection === 8) {
-                  setSettingsSection(7); setSettingsFocus(74);
-                } else if (settingsSection === 9) {
-                  setSettingsSection(8); setSettingsFocus(80);
-                } else if (settingsSection === 10) {
-                  if (settingsFocus === 101) setSettingsFocus(100);
-                  else { setSettingsSection(9); setSettingsFocus(90); }
-                } else if (settingsSection === 11) {
-                  setSettingsSection(10); setSettingsFocus(101);
-                }
-              } else if (activeSettingsTab === 1) {
-                if (settingsSection === 1) {
-                  if (settingsFocus === 3) setSettingsFocus(1);
-                  else { setSettingsSection(0); setSettingsFocus(0); }
-                } else if (settingsSection === 2) {
-                  if (settingsFocus === 5) setSettingsFocus(4);
-                  else { setSettingsSection(1); setSettingsFocus(epgData ? 3 : 1); }
-                } else if (settingsSection === 3) {
-                  if (settingsFocus === 7) setSettingsFocus(6);
-                  else { setSettingsSection(2); setSettingsFocus(5); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus >= 11) setSettingsFocus(prev => prev - 3);
-                  else { setSettingsSection(3); setSettingsFocus(7); }
-                } else if (settingsSection === 5) {
-                  if (settingsFocus === 22) setSettingsFocus(21);
-                  else if (settingsFocus === 21) setSettingsFocus(20);
-                  else if (settingsFocus === 30 || settingsFocus === 31) setSettingsFocus(22);
-                  else if (settingsFocus >= 32) setSettingsFocus(prev => prev - 2);
-                  else { setSettingsSection(4); setSettingsFocus(11); }
-                } else if (settingsSection === 6) {
-                  setSettingsSection(5); setSettingsFocus(playlists.length > 0 ? 30 + (playlists.length - 1) * 2 : 22);
-                }
-              } else if (activeSettingsTab === 2) {
-                if (settingsSection === 1) { setSettingsSection(0); setSettingsFocus(0); }
-                else if (settingsSection === 2) {
-                  if (settingsFocus === 3) setSettingsFocus(2);
-                  else { setSettingsSection(1); setSettingsFocus(1); }
-                }
-                else if (settingsSection === 3) {
-                  if (settingsFocus >= 8) setSettingsFocus(prev => prev - 4);
-                  else { setSettingsSection(2); setSettingsFocus(3); }
-                } else if (settingsSection === 4) {
-                  if (settingsFocus >= 13) setSettingsFocus(prev => prev - 2);
-                  else { setSettingsSection(3); setSettingsFocus(7); }
-                } else if (settingsSection === 5) {
-                  setSettingsSection(4); setSettingsFocus(13);
-                } else if (settingsSection === 6) {
-                  if (settingsFocus === 17) setSettingsFocus(16);
-                  else { setSettingsSection(5); setSettingsFocus(15); }
-                }
-              }
-            }
-            break;
-        }
-        return;
-      }
-
-      if (navContext === 'exit-confirm') {
-        switch (key) {
-          case 'ArrowLeft':
-            e.preventDefault();
-            setExitFocus(0);
-            break;
-          case 'ArrowRight':
-            e.preventDefault();
-            setExitFocus(1);
-            break;
-          case 'Enter':
-            e.preventDefault();
-            if (exitFocus === 0) {
-              window.location.reload();
-            } else {
-              setShowExitConfirm(false);
-              setNavContext('browse');
-              setActiveRow(0);
-              setActiveCol(0);
-            }
-            break;
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            setShowExitConfirm(false);
-            setNavContext('browse');
-            setActiveRow(0);
-            setActiveCol(0);
-            break;
-        }
-        return;
-      }
-
-      if (navContext === 'browse') {
-        switch (key) {
-          case 'Escape':
-          case 'Backspace':
-            e.preventDefault();
-            setShowExitConfirm(true);
-            setNavContext('exit-confirm');
-            setExitFocus(1);
-            break;
-          case 'ArrowUp':
-            e.preventDefault();
-            if (activeRow === 0) {
-              setActiveRow(-1);
-              setActiveCol(0);
-            } else if (activeRow === -1) {
-              setActiveRow(-2);
-              setActiveCol(0);
-            } else if (activeRow === -2) {
-              setActiveRow(-3);
-              setActiveCol(0);
-            } else if (activeRow === -3) {
-              setActiveRow(-4);
-              setActiveCol(0);
-            } else if (activeRow > 0) {
-              const nextRow = activeRow - 1;
-              const group = groupedChannels[nextRow]?.[0];
-              setActiveRow(nextRow);
-              if (group && collapsedRows.has(group)) {
-                setActiveCol(-1);
-              }
-            }
-            break;
-          case 'ArrowDown':
-            e.preventDefault();
-            if (activeRow === -4) {
-              setActiveRow(-3);
-              setActiveCol(0);
-            } else if (activeRow === -3) {
-              setActiveRow(-2);
-              setActiveCol(0);
-            } else if (activeRow === -2) {
-              setActiveRow(-1);
-              setActiveCol(0);
-            } else if (activeRow === -1) {
-              const group = groupedChannels[0]?.[0];
-              setActiveRow(0);
-              if (group && collapsedRows.has(group)) {
-                setActiveCol(-1);
-              } else {
-                setActiveCol(0);
-              }
-            } else {
-              const isLastRow = activeRow === groupedChannels.length - 1;
-              const nextRow = isLastRow ? 0 : activeRow + 1;
-              const group = groupedChannels[nextRow]?.[0];
-              setActiveRow(nextRow);
-              
-              // Reset or clamp column when wrapping around or changing rows
-              const nextRowChannels = groupedChannels[nextRow]?.[1] || [];
-              if (group && collapsedRows.has(group)) {
-                setActiveCol(-1);
-              } else if (activeCol >= nextRowChannels.length) {
-                setActiveCol(Math.max(0, nextRowChannels.length - 1));
-              }
-            }
-            break;
-          case 'ArrowLeft':
-            e.preventDefault();
-            if (activeRow === -4) return;
-            if (activeRow >= 0) {
-              setActiveCol(prev => Math.max(-1, prev - 1));
-            } else {
-              setActiveCol(prev => Math.max(0, prev - 1));
-            }
-            break;
-          case 'ArrowRight':
-            e.preventDefault();
-            if (activeRow === -4) return;
-            if (activeRow === -3) {
-              setActiveCol(prev => Math.min(primaryHeroButtons.length - 1, prev + 1));
-            } else if (activeRow === -2) {
-              setActiveCol(0);
-            } else if (activeRow === -1) {
-              const otherFilters = filterHeroButtons.filter(b => b.id !== 'search');
-              setActiveCol(prev => Math.min(otherFilters.length - 1, prev + 1));
-            } else {
-              const group = groupedChannels[activeRow]?.[0];
-              if (group && collapsedRows.has(group)) {
-                // Do nothing, stay on header
-                return;
-              }
-              const currentRowLength = groupedChannels[activeRow]?.[1].length || 0;
-              setActiveCol(prev => Math.min(currentRowLength - 1, prev + 1));
-            }
-            break;
-          case 'Enter':
-            e.preventDefault();
-            console.log('App Enter pressed, activeRow:', activeRow, 'activeCol:', activeCol);
-            if (activeRow === -4) {
-              setShowSettings(true);
-              setNavContext('settings');
-              setSettingsArea('content');
-              setSidebarFocus(0);
-              setActiveSettingsTab(0);
-              setSettingsSection(0);
-              setSettingsFocus(0);
-            } else if (activeRow === -3) {
-              const button = primaryHeroButtons[activeCol];
-              if (button) button.action();
-            } else if (activeRow === -2) {
-              const searchBtn = filterHeroButtons.find(b => b.id === 'search');
-              if (searchBtn) searchBtn.action();
-            } else if (activeRow === -1) {
-              const otherFilters = filterHeroButtons.filter(b => b.id !== 'search');
-              const button = otherFilters[activeCol];
-              if (button) button.action();
-            } else {
-              if (activeCol === -1) {
-                const group = groupedChannels[activeRow]?.[0];
-                if (group) {
-                  setCollapsedRows(prev => {
-                    const next = new Set(prev);
-                    if (next.has(group)) next.delete(group);
-                    else next.add(group);
-                    return next;
-                  });
-                }
-              } else {
-                const selectedChannel = groupedChannels[activeRow]?.[1][activeCol];
-                if (selectedChannel) {
-                  handleChannelSelect(selectedChannel);
-                }
-              }
-            }
-            break;
-          case 'Backspace':
-          case 'Escape':
-          case 'GoBack':
-            e.preventDefault();
-            setShowExitConfirm(true);
-            setNavContext('exit-confirm');
-            break;
-        }
-      }
-    };
-
-  const handleKeyUp = (e: KeyboardEvent) => {
-    let key = e.key;
-    if (key === 'Select' || key === 'OK') key = 'Enter';
-    
-    if (key === 'Enter') {
-      if (keyHoldTimer.current) {
-        clearTimeout(keyHoldTimer.current);
-        keyHoldTimer.current = null;
-      }
-      isKeyHeld.current = false;
-    }
-  };
+  const {
+    toggleSection,
+    handleKeyDown,
+    handleKeyUp
+  } = useKeyboardNavigation({
+    channels,
+    groupedChannels,
+    currentChannel,
+    setCurrentChannel,
+    showSettings,
+    setShowSettings,
+    showQuickSettings,
+    setShowQuickSettings,
+    showEPGTimeline,
+    setShowEPGTimeline,
+    isMiniPlayer,
+    setIsMiniPlayer,
+    setIsGlobalPlaying,
+    globalVolume,
+    updateGlobalVolume,
+    setIsMuted,
+    handleChannelSelect,
+    toggleFavorite,
+    toggleManualCategory,
+    moveChannel,
+    setRecentlyWatched,
+    setTypedNumber,
+    setChannelNumbers,
+    setShowNumberInput,
+    setNumberInputChannelId,
+    setChannelMenuId,
+    setChannelMenuCategory,
+    setChannelForDetail,
+    setShowRemotePairingModal,
+    setShowDeviceInfo,
+    showDeviceInfo,
+    themeColor,
+    setThemeColor,
+    setUiMode,
+    setPlayerEngine,
+    setAmbilightMode,
+    setSleepTimer,
+    setSleepTimerActive,
+    mixedColor,
+    setProfilePic,
+    setDeviceType,
+    setDynamicThemeEnabled,
+    setVoiceControlEnabled,
+    setTmdbApiKey,
+    setGeminiApiKey,
+    setCustomProxyUrl,
+    setClockStyle,
+    setTop10Style,
+    setFocusEffect,
+    setLogoStyle,
+    setPosterOrientation,
+    layoutMode,
+    setLayoutMode,
+    multiSessionMenuOpen,
+    setMultiSessionMenuOpen,
+    channelMenuId,
+    channelMenuCategory,
+    numberInputChannelId,
+    channelForDetail,
+    primaryHeroButtons,
+    filterHeroButtons,
+    handleUrlSubmit,
+    setSavedUrl,
+    setPlaylistUrl,
+    setCollapsedRows,
+    extraUrl,
+    detailFocus,
+    setDetailFocus,
+    allFlattenedChannels,
+    navContext,
+    setNavContext,
+    activeRow,
+    setActiveRow,
+    activeCol,
+    setActiveCol,
+    settingsArea,
+    setSettingsArea,
+    settingsSection,
+    setSettingsSection,
+    settingsFocus,
+    setSettingsFocus,
+    sidebarFocus,
+    setSidebarFocus,
+    channelMenuFocus,
+    setChannelMenuFocus,
+    quickSettingsFocus,
+    setQuickSettingsFocus,
+    quickSwitchFocus,
+    setQuickSwitchFocus,
+    showQuickSwitch,
+    setShowQuickSwitch,
+    recentlyWatched,
+    searchQuery,
+    isAISearching,
+    handleAISearch,
+    activeSettingsTab,
+    setActiveSettingsTab,
+    expandedSections,
+    setExpandedSections,
+    showSportsDashboard,
+    setShowSportsDashboard
+  });
 
   const handleKeyDownRef = useRef(handleKeyDown);
   const handleKeyUpRef = useRef(handleKeyUp);
@@ -2611,166 +2266,20 @@ export default function App() {
   useEffect(() => {
     handleKeyDownRef.current = handleKeyDown;
     handleKeyUpRef.current = handleKeyUp;
-  });
+  }, [handleKeyDown, handleKeyUp]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => handleKeyDownRef.current(e);
     const onKeyUp = (e: KeyboardEvent) => handleKeyUpRef.current(e);
+    
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
   }, []);
-
-  const resolveUrl = (rawUrl: string) => {
-    if (!rawUrl) return [];
-    const trimmed = rawUrl.trim();
-    if (trimmed.startsWith('http')) return [trimmed];
-    // If it's a code, try cutt.ly first, then the raw string
-    return [`https://cutt.ly/${trimmed}`, trimmed];
-  };
-
-  const addPlaylist = (name: string, url: string) => {
-    const newPlaylist: Playlist = {
-      id: crypto.randomUUID(),
-      name,
-      url
-    };
-    const updatedPlaylists = [...playlists, newPlaylist];
-    setPlaylists(updatedPlaylists);
-    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
-    return newPlaylist;
-  };
-
-  const removePlaylist = (id: string) => {
-    const updatedPlaylists = playlists.filter(p => p.id !== id);
-    setPlaylists(updatedPlaylists);
-    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
-    if (currentPlaylistId === id) {
-      setCurrentPlaylistId(null);
-      localStorage.removeItem('current_playlist_id');
-    }
-  };
-
-  const switchPlaylist = async (playlist: Playlist) => {
-    setCurrentPlaylistId(playlist.id);
-    localStorage.setItem('current_playlist_id', playlist.id);
-    setPlaylistUrl(playlist.url);
-    if (playlist.epgUrl) setEpgUrl(playlist.epgUrl);
-    await handleUrlSubmit(playlist.url);
-  };
-
-  const handleUrlSubmit = async (urlOverride?: string) => {
-    const rawUrl = urlOverride || playlistUrl;
-    if (!rawUrl) return;
-
-    setIsLoading(true);
-    setChannels([]); // Clear current channels while loading new ones
-
-    const urlsToTry = resolveUrl(rawUrl);
-
-    let finalUrl = '';
-    let content = '';
-
-    try {
-      for (const url of urlsToTry) {
-        try {
-          // Try with CapacitorHttp on native platforms first
-          if (Capacitor.isNativePlatform()) {
-            try {
-              const response = await CapacitorHttp.get({
-                url: url,
-                connectTimeout: 15000,
-                readTimeout: 15000,
-              });
-              if (response.status === 200 && response.data) {
-                content = response.data;
-                finalUrl = url;
-                break;
-              }
-            } catch (capErr) {
-              console.error(`CapacitorHttp failed for ${url}:`, capErr);
-            }
-          }
-
-          // Try with proxy
-          const response = await fetchWithProxy(url);
-          if (response.ok) {
-            content = await response.text();
-            finalUrl = url;
-            break;
-          }
-          
-          // Try direct
-          const directResponse = await fetch(url, { signal: AbortSignal.timeout(5000) });
-          if (directResponse.ok) {
-            content = await directResponse.text();
-            finalUrl = url;
-            break;
-          }
-        } catch (e) {
-          console.error(`Failed to load ${url}:`, e);
-        }
-      }
-
-      if (!content) {
-        throw new Error('Oynatma listesi yüklenemedi. URL\'yi kontrol edin.');
-      }
-
-      const { channels: parsedChannels, epgUrl: extractedEpgUrl } = parseM3U(content);
-      setChannels(parsedChannels);
-      setHasCheckedLinks(false);
-      setBrokenChannelIds(new Set());
-
-      // Use extracted EPG URL if provided in M3U header and no manual EPG URL is set
-      const finalEpgUrlToUse = epgUrl || extractedEpgUrl;
-
-      // Load EPG if URL provided or extracted
-      if (finalEpgUrlToUse) {
-        try {
-          const urlsToTryEpg = resolveUrl(finalEpgUrlToUse);
-          let epg = null;
-          for (const url of urlsToTryEpg) {
-            try {
-              const finalEpgUrl = getProxiedUrl(url);
-              epg = await fetchAndParseEPG(finalEpgUrl);
-              if (epg) {
-                localStorage.setItem('epg_url', url);
-                setEpgUrl(url);
-                break;
-              }
-            } catch (e) {
-              console.error(`EPG load failed for ${url}:`, e);
-            }
-          }
-          if (epg) setEpgData(epg);
-        } catch (epgErr) {
-          console.error('EPG load failed:', epgErr);
-        }
-      }
-
-      if (parsedChannels.length > 0) {
-        // Save to localStorage
-        localStorage.setItem('m3u_url', finalUrl);
-        localStorage.removeItem('m3u_deleted');
-        setSavedUrl(finalUrl);
-        
-        showToast('Oynatma listesi başarıyla yüklendi!', 'success');
-        setNavContext('browse');
-        setActiveRow(0);
-        setActiveCol(0);
-      } else {
-        showToast('Bu oynatma listesinde kanal bulunamadı.', 'error');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Oynatma listesi yüklenirken hata oluştu.';
-      showToast(msg, 'error');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   useEffect(() => {
     if (socketRef.current && isRemoteConnected && channels.length > 0) {
@@ -2813,27 +2322,15 @@ export default function App() {
         handleKeyDown({ key: 'Enter', preventDefault: () => {}, stopPropagation: () => {} } as any);
         break;
       case 'volume-up':
-        setGlobalVolume(prev => {
-          const next = Math.min(1, prev + 0.1);
-          if (socketRef.current) {
-            socketRef.current.emit('sync-state', { volume: next, isMuted: false });
-          }
-          return next;
-        });
+        updateGlobalVolume(Math.min(1, globalVolumeRef.current + 0.1));
         setIsMuted(false);
         break;
       case 'volume-down':
-        setGlobalVolume(prev => {
-          const next = Math.max(0, prev - 0.1);
-          if (socketRef.current) {
-            socketRef.current.emit('sync-state', { volume: next, isMuted: false });
-          }
-          return next;
-        });
+        updateGlobalVolume(Math.max(0, globalVolumeRef.current - 0.1));
         setIsMuted(false);
         break;
       case 'channel-up':
-        if (navContextRef.current === 'player' && currentChannelRef.current) {
+        if (currentChannelRef.current) {
           const currentIndex = channels.findIndex(ch => ch.id === currentChannelRef.current?.id);
           if (currentIndex !== -1) {
             const nextIndex = (currentIndex + 1) % channels.length;
@@ -2844,7 +2341,7 @@ export default function App() {
         }
         break;
       case 'channel-down':
-        if (navContextRef.current === 'player' && currentChannelRef.current) {
+        if (currentChannelRef.current) {
           const currentIndex = channels.findIndex(ch => ch.id === currentChannelRef.current?.id);
           if (currentIndex !== -1) {
             const prevIndex = (currentIndex - 1 + channels.length) % channels.length;
@@ -2970,23 +2467,29 @@ export default function App() {
   useEffect(() => { handleRemoteCommandRef.current = handleRemoteCommand; }, [handleRemoteCommand]);
 
   useEffect(() => {
-    if (!appUrl || !remoteRoomId || !remoteControlEnabled) return;
+    if (!appUrl || !remoteRoomId) return;
 
     const normalizedAppUrl = appUrl.replace(/\/$/, '');
-    console.log('TV app connecting to socket for remote control...', normalizedAppUrl);
+    console.log('TV app connecting to socket...', normalizedAppUrl);
     
     const socket = io(normalizedAppUrl, {
       transports: ['polling', 'websocket'],
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
-      timeout: 120000 // Extended from 60000
+      timeout: 120000
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('TV app socket connected, joining room:', remoteRoomId);
+      console.log('TV app socket connected');
       setIsTvSocketConnected(true);
-      socket.emit('join-room', remoteRoomId);
+      if (remoteControlEnabled) {
+        socket.emit('join-room', remoteRoomId);
+      }
+    });
+
+    socket.on('user-count', (count: number) => {
+      setUserCount(count);
     });
 
     socket.on('connect_error', (err) => {
@@ -3044,7 +2547,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [remoteRoomId, showToast, appUrl]);
+  }, [remoteRoomId, showToast, appUrl, remoteControlEnabled]);
 
   const checkAbortController = useRef<AbortController | null>(null);
 
@@ -3153,26 +2656,9 @@ export default function App() {
       setHasCheckedLinks(false);
       setBrokenChannelIds(new Set());
 
-      // Use extracted EPG URL if provided in M3U header
-      if (extractedEpgUrl) {
-        setEpgUrl(extractedEpgUrl);
-        localStorage.setItem('epg_url', extractedEpgUrl);
-        // Trigger EPG load
-        const loadEPG = async () => {
-          try {
-            const urlsToTryEpg = resolveUrl(extractedEpgUrl);
-            let epg = null;
-            for (const url of urlsToTryEpg) {
-              try {
-                const finalEpgUrl = getProxiedUrl(url);
-                epg = await fetchAndParseEPG(finalEpgUrl);
-                if (epg) break;
-              } catch (err) {}
-            }
-            if (epg) setEpgData(epg);
-          } catch (err) {}
-        };
-        loadEPG();
+      // Use extracted EPG URL if provided in M3U header and not already set
+      if (extractedEpgUrl && !epgUrl) {
+        handleLoadEPG(extractedEpgUrl);
       }
 
       if (parsedChannels.length > 0) {
@@ -3294,7 +2780,10 @@ export default function App() {
         {showEPGTimeline && (
           <EPGTimeline
             isOpen={showEPGTimeline}
-            onClose={() => setShowEPGTimeline(false)}
+            onClose={() => {
+              setShowEPGTimeline(false);
+              setNavContext(currentChannel ? 'player' : 'browse');
+            }}
             epgData={epgData}
             channels={channels}
             now={now}
@@ -3306,32 +2795,23 @@ export default function App() {
 
       {/* Navbar */}
       <nav className={cn(
-        "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-between transition-all duration-500",
-        (uiMode === 'modern' || uiMode === 'bento') && (scrolled || channels.length > 0 
-          ? "bg-black/60 backdrop-blur-2xl h-16 border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.1)]" 
-          : "bg-gradient-to-b from-black/90 via-black/40 to-transparent h-20 md:h-24"),
-        uiMode === 'classic' && (scrolled || channels.length > 0 
-          ? "bg-zinc-950 border-b-2 border-zinc-800 h-16 shadow-2xl" 
-          : "bg-zinc-900 h-20 border-b border-white/5"),
-        uiMode === 'minimalist' && (scrolled || channels.length > 0 
-          ? "bg-black/80 backdrop-blur-sm h-14 border-b border-white/10" 
-          : "bg-transparent h-20")
+        "fixed top-0 w-full z-50 flex items-center px-4 md:px-12 justify-end transition-all duration-500 h-20 pointer-events-none"
       )}>
-        <div className="flex items-center gap-8">
-          <Logo uiMode={uiMode} logoStyle={logoStyle} />
-          {channels.length > 0 && (
-            <div className="hidden lg:flex items-center gap-5 text-sm font-medium text-zinc-300">
-              <button className="hover:text-white transition-colors">Ana Sayfa</button>
-              <button className="hover:text-white transition-colors">TV Programları</button>
-              <button className="hover:text-white transition-colors">Filmler</button>
-              <button className="hover:text-white transition-colors">Yeni ve Popüler</button>
+        <div className="flex items-center gap-4 md:gap-6 pointer-events-auto bg-black/20 hover:bg-black/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 hover:border-white/20 shadow-2xl transition-all duration-300 group/topbar">
+          <div className="flex items-center gap-3 border-r border-white/10 pr-4">
+            <Logo uiMode={uiMode} logoStyle={logoStyle} />
+            <div className="flex items-center gap-2">
+              <WeatherWidget city={weatherCity} themeColor={themeColor} />
+              <div className="flex items-center gap-1.5 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm">
+                <motion.div 
+                  animate={{ opacity: [0.5, 1, 0.5] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                >
+                  <User className="w-4 h-4" style={{ color: themeColor }} />
+                </motion.div>
+                <span className="text-sm font-black italic text-white leading-none">{userCount}</span>
+              </div>
             </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4 md:gap-6">
-          <div className="hidden md:block">
-            <WeatherWidget city={weatherCity} themeColor={themeColor} />
           </div>
           <div className="hidden sm:block">
             <DigitalClock themeColor={themeColor} style={clockStyle} />
@@ -3385,7 +2865,10 @@ export default function App() {
       </nav>
 
       <main 
-        className="pb-20"
+        className={cn(
+          "relative min-h-screen",
+          layoutMode === 'fixed-focus' && "h-screen overflow-hidden flex flex-col"
+        )}
       >
         <div className="animate-in fade-in duration-1000">
           {isLoading ? (
@@ -3401,30 +2884,31 @@ export default function App() {
               weatherCity={weatherCity}
               now={now}
               channels={channels}
+              favorites={favorites}
             />
           ) : channels.length === 0 ? (
-            <div className="relative min-h-[80vh] flex flex-col items-center justify-center space-y-8 text-center px-4 py-20">
+            <div className="relative h-screen flex flex-col items-center justify-center space-y-4 text-center px-4 pt-20 pb-8 overflow-hidden">
               <div className="absolute inset-0 z-0 overflow-hidden">
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#141414]/60 to-[#141414]" />
               </div>
               
-              <div className="relative z-10 space-y-8 max-w-2xl w-full">
-                <div className="space-y-4">
-                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 shadow-2xl">
-                    <Tv className="w-10 h-10 text-zinc-400" />
+              <div className="relative z-10 space-y-4 max-w-2xl w-full">
+                <div className="space-y-2">
+                  <div className="w-14 h-14 bg-white/5 rounded-full flex items-center justify-center mx-auto border border-white/10 shadow-2xl">
+                    <Tv className="w-7 h-7 text-zinc-400" />
                   </div>
-                  <div className="space-y-2">
-                    <h2 className="text-4xl font-black italic uppercase tracking-tighter text-white">Oynatma Listesi Yok</h2>
-                    <p className="text-zinc-500 max-w-md mx-auto font-medium">
+                  <div className="space-y-1">
+                    <h2 className="text-2xl font-black italic uppercase tracking-tighter text-white">Oynatma Listesi Yok</h2>
+                    <p className="text-zinc-500 max-w-md mx-auto font-medium text-xs">
                       İzlemeye başlamak için bir M3U dosyası yükleyin veya bir URL adresi girin.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* File Upload Section */}
                   <div className={cn(
-                    "bg-white/5 p-8 rounded-3xl border-2 transition-all flex flex-col items-center gap-4 group cursor-pointer",
+                    "bg-white/5 p-5 rounded-3xl border-2 transition-all flex flex-col items-center gap-2 group cursor-pointer",
                     activeRow === 0 ? "border-white bg-white/10 scale-105 shadow-2xl" : "border-white/5 hover:border-white/10"
                   )}
                   onClick={() => document.getElementById('empty-file-upload')?.click()}
@@ -3432,30 +2916,30 @@ export default function App() {
                   onMouseEnter={() => { setActiveRow(0); setActiveCol(0); }}
                   >
                     <input id="empty-file-upload" type="file" accept=".m3u,.m3u8" className="hidden" onChange={handleFileUpload} />
-                    <div className="p-4 bg-white/10 rounded-2xl group-hover:scale-110 transition-transform">
-                      <Upload className="w-8 h-8 text-white" />
+                    <div className="p-2.5 bg-white/10 rounded-2xl group-hover:scale-110 transition-transform">
+                      <Upload className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                      <div className="text-xl font-bold text-white">Dosya Yükle</div>
-                      <div className="text-sm text-zinc-500">Cihazınızdan bir .m3u dosyası seçin</div>
+                      <div className="text-base font-bold text-white">Dosya Yükle</div>
+                      <div className="text-[10px] text-zinc-500">Cihazınızdan bir .m3u dosyası seçin</div>
                     </div>
                   </div>
 
                   {/* URL Input Section */}
                   <div className={cn(
-                    "bg-white/5 p-8 rounded-3xl border-2 transition-all flex flex-col gap-4",
+                    "bg-white/5 p-5 rounded-3xl border-2 transition-all flex flex-col gap-2",
                     activeRow === 1 ? "border-white bg-white/10 scale-105 shadow-2xl" : "border-white/5"
                   )}
                   onPointerDown={() => { setActiveRow(1); setActiveCol(0); }}
                   onMouseEnter={() => { setActiveRow(1); setActiveCol(0); }}
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="p-4 bg-white/10 rounded-2xl">
-                        <LinkIcon className="w-8 h-8 text-white" />
+                    <div className="flex items-center gap-2">
+                      <div className="p-2.5 bg-white/10 rounded-2xl">
+                        <LinkIcon className="w-5 h-5 text-white" />
                       </div>
                       <div className="text-left">
-                        <div className="text-xl font-bold text-white">URL Adresi</div>
-                        <div className="text-sm text-zinc-500">M3U linki veya Cutt.ly kodu</div>
+                        <div className="text-base font-bold text-white">URL Adresi</div>
+                        <div className="text-[10px] text-zinc-500">M3U linki veya Cutt.ly kodu</div>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -3464,7 +2948,7 @@ export default function App() {
                         type="url"
                         placeholder="URL girin..."
                         className={cn(
-                          "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm font-bold",
+                          "flex-1 bg-black/40 border rounded-xl px-3 py-2 outline-none transition-all text-[10px] font-bold",
                           activeRow === 1 && activeCol === 0 ? "border-white ring-4 ring-white/10" : "border-white/10"
                         )}
                         value={extraUrl}
@@ -3482,7 +2966,7 @@ export default function App() {
                         onMouseEnter={() => { setActiveRow(1); setActiveCol(1); }}
                         style={{ backgroundColor: themeColor }}
                         className={cn(
-                          "px-6 py-3 rounded-xl font-bold text-white transition-all",
+                          "px-3 py-2 rounded-xl font-bold text-white transition-all text-[10px]",
                           activeRow === 1 && activeCol === 1 ? "scale-110 shadow-xl brightness-110" : "opacity-90"
                         )}
                       >
@@ -3492,7 +2976,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <div className="flex flex-col sm:flex-row gap-2 justify-center">
                   <button
                     onClick={() => {
                       localStorage.removeItem('m3u_url');
@@ -3502,12 +2986,12 @@ export default function App() {
                     onPointerDown={() => { setActiveRow(2); setActiveCol(0); }}
                     onMouseEnter={() => { setActiveRow(2); setActiveCol(0); }}
                     className={cn(
-                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      "px-5 py-2.5 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 text-xs",
                       activeRow === 2 ? "bg-orange-500 text-white scale-105 shadow-xl" : "bg-orange-500/10 text-orange-500 hover:bg-orange-500/20"
                     )}
                   >
-                    <Smartphone className="w-5 h-5" />
-                    Uzaktan Kumanda Modu
+                    <Smartphone className="w-3.5 h-3.5" />
+                    Uzaktan Kumanda
                   </button>
                   <button
                     onClick={() => {
@@ -3520,12 +3004,12 @@ export default function App() {
                     onPointerDown={() => { setActiveRow(3); setActiveCol(0); }}
                     onMouseEnter={() => { setActiveRow(3); setActiveCol(0); }}
                     className={cn(
-                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      "px-5 py-2.5 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 text-xs",
                       activeRow === 3 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
                     )}
                   >
-                    <RefreshCw className={cn("w-5 h-5", activeRow === 3 && "animate-spin")} />
-                    Varsayılan Listeyi Yükle
+                    <RefreshCw className={cn("w-3.5 h-3.5", activeRow === 3 && "animate-spin")} />
+                    Varsayılan
                   </button>
 
                   <button
@@ -3538,12 +3022,12 @@ export default function App() {
                     onPointerDown={() => { setActiveRow(4); setActiveCol(0); }}
                     onMouseEnter={() => { setActiveRow(4); setActiveCol(0); }}
                     className={cn(
-                      "px-8 py-4 rounded-2xl font-bold transition-all flex items-center justify-center gap-3",
+                      "px-5 py-2.5 rounded-2xl font-bold transition-all flex items-center justify-center gap-2 text-xs",
                       activeRow === 4 ? "bg-white text-black scale-105 shadow-xl" : "bg-white/5 text-white hover:bg-white/10"
                     )}
                   >
-                    <Settings className="w-5 h-5" />
-                    Gelişmiş Ayarlar
+                    <Settings className="w-3.5 h-3.5" />
+                    Ayarlar
                   </button>
                 </div>
 
@@ -3625,7 +3109,12 @@ export default function App() {
                           {['hls', 'shaka'].map((engine, idx) => (
                             <button
                               key={engine}
-                              onClick={() => setPlayerEngine(engine as any)}
+                              onClick={() => {
+                                setPlayerEngine(engine as any);
+                                setQuickSettingsFocus(idx);
+                              }}
+                              onPointerDown={() => setQuickSettingsFocus(idx)}
+                              onMouseEnter={() => setQuickSettingsFocus(idx)}
                               className={cn(
                                 "py-3 rounded-2xl border-2 transition-all text-xs font-black uppercase tracking-widest relative overflow-hidden",
                                 playerEngine === engine ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
@@ -3653,7 +3142,12 @@ export default function App() {
                           {['none', 'soft', 'vibrant', 'cinema'].map((mode, idx) => (
                             <button
                               key={mode}
-                              onClick={() => setAmbilightMode(mode as any)}
+                              onClick={() => {
+                                setAmbilightMode(mode as any);
+                                setQuickSettingsFocus(idx + 2);
+                              }}
+                              onPointerDown={() => setQuickSettingsFocus(idx + 2)}
+                              onMouseEnter={() => setQuickSettingsFocus(idx + 2)}
                               className={cn(
                                 "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
                                 ambilightMode === mode ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
@@ -3683,7 +3177,10 @@ export default function App() {
                               onClick={() => {
                                 setSleepTimer(mins);
                                 setSleepTimerActive(true);
+                                setQuickSettingsFocus(idx + 6);
                               }}
+                              onPointerDown={() => setQuickSettingsFocus(idx + 6)}
+                              onMouseEnter={() => setQuickSettingsFocus(idx + 6)}
                               className={cn(
                                 "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
                                 sleepTimer === mins && sleepTimerActive ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
@@ -3734,7 +3231,11 @@ export default function App() {
                 {featuredChannel && (
                 <div 
                   className="relative w-full overflow-hidden transition-all duration-700"
-                  style={{ height: searchQuery ? '35vh' : '75vh' }}
+                  style={{ 
+                    height: layoutMode === 'fixed-focus'
+                      ? (activeRow >= 0 ? '60vh' : '80vh')
+                      : (searchQuery ? '40vh' : '80vh') 
+                  }}
                 >
                 <div className="absolute inset-0">
                   <motion.img 
@@ -3758,16 +3259,20 @@ export default function App() {
                 </div>
 
                 <div className={cn(
-                  "absolute left-4 md:left-12 max-w-3xl space-y-3 sm:space-y-4 transition-all duration-500 z-10", 
-                  searchQuery ? "bottom-8" : "bottom-[5%] sm:bottom-[8%]",
-                  "max-h-[calc(100%-120px)] overflow-hidden flex flex-col justify-end pt-24"
+                  "absolute left-0 right-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none z-0"
+                )} />
+
+                <div className={cn(
+                  "absolute left-4 md:left-12 max-w-4xl space-y-2 sm:space-y-3 transition-all duration-500 z-10", 
+                  searchQuery ? "bottom-8" : (layoutMode === 'fixed-focus' ? "bottom-[4%] sm:bottom-[6%]" : "bottom-[8%] sm:bottom-[12%]"),
+                  "max-h-[95%] flex flex-col justify-end pt-20"
                 )}>
                   {!searchQuery && (
                     <motion.div 
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       key={`info-${featuredChannel.id}`}
-                      className="space-y-4"
+                      className="space-y-2"
                     >
                       <div className="flex items-center gap-2 text-red-600 font-bold tracking-widest text-xs sm:text-sm">
                         <Tv className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
@@ -3775,9 +3280,14 @@ export default function App() {
                       </div>
                       
                       <h1 className={cn(
-                        "font-black tracking-tighter uppercase italic line-clamp-2 leading-none",
-                        deviceType === 'tv' ? "text-5xl sm:text-7xl md:text-8xl" : "text-2xl sm:text-4xl md:text-6xl"
-                      )}>{featuredChannel.name}</h1>
+                        "font-black tracking-tighter uppercase italic line-clamp-2 leading-tight py-0.5",
+                        deviceType === 'tv' ? "text-6xl sm:text-8xl md:text-9xl" : "text-3xl sm:text-5xl md:text-7xl"
+                      )}
+                      style={{ 
+                        textShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                        WebkitTextStroke: uiMode === 'minimalist' ? `1px ${themeColor}` : 'none'
+                      }}
+                      >{featuredChannel.name}</h1>
 
                       <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-white/80">
                         {featuredChannel.year && (
@@ -3820,7 +3330,7 @@ export default function App() {
 
                       {/* EPG Info */}
                       {getCurrentProgram(featuredChannel.tvgId || featuredChannel.name) && (
-                        <div className="mt-6 p-4 bg-white/5 rounded-2xl border border-white/10 backdrop-blur-md max-w-md group hover:bg-white/10 transition-colors">
+                        <div className="mt-1 p-2.5 bg-white/5 rounded-xl border border-white/10 backdrop-blur-md max-w-md group hover:bg-white/10 transition-colors">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-red-500 uppercase tracking-wider flex items-center gap-1">
                               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -3853,10 +3363,27 @@ export default function App() {
                       )}
                     </motion.div>
                   )}
-                  <div className="flex flex-col gap-4 pt-2">
+                  <div className="flex flex-col gap-2 pt-1">
                     {/* Primary Buttons Row */}
                     {!searchQuery && (
                       <div className="flex flex-wrap items-center gap-3">
+                        {/* Navigation Buttons */}
+                        <div className="flex items-center gap-2 mr-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handlePrevFeatured(); }}
+                            className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all border border-white/10 backdrop-blur-md"
+                            title="Önceki Kanal"
+                          >
+                            <ChevronUp className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleNextFeatured(); }}
+                            className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all border border-white/10 backdrop-blur-md"
+                            title="Sonraki Kanal"
+                          >
+                            <ChevronDown className="w-5 h-5" />
+                          </button>
+                        </div>
                         {primaryHeroButtons.map((btn, idx) => {
                           const isFocused = activeRow === -3 && activeCol === idx;
                           const isPlay = btn.id === 'play';
@@ -3893,7 +3420,7 @@ export default function App() {
 
                     {/* Search Row */}
                     <div className="flex items-center gap-2">
-                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice' || b.id === 'remote-toggle').map((btn, idx) => {
+                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice' || b.id === 'remote-toggle' || b.id === 'device-info').map((btn, idx) => {
                         const isFocused = activeRow === -2 && activeCol === idx;
                         
                         return (
@@ -3921,7 +3448,8 @@ export default function App() {
                                   "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
                                   isFocused && "shadow-2xl ring-4 ring-white/20",
                                   btn.id === 'voice' && isListening && "animate-pulse",
-                                  btn.id === 'remote-toggle' && remoteControlEnabled && "border-green-500/50"
+                                  btn.id === 'remote-toggle' && remoteControlEnabled && "border-green-500/50",
+                                  btn.id === 'device-info' && showDeviceInfo && "border-blue-500/50"
                                 )}
                               >
                                 <div className="relative">
@@ -3955,15 +3483,47 @@ export default function App() {
                                       setActiveRow(-2);
                                       setActiveCol(idx);
                                     }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && searchQuery.length > 10) {
+                                        handleAISearch(searchQuery);
+                                      }
+                                    }}
                                   />
-                                  {searchQuery && (isFocused || searchQuery) && (
-                                    <button
-                                      onClick={() => setSearchQuery('')}
-                                      className="absolute right-3 text-zinc-400 hover:text-white transition-colors"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  )}
+                                  <div className="absolute right-3 flex items-center gap-2">
+                                    {isAISearching ? (
+                                      <CircleDashed className="w-3 h-3 animate-spin text-blue-400" />
+                                    ) : searchQuery.length > 10 ? (
+                                      <button
+                                        onClick={() => handleAISearch(searchQuery)}
+                                        className="text-blue-400 hover:text-blue-300 transition-colors"
+                                        title="AI ile Ara"
+                                      >
+                                        <Sparkles className="w-3 h-3" />
+                                      </button>
+                                    ) : null}
+                                    {searchQuery && (isFocused || searchQuery) && (
+                                      <button
+                                        onClick={() => setSearchQuery('')}
+                                        className="text-zinc-400 hover:text-white transition-colors"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  
+                                  <AnimatePresence>
+                                    {aiExplanation && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: 10 }}
+                                        className="absolute top-full left-0 mt-2 bg-blue-600 text-white px-4 py-2 rounded-2xl text-[10px] font-bold shadow-xl z-50 whitespace-nowrap flex items-center gap-2"
+                                      >
+                                        <Sparkles className="w-3 h-3" />
+                                        {aiExplanation}
+                                      </motion.div>
+                                    )}
+                                  </AnimatePresence>
                                 </div>
                               )}
                             </div>
@@ -3978,7 +3538,7 @@ export default function App() {
                         ref={categoryScrollRef}
                         className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth pb-2"
                       >
-                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice' && b.id !== 'remote-toggle').map((btn, idx) => {
+                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice' && b.id !== 'remote-toggle' && b.id !== 'device-info').map((btn, idx) => {
                           const isFocused = activeRow === -1 && activeCol === idx;
                           
                           return (
@@ -4019,66 +3579,90 @@ export default function App() {
             )}
 
             {/* Rows */}
-              <div className={cn("relative z-20 space-y-1 pb-20 transition-all duration-500", searchQuery ? "mt-8" : "-mt-8 sm:-mt-12")}>
-              {(groupedChannels as [string, M3UChannel[]][]).map(([group, groupChannels], idx) => (
-                <ChannelRow 
-                  key={group} 
-                  title={group} 
-                  rowIndex={idx}
-                  channels={groupChannels} 
-                  onSelect={handleChannelSelect}
-                  onDetail={(ch) => handleChannelDetail(ch, group)}
-                  onFocus={(r, c) => {
-                    setActiveRow(r);
-                    setActiveCol(c);
-                  }}
-                  onToggleFavorite={toggleFavorite}
-                  onDeleteChannel={handleDeleteChannel}
-                  onLongPress={(id, category) => {
-                    setChannelMenuId(id);
-                    setChannelMenuCategory(category);
-                    setNavContext('channel-menu');
-                    setChannelMenuFocus(0);
-                  }}
-                  favorites={favorites}
-                  multiSessions={multiSessions}
-                  canliChannels={canliChannels}
-                  filmChannels={filmChannels}
-                  diziChannels={diziChannels}
-                  activeRow={activeRow}
-                  activeCol={activeCol}
-                  orientation={posterOrientation}
-                  previewChannelId={previewChannelId}
-                  themeColor={themeColor}
-                  deviceType={deviceType}
-                  uiMode={uiMode}
-                  isCollapsed={collapsedRows.has(group)}
-                  customProxyUrl={customProxyUrl}
-                  top10Style={top10Style}
-                  onToggleMini={(channel) => {
-                    if (isMiniPlayer && currentChannel?.id === channel.id) {
-                      setIsMiniPlayer(false);
-                      setCurrentChannel(null);
-                    } else {
-                      setCurrentChannel(channel);
-                      setIsMiniPlayer(true);
-                    }
-                  }}
-                  onToggleCollapse={() => {
-                    setCollapsedRows(prev => {
-                      const next = new Set(prev);
-                      if (next.has(group)) next.delete(group);
-                      else next.add(group);
-                      return next;
-                    });
-                  }}
-                  playbackProgress={playbackProgress}
-                  epgData={epgData}
-                  now={now}
-                  focusEffect={focusEffect}
-                />
-              ))}
-            </div>
+            <motion.div 
+              animate={{ y: 0 }}
+              className={cn(
+                "relative z-20 space-y-1", 
+                layoutMode === 'fixed-focus' ? "flex-1 flex flex-col justify-center" : "pb-20",
+                searchQuery ? "mt-8" : (layoutMode === 'fixed-focus' ? "mt-0" : "-mt-8 sm:-mt-12")
+              )}
+            >
+              <AnimatePresence mode="wait">
+                {(groupedChannels as [string, M3UChannel[]][]).map(([group, groupChannels], idx) => {
+                  const isVisible = layoutMode !== 'fixed-focus' || (activeRow < 0 ? idx === 0 : idx === activeRow);
+                  if (!isVisible) return null;
+
+                  return (
+                    <motion.div
+                      key={group}
+                      initial={layoutMode === 'fixed-focus' ? { opacity: 0, y: 20 } : {}}
+                      animate={layoutMode === 'fixed-focus' ? { opacity: 1, y: 0 } : {}}
+                      exit={layoutMode === 'fixed-focus' ? { opacity: 0, y: -20 } : {}}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <ChannelRow 
+                        key={group} 
+                        title={group} 
+                        rowIndex={idx}
+                        channels={groupChannels} 
+                        onSelect={handleChannelSelect}
+                        onDetail={(ch) => handleChannelDetail(ch, group)}
+                        onFocus={(r, c) => {
+                          setActiveRow(r);
+                          setActiveCol(c);
+                        }}
+                        onToggleFavorite={toggleFavorite}
+                        onDeleteChannel={handleDeleteChannel}
+                        onLongPress={(id, category) => {
+                          setChannelMenuId(id);
+                          setChannelMenuCategory(category);
+                          setNavContext('channel-menu');
+                          setChannelMenuFocus(0);
+                        }}
+                        favorites={favorites}
+                        multiSessions={multiSessions}
+                        canliChannels={canliChannels}
+                        filmChannels={filmChannels}
+                        diziChannels={diziChannels}
+                        activeRow={activeRow}
+                        activeCol={activeCol}
+                        orientation={posterOrientation}
+                        previewChannelId={previewChannelId}
+                        themeColor={themeColor}
+                        deviceType={deviceType}
+                        uiMode={uiMode}
+                        layoutMode={layoutMode}
+                        isCollapsed={collapsedRows.has(group)}
+                        customProxyUrl={customProxyUrl}
+                        top10Style={top10Style}
+                        onToggleMini={(channel) => {
+                          if (isMiniPlayer && currentChannel?.id === channel.id) {
+                            setIsMiniPlayer(false);
+                            setCurrentChannel(null);
+                          } else {
+                            setCurrentChannel(channel);
+                            setIsMiniPlayer(true);
+                          }
+                        }}
+                        onToggleCollapse={() => {
+                          setCollapsedRows(prev => {
+                            const next = new Set(prev);
+                            if (next.has(group)) next.delete(group);
+                            else next.add(group);
+                            return next;
+                          });
+                        }}
+                        playbackProgress={playbackProgress}
+                        epgData={epgData}
+                        now={now}
+                        focusEffect={focusEffect}
+                        channelNumbers={channelNumbers}
+                      />
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </motion.div>
           </motion.div>
         </>
       )}
@@ -4114,6 +3698,16 @@ export default function App() {
               onVolumeChange={setGlobalVolume}
               onMuteToggle={setIsMuted}
               ambilightMode={ambilightMode}
+              isPlaying={isGlobalPlaying}
+              onPlayPauseToggle={setIsGlobalPlaying}
+              loadingStyle={loadingStyle}
+              geminiApiKey={geminiApiKey}
+              isLiveTranslationEnabled={isLiveTranslationEnabled}
+              onToggleLiveTranslation={() => setIsLiveTranslationEnabled(prev => !prev)}
+              showSummary={showSummary}
+              isSummaryLoading={isSummaryLoading}
+              currentSummary={currentSummary}
+              onToggleSummary={handleToggleSummary}
             />
             <div className="absolute top-2 right-2 opacity-100 flex gap-2 z-[200]">
               <button
@@ -4149,6 +3743,127 @@ export default function App() {
                 <X className="w-4 h-4" />
               </button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Quick Channel Access Overlay */}
+      <AnimatePresence>
+        {typedNumber && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.5, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, y: 50 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] bg-black/80 backdrop-blur-2xl px-12 py-6 rounded-[32px] border-2 border-white/20 shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center gap-2"
+          >
+            <div 
+              className="text-6xl font-black tracking-[0.2em] text-white"
+              style={{ textShadow: `0 0 20px ${themeColor}` }}
+            >
+              {typedNumber}
+            </div>
+            <div className="text-[10px] font-bold text-white/40 uppercase tracking-widest">
+              Kanal Numarası
+            </div>
+            {channels.find(c => channelNumbers[c.id] === typedNumber) && (
+              <div className="text-sm font-bold text-white mt-2 animate-pulse">
+                {channels.find(c => channelNumbers[c.id] === typedNumber)?.name}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Remote Pairing Modal */}
+      <RemotePairingModal
+        isOpen={showRemotePairingModal}
+        onClose={() => { setShowRemotePairingModal(false); setNavContext('browse'); }}
+        themeColor={themeColor}
+        appUrl={appUrl}
+        remoteRoomId={remoteRoomId}
+        remoteControlEnabled={remoteControlEnabled}
+        setRemoteControlEnabled={setRemoteControlEnabled}
+        isRemoteConnected={isRemoteConnected}
+      />
+
+      <AnimatePresence>
+        {showNumberInput && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[250] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-zinc-900 border border-white/10 p-12 rounded-[40px] max-w-md w-full shadow-2xl relative overflow-hidden"
+            >
+              <div 
+                className="absolute -top-24 -left-24 w-48 h-48 rounded-full blur-[80px] opacity-20"
+                style={{ backgroundColor: themeColor }}
+              />
+              
+              <h3 className="text-2xl font-black text-white mb-2 text-center uppercase tracking-widest">
+                Kanal Numarası Ata
+              </h3>
+              <p className="text-white/40 text-sm text-center mb-8">
+                {channels.find(c => c.id === numberInputChannelId)?.name} için bir numara girin.
+              </p>
+
+              <div className="relative">
+                <input
+                  id="channel-number-input"
+                  type="number"
+                  autoFocus
+                  placeholder="Örn: 1"
+                  defaultValue={numberInputChannelId ? channelNumbers[numberInputChannelId] || '' : ''}
+                  className="w-full bg-white/5 border-2 border-white/10 rounded-2xl px-6 py-4 text-3xl font-black text-white text-center focus:border-white transition-all outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const val = (e.target as HTMLInputElement).value;
+                      if (numberInputChannelId) {
+                        setChannelNumbers(prev => ({ ...prev, [numberInputChannelId]: val }));
+                        setShowNumberInput(false);
+                        setNumberInputChannelId(null);
+                        setChannelMenuId(null);
+                        setNavContext('browse');
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="mt-8 flex gap-4">
+                <button
+                  onClick={() => {
+                    const input = document.getElementById('channel-number-input') as HTMLInputElement;
+                    if (input && numberInputChannelId) {
+                      setChannelNumbers(prev => ({ ...prev, [numberInputChannelId]: input.value }));
+                      setShowNumberInput(false);
+                      setNumberInputChannelId(null);
+                      setChannelMenuId(null);
+                      setNavContext('browse');
+                    }
+                  }}
+                  style={{ backgroundColor: themeColor }}
+                  className="flex-1 py-4 rounded-2xl font-black text-white uppercase tracking-widest hover:scale-105 transition-all shadow-xl"
+                >
+                  Kaydet
+                </button>
+                <button
+                  onClick={() => {
+                    setShowNumberInput(false);
+                    setNumberInputChannelId(null);
+                    setNavContext('channel-menu');
+                  }}
+                  className="flex-1 py-4 rounded-2xl font-black text-white/40 uppercase tracking-widest hover:bg-white/10 transition-all border border-white/10"
+                >
+                  İptal
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -4206,6 +3921,7 @@ export default function App() {
                   <div className="flex flex-wrap justify-center gap-4">
                     {[
                       { id: 'favorite', label: favorites.includes(channelMenuId) ? 'Favorilerden Çıkar' : 'Favorilere Ekle', icon: Heart, active: favorites.includes(channelMenuId) },
+                      { id: 'number', label: 'Kanal No', icon: Hash, active: !!channelNumbers[channelMenuId] },
                       { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
                       { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
                       { id: 'dizi', label: 'Dizi', icon: ListIcon, active: diziChannels.includes(channelMenuId) },
@@ -4225,6 +3941,11 @@ export default function App() {
                           } else if (opt.id === 'multi') {
                             setMultiSessionMenuOpen(true);
                             setChannelMenuFocus(0);
+                            return;
+                          } else if (opt.id === 'number') {
+                            setNumberInputChannelId(channelMenuId);
+                            setShowNumberInput(true);
+                            setNavContext('number-input');
                             return;
                           } else {
                             toggleManualCategory(channelMenuId, opt.id as any);
@@ -4413,7 +4134,9 @@ export default function App() {
                 {[
                   { id: 0, label: 'Görünüm', icon: Sun },
                   { id: 1, label: 'Liste', icon: ListIcon },
-                  { id: 2, label: 'Genel', icon: Settings }
+                  { id: 2, label: 'Genel', icon: Settings },
+                  { id: 3, label: 'Kumanda', icon: Smartphone },
+                  { id: 4, label: 'AI Gözcü', icon: Sparkles }
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -4663,6 +4386,56 @@ export default function App() {
                                   </span>
                                 </div>
                               </div>
+
+                              {/* Merged Color Mixer UI */}
+                              <div className="mt-8 pt-8 border-t border-white/10 space-y-4 px-2">
+                                <div className="flex items-center gap-2 text-zinc-400 text-[10px] font-black uppercase tracking-widest">
+                                  <Pipette className="w-3 h-3" />
+                                  Renk Karıştırıcı
+                                </div>
+                                <div className="bg-white/5 p-6 rounded-2xl space-y-6">
+                                  <div className="flex items-center justify-center gap-8">
+                                    <div className="flex flex-col items-center gap-2">
+                                      <input 
+                                        type="color" 
+                                        value={mixColor1} 
+                                        onChange={(e) => setMixColor1(e.target.value)}
+                                        className={cn(
+                                          "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
+                                          settingsArea === 'content' && settingsFocus === 13 ? "border-white scale-110 settings-focused" : "border-white/10"
+                                        )}
+                                        onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(13); } }}
+                                        onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(13); } }}
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 1</span>
+                                    </div>
+                                    <Plus className="w-4 h-4 text-zinc-500" />
+                                    <div className="flex flex-col items-center gap-2">
+                                      <input 
+                                        type="color" 
+                                        value={mixColor2} 
+                                        onChange={(e) => setMixColor2(e.target.value)}
+                                        className={cn(
+                                          "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
+                                          settingsArea === 'content' && settingsFocus === 14 ? "border-white scale-110 settings-focused" : "border-white/10"
+                                        )}
+                                        onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(14); } }}
+                                        onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(14); } }}
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 2</span>
+                                    </div>
+                                    <Equal className="w-4 h-4 text-zinc-500" />
+                                    <div className="flex flex-col items-center gap-2">
+                                      <div 
+                                        className="w-12 h-12 rounded-lg border-2 border-white/10"
+                                        style={{ backgroundColor: mixedColor }}
+                                      />
+                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Sonuç</span>
+                                    </div>
+                                  </div>
+                                  <p className="text-[10px] text-center text-zinc-500 font-medium italic">İki rengi karıştırarak kendi özel temanızı oluşturun. Sonuç rengi yukarıdaki palete kare olarak eklenir.</p>
+                                </div>
+                              </div>
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -4739,7 +4512,6 @@ export default function App() {
                           )}
                         </AnimatePresence>
                       </section>
-
                       <section className="space-y-4">
                         <button 
                           data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
@@ -4758,7 +4530,7 @@ export default function App() {
                         >
                           <div className="flex items-center gap-2">
                             <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Renk Karıştırıcı
+                            Navigasyon Modu
                           </div>
                           <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-2'] ? "rotate-180" : "rotate-0")} />
                         </button>
@@ -4771,47 +4543,39 @@ export default function App() {
                               transition={{ duration: 0.3, ease: "easeInOut" }}
                               className="overflow-hidden"
                             >
-                              <div className="bg-white/5 p-6 rounded-2xl space-y-6 m-2">
-                                <div className="flex items-center justify-center gap-8">
-                                  <div className="flex flex-col items-center gap-2">
-                                    <input 
-                                      type="color" 
-                                      value={mixColor1} 
-                                      onChange={(e) => setMixColor1(e.target.value)}
-                                      className={cn(
-                                        "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
-                                        settingsArea === 'content' && settingsFocus === 13 ? "border-white scale-110 settings-focused" : "border-white/10"
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-2">
+                                {[
+                                  { id: 'scroll', label: 'Standart Kaydırma', icon: ListIcon, desc: 'Sayfa aşağı doğru kayar' },
+                                  { id: 'fixed-focus', label: 'Sabit Odak (TV)', icon: Monitor, desc: 'Kategoriler odak noktasına gelir' }
+                                ].map((mode, idx) => (
+                                  <button
+                                    key={mode.id}
+                                    onClick={() => setLayoutMode(mode.id as LayoutMode)}
+                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(150 + idx); } }}
+                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(150 + idx); } }}
+                                    className={cn(
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
+                                      uiMode === 'modern' && "rounded-2xl",
+                                      uiMode === 'classic' && "rounded-none",
+                                      uiMode === 'minimalist' && "rounded-none border-0",
+                                      layoutMode === mode.id 
+                                        ? "border-white bg-white/10" 
+                                        : "border-white/5 hover:border-white/20 bg-white/5",
+                                      settingsArea === 'content' && settingsFocus === (150 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
+                                    )}
+                                  >
+                                    <div className="absolute top-2 right-2">
+                                      {layoutMode === mode.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
                                       )}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(2); setSettingsFocus(13); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(2); setSettingsFocus(13); } }}
-                                    />
-                                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 1</span>
-                                  </div>
-                                  <Plus className="w-4 h-4 text-zinc-500" />
-                                  <div className="flex flex-col items-center gap-2">
-                                    <input 
-                                      type="color" 
-                                      value={mixColor2} 
-                                      onChange={(e) => setMixColor2(e.target.value)}
-                                      className={cn(
-                                        "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
-                                        settingsArea === 'content' && settingsFocus === 14 ? "border-white scale-110 settings-focused" : "border-white/10"
-                                      )}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(2); setSettingsFocus(14); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(2); setSettingsFocus(14); } }}
-                                    />
-                                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 2</span>
-                                  </div>
-                                  <Equal className="w-4 h-4 text-zinc-500" />
-                                  <div className="flex flex-col items-center gap-2">
-                                    <div 
-                                      className="w-12 h-12 rounded-lg border-2 border-white/10"
-                                      style={{ backgroundColor: mixedColor }}
-                                    />
-                                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Sonuç</span>
-                                  </div>
-                                </div>
-                                <p className="text-[10px] text-center text-zinc-500 font-medium italic">İki rengi karıştırarak kendi özel temanızı oluşturun. Sonuç rengi yukarıdaki palete kare olarak eklenir.</p>
+                                    </div>
+                                    <mode.icon className="w-6 h-6" style={{ color: layoutMode === mode.id ? themeColor : undefined }} />
+                                    <div>
+                                      <div className="font-bold text-sm">{mode.label}</div>
+                                      <div className="text-[10px] text-zinc-500 font-medium">{mode.desc}</div>
+                                    </div>
+                                  </button>
+                                ))}
                               </div>
                             </motion.div>
                           )}
@@ -5282,7 +5046,7 @@ export default function App() {
                               transition={{ duration: 0.3, ease: "easeInOut" }}
                               className="overflow-hidden"
                             >
-                              <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="p-2">
                                 <button
                                   onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
                                   onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
@@ -5306,43 +5070,6 @@ export default function App() {
                                     <div className={cn(
                                       "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
                                       voiceControlEnabled ? "left-7" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-
-                                <button
-                                  onClick={() => setRemoteControlEnabled(!remoteControlEnabled)}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(100); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(100); } }}
-                                  className={cn(
-                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
-                                    remoteControlEnabled 
-                                      ? "border-white bg-white/10" 
-                                      : "border-white/5 hover:border-white/20 bg-white/5",
-                                    settingsArea === 'content' && settingsFocus === 100 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
-                                  )}
-                                >
-                                  <div className="flex flex-col items-start gap-1 text-left">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-bold text-lg">Uzaktan Kumanda</span>
-                                      {isRemoteConnected && (
-                                        <motion.div 
-                                          animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                                          transition={{ duration: 2, repeat: Infinity }}
-                                          className="w-2 h-2 rounded-full"
-                                          style={{ backgroundColor: themeColor }}
-                                        />
-                                      )}
-                                    </div>
-                                    <span className="text-[10px] text-zinc-500">Mobil cihazınızı kumanda olarak kullanın</span>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full transition-all relative flex-shrink-0",
-                                    remoteControlEnabled ? "bg-green-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      remoteControlEnabled ? "left-7" : "left-1"
                                     )} />
                                   </div>
                                 </button>
@@ -5370,15 +5097,7 @@ export default function App() {
                         >
                           <div className="flex items-center gap-2">
                             <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Uzaktan Kumanda
-                            {isRemoteConnected && (
-                              <motion.div 
-                                animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                                transition={{ duration: 2, repeat: Infinity }}
-                                className="w-2 h-2 rounded-full ml-1"
-                                style={{ backgroundColor: themeColor }}
-                              />
-                            )}
+                            Yükleme Ekranı Stili
                           </div>
                           <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-10'] ? "rotate-180" : "rotate-0")} />
                         </button>
@@ -5391,69 +5110,41 @@ export default function App() {
                               transition={{ duration: 0.3, ease: "easeInOut" }}
                               className="overflow-hidden"
                             >
-                              <div className="p-2 space-y-6">
-
-                                {remoteControlEnabled && (
-                                  <motion.div 
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="space-y-6 text-center flex flex-col items-center pt-4 border-t border-white/5"
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
+                                {[
+                                  { id: 'classic', label: 'Klasik', icon: Tv, desc: 'Geleneksel TV' },
+                                  { id: 'minimal', label: 'Minimal', icon: CircleDashed, desc: 'Sade ve şık' },
+                                  { id: 'pulse', label: 'Nabız', icon: Activity, desc: 'Canlı efekt' },
+                                  { id: 'bars', label: 'Çubuklar', icon: Sparkles, desc: 'Modern animasyon' },
+                                  { id: 'orbit', label: 'Yörünge', icon: RefreshCw, desc: 'Dairesel hareket' },
+                                  { id: 'glitch', label: 'Dijital', icon: Cpu, desc: 'Teknolojik görünüm' }
+                                ].map((style, idx) => (
+                                  <button
+                                    key={style.id}
+                                    onClick={() => setLoadingStyle(style.id as any)}
+                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(110 + idx); } }}
+                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(110 + idx); } }}
+                                    className={cn(
+                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
+                                      uiMode === 'modern' && "rounded-2xl",
+                                      uiMode === 'classic' && "rounded-none",
+                                      uiMode === 'minimalist' && "rounded-none border-0",
+                                      loadingStyle === style.id 
+                                        ? "border-white bg-white/10" 
+                                        : "border-white/5 hover:border-white/20 bg-white/5",
+                                      settingsArea === 'content' && settingsFocus === (110 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
+                                    )}
                                   >
-                                    <div className="p-4 bg-white rounded-[24px] shadow-2xl shadow-white/5 border-4 border-white/5 relative group">
-                                      <QRCodeCanvas 
-                                        value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
-                                        size={140}
-                                        level="H"
-                                        includeMargin={false}
-                                      />
-                                      <div className="absolute -top-3 -right-3 bg-orange-500 text-white px-3 py-1.5 rounded-full font-black text-[8px] shadow-xl animate-bounce">
-                                        TARATIN
-                                      </div>
+                                    <div className="absolute top-2 right-2">
+                                      {loadingStyle === style.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
+                                      )}
                                     </div>
-
-                                    <div className="space-y-4 w-full">
-                                      <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between">
-                                        <div className="text-left">
-                                          <div className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">EŞLEŞME KODU</div>
-                                          <div className="text-xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
-                                        </div>
-                                        <button 
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`);
-                                            showToast('Bağlantı adresi kopyalandı!', 'success');
-                                          }}
-                                          onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(101); } }}
-                                          onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(101); } }}
-                                          className={cn(
-                                            "p-3 rounded-xl transition-all",
-                                            settingsArea === 'content' && settingsFocus === 101 ? "bg-white text-black scale-110" : "bg-white/10 text-white hover:bg-white/20"
-                                          )}
-                                        >
-                                          <LinkIcon className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                      
-                                      <div className="grid grid-cols-2 gap-3">
-                                        <div className={cn(
-                                          "bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors",
-                                          isRemoteConnected ? "border-green-500/50 bg-green-500/5" : ""
-                                        )}>
-                                          <Smartphone className={cn("w-4 h-4", isRemoteConnected ? "text-green-500" : "text-zinc-500")} />
-                                          <span className="text-[8px] font-bold text-zinc-400 uppercase">MOBİL</span>
-                                          <div className={cn("w-1 h-1 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-zinc-700")} />
-                                        </div>
-                                        <div className={cn(
-                                          "bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col items-center gap-1.5 transition-colors",
-                                          isTvSocketConnected ? "border-blue-500/50 bg-blue-500/5" : ""
-                                        )}>
-                                          <Tv className={cn("w-4 h-4", isTvSocketConnected ? "text-blue-500" : "text-zinc-500")} />
-                                          <span className="text-[8px] font-bold text-zinc-400 uppercase">TV</span>
-                                          <div className={cn("w-1 h-1 rounded-full", isTvSocketConnected ? "bg-blue-500 animate-pulse" : "bg-zinc-700")} />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                )}
+                                    <style.icon className="w-6 h-6" style={{ color: loadingStyle === style.id ? themeColor : undefined }} />
+                                    <div className="font-bold text-sm">{style.label}</div>
+                                    <div className="text-[10px] opacity-50">{style.desc}</div>
+                                  </button>
+                                ))}
                               </div>
                             </motion.div>
                           )}
@@ -5560,53 +5251,32 @@ export default function App() {
                               <div className="bg-white/5 p-6 rounded-2xl space-y-4 m-2">
                                 <label className="text-sm font-bold text-zinc-400">EPG Linki Ekle</label>
                                 <div className="flex gap-2">
-                                  <input
-                                    type="url"
-                                    placeholder="EPG URL'si girin..."
-                                    className={cn(
-                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                      settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                    )}
-                                    value={epgUrl}
-                                    onChange={(e) => setEpgUrl(e.target.value)}
+                                  <button
+                                    id="epg-input-btn"
+                                    onClick={() => {
+                                      const input = document.getElementById('epg-input') as HTMLInputElement;
+                                      if (input) input.focus();
+                                    }}
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); } }}
+                                    className={cn(
+                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm text-left relative",
+                                      settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
+                                    )}
+                                  >
+                                    <span className="truncate block pr-8">{epgUrl || 'EPG URL\'si girin...'}</span>
+                                    <Link2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                                  </button>
+                                  <input
+                                    id="epg-input"
+                                    type="url"
+                                    value={epgUrl}
+                                    onChange={(e) => setEpgUrl(e.target.value)}
+                                    className="sr-only"
                                   />
                                   <button
                                     id="epg-load-btn"
-                                    onClick={async () => {
-                                      if (!epgUrl) return;
-                                      setIsLoading(true);
-                                      try {
-                                        const urlsToTry = resolveUrl(epgUrl);
-                                        let epg = null;
-                                        let successUrl = '';
-                                        for (const url of urlsToTry) {
-                                          try {
-                                            epg = await fetchAndParseEPG(url);
-                                            if (epg) {
-                                              successUrl = url;
-                                              break;
-                                            }
-                                          } catch (e) {
-                                            console.error(`EPG load failed for ${url}:`, e);
-                                          }
-                                        }
-                                        
-                                        if (epg) {
-                                          setEpgData(epg);
-                                          localStorage.setItem('epg_url', successUrl);
-                                          showToast('EPG başarıyla yüklendi!', 'success');
-                                          setTimeout(() => {}, 3000);
-                                        } else {
-                                          throw new Error('EPG yüklenemedi.');
-                                        }
-                                      } catch (err) {
-                                        showToast('EPG yüklenirken hata oluştu.', 'error');
-                                      } finally {
-                                        setIsLoading(false);
-                                      }
-                                    }}
+                                    onClick={() => handleLoadEPG()}
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(2); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(2); } }}
                                     style={{ backgroundColor: themeColor }}
@@ -5675,17 +5345,28 @@ export default function App() {
                             >
                               <div className="bg-white/5 p-6 rounded-2xl space-y-4 m-2">
                                 <div className="flex gap-2">
-                                  <input
-                                    type="url"
-                                    placeholder="URL veya Cutt.ly kodu girin..."
-                                    className={cn(
-                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                      settingsArea === 'content' && settingsFocus === 4 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                    )}
-                                    value={extraUrl}
-                                    onChange={(e) => setExtraUrl(e.target.value)}
+                                  <button
+                                    id="extra-url-input-btn"
+                                    onClick={() => {
+                                      const input = document.getElementById('extra-url-input') as HTMLInputElement;
+                                      if (input) input.focus();
+                                    }}
                                     onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4); } }}
                                     onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4); } }}
+                                    className={cn(
+                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm text-left relative",
+                                      settingsArea === 'content' && settingsFocus === 4 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
+                                    )}
+                                  >
+                                    <span className="truncate block pr-8">{extraUrl || 'URL veya Cutt.ly kodu girin...'}</span>
+                                    <Link2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                                  </button>
+                                  <input
+                                    id="extra-url-input"
+                                    type="url"
+                                    value={extraUrl}
+                                    onChange={(e) => setExtraUrl(e.target.value)}
+                                    className="sr-only"
                                   />
                                   <button
                                     onClick={() => {
@@ -6104,24 +5785,36 @@ export default function App() {
                               className="overflow-hidden"
                             >
                               <div className="relative p-2">
-                                <input
-                                  id="proxy-input"
-                                  type="text"
-                                  value={customProxyUrl}
-                                  onChange={(e) => {
-                                    setCustomProxyUrl(e.target.value);
-                                    localStorage.setItem('custom_proxy_url', e.target.value);
-                                  }}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
-                                  className={cn(
-                                    "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold",
-                                    settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                  )}
-                                  placeholder="Örn: https://proxy.com/?url="
-                                />
-                                <Link2 className="absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
-                                <p className="text-xs text-zinc-500 px-2 mt-2 italic">Boş bırakılırsa sistemin kendi proxy'si kullanılır.</p>
+                                  <button
+                                    id="proxy-input-btn"
+                                    onClick={() => {
+                                      const input = document.getElementById('proxy-input') as HTMLInputElement;
+                                      if (input) input.focus();
+                                    }}
+                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
+                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
+                                    className={cn(
+                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold text-left relative",
+                                      settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
+                                    )}
+                                  >
+                                    <div className="flex flex-col">
+                                      <span className="text-[10px] text-zinc-500 uppercase font-bold">Proxy URL</span>
+                                      <span className="truncate">{customProxyUrl || 'Varsayılan Proxy'}</span>
+                                    </div>
+                                    <Link2 className="absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
+                                  </button>
+                                  <input
+                                    id="proxy-input"
+                                    type="text"
+                                    value={customProxyUrl}
+                                    onChange={(e) => {
+                                      setCustomProxyUrl(e.target.value);
+                                      localStorage.setItem('custom_proxy_url', e.target.value);
+                                    }}
+                                    className="sr-only"
+                                  />
+                                  <p className="text-xs text-zinc-500 px-2 mt-2 italic">Boş bırakılırsa sistemin kendi proxy'si kullanılır.</p>
                               </div>
                             </motion.div>
                           )}
@@ -6523,36 +6216,56 @@ export default function App() {
                               className="overflow-hidden"
                             >
                               <div className="space-y-4 p-2">
-                                <div className="space-y-2">
+                                <div className="space-y-2 p-2">
                                   <label className="text-[10px] text-zinc-500 uppercase font-bold px-2">TMDb API Key</label>
+                                  <button
+                                    id="tmdb-api-input-btn"
+                                    onClick={() => {
+                                      const input = document.getElementById('tmdb-api-input') as HTMLInputElement;
+                                      if (input) input.focus();
+                                    }}
+                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
+                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
+                                    className={cn(
+                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono text-left relative",
+                                      settingsArea === 'content' && settingsFocus === 16 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
+                                    )}
+                                  >
+                                    <span className="truncate block pr-8">{tmdbApiKey || 'TMDb API Key girin...'}</span>
+                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                                  </button>
                                   <input
                                     id="tmdb-api-input"
                                     type="text"
                                     value={tmdbApiKey}
                                     onChange={(e) => setTmdbApiKey(e.target.value)}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
-                                    className={cn(
-                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono",
-                                      settingsArea === 'content' && settingsFocus === 16 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                    )}
-                                    placeholder="TMDb API Key girin..."
+                                    className="sr-only"
                                   />
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-2 p-2">
                                   <label className="text-[10px] text-zinc-500 uppercase font-bold px-2">Gemini API Key</label>
+                                  <button
+                                    id="gemini-api-input-btn"
+                                    onClick={() => {
+                                      const input = document.getElementById('gemini-api-input') as HTMLInputElement;
+                                      if (input) input.focus();
+                                    }}
+                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
+                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
+                                    className={cn(
+                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono text-left relative",
+                                      settingsArea === 'content' && settingsFocus === 17 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
+                                    )}
+                                  >
+                                    <span className="truncate block pr-8">{geminiApiKey || 'Gemini API Key girin...'}</span>
+                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+                                  </button>
                                   <input
                                     id="gemini-api-input"
                                     type="text"
                                     value={geminiApiKey}
                                     onChange={(e) => setGeminiApiKey(e.target.value)}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
-                                    className={cn(
-                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono",
-                                      settingsArea === 'content' && settingsFocus === 17 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                    )}
-                                    placeholder="Gemini API Key girin..."
+                                    className="sr-only"
                                   />
                                 </div>
                                 <p className="text-[10px] text-zinc-500 px-2 mt-2 italic">Film ve dizi afişleri, özetleri ve puanları için gereklidir.</p>
@@ -6561,6 +6274,301 @@ export default function App() {
                           )}
                         </AnimatePresence>
                       </section>
+
+                      <section className="space-y-4">
+                        <button 
+                          data-section-active={settingsArea === 'sections' && settingsSection === 7 ? "true" : "false"}
+                          className={cn(
+                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3 rounded-xl",
+                            settingsArea === 'sections' && settingsSection === 7 ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : "hover:bg-white/5"
+                          )}
+                          onClick={() => toggleSection(2, 7)}
+                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(7); }}
+                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(7); }}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
+                            Sinema Deneyimi
+                          </div>
+                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-7'] ? "rotate-180" : "rotate-0")} />
+                        </button>
+                        <AnimatePresence>
+                          {expandedSections['2-7'] && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.3, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-2 space-y-2">
+                                <button 
+                                  onClick={() => setCinemaModeEnabled(prev => !prev)}
+                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(30); }}
+                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(30); }}
+                                  className={cn(
+                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                                    settingsArea === 'content' && settingsFocus === 30 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className={cn(
+                                      "p-3 rounded-xl transition-transform",
+                                      settingsArea === 'content' && settingsFocus === 30 ? "bg-black/10" : "bg-white/10"
+                                    )}>
+                                      <Tv className="w-6 h-6" />
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="text-lg">Akıllı Sinema Modu</div>
+                                      <div className="text-xs opacity-50 font-medium">VOD içeriklerde sinematik arayüz</div>
+                                    </div>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full relative transition-colors",
+                                    cinemaModeEnabled ? "bg-emerald-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      cinemaModeEnabled ? "right-1" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
+
+                                <button 
+                                  onClick={() => setTmdbEnabled(prev => !prev)}
+                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(31); }}
+                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(31); }}
+                                  className={cn(
+                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
+                                    settingsArea === 'content' && settingsFocus === 31 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className={cn(
+                                      "p-3 rounded-xl transition-transform",
+                                      settingsArea === 'content' && settingsFocus === 31 ? "bg-black/10" : "bg-white/10"
+                                    )}>
+                                      <Database className="w-6 h-6" />
+                                    </div>
+                                    <div className="text-left">
+                                      <div className="text-lg">TMDB Entegrasyonu</div>
+                                      <div className="text-xs opacity-50 font-medium">Otomatik film/dizi bilgileri</div>
+                                    </div>
+                                  </div>
+                                  <div className={cn(
+                                    "w-12 h-6 rounded-full relative transition-colors",
+                                    tmdbEnabled ? "bg-emerald-500" : "bg-zinc-700"
+                                  )}>
+                                    <div className={cn(
+                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                      tmdbEnabled ? "right-1" : "left-1"
+                                    )} />
+                                  </div>
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 3 && (
+                    <motion.div 
+                      key="tab-3"
+                      initial={{ opacity: 0, y: 10 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-4"
+                    >
+                      {/* Remote Control Section */}
+                      <section className="space-y-4">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                            <Smartphone className="w-5 h-5 text-white" />
+                          </div>
+                          <div>
+                            <h2 className="text-xl font-black text-white">Uzaktan Kumanda</h2>
+                            <p className="text-zinc-500 text-[10px]">Telefonunuzu kumanda olarak kullanın</p>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4">
+                          {/* Remote Control Toggle */}
+                          <button
+                            onClick={() => setRemoteControlEnabled(!remoteControlEnabled)}
+                            onPointerDown={() => { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(100); }}
+                            onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(100); }}
+                            className={cn(
+                              "w-full p-4 rounded-xl border-2 transition-all flex items-center justify-between gap-4",
+                              remoteControlEnabled ? "border-white bg-white/10" : "border-white/5 bg-white/5",
+                              settingsArea === 'content' && settingsFocus === 100 && "ring-4 ring-white scale-[1.01] z-10 settings-focused"
+                            )}
+                          >
+                            <div className="flex flex-col items-start gap-0.5">
+                              <span className="font-bold text-base text-white">Kumanda Modu</span>
+                              <span className="text-[10px] text-zinc-500">Dışarıdan kontrolü aktif eder</span>
+                            </div>
+                            <div className={cn(
+                              "w-12 h-6 rounded-full transition-all relative",
+                              remoteControlEnabled ? "bg-green-500" : "bg-zinc-700"
+                            )}>
+                              <div className={cn(
+                                "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                                remoteControlEnabled ? "left-7" : "left-1"
+                              )} />
+                            </div>
+                          </button>
+
+                          {/* Compact Pairing Info */}
+                          <div className="bg-zinc-900/50 border border-white/10 p-6 rounded-[32px] text-center space-y-6 relative overflow-hidden">
+                            <div 
+                              className="absolute -top-24 -left-24 w-64 h-64 rounded-full blur-[100px] opacity-10"
+                              style={{ backgroundColor: themeColor }}
+                            />
+                            
+                            <div className="relative z-10 space-y-6">
+                              <div className="space-y-1">
+                                <h2 className="text-xl font-black text-white uppercase tracking-tighter italic">BAĞLANTI KUR</h2>
+                                <p className="text-zinc-500 font-medium text-[10px]">QR kodu tarayın veya kodu girin.</p>
+                              </div>
+
+                              <div className="flex flex-col md:flex-row items-center justify-center gap-8">
+                                <div className="space-y-2">
+                                  <div className="p-4 bg-white rounded-[24px] shadow-2xl transform hover:scale-105 transition-transform duration-500">
+                                    <QRCodeCanvas 
+                                      value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
+                                      size={130}
+                                      level="H"
+                                      includeMargin={false}
+                                    />
+                                  </div>
+                                  <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">TARATIN</div>
+                                </div>
+
+                                <div className="w-full max-w-[220px] space-y-4">
+                                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
+                                    <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">EŞLEŞME KODU</div>
+                                    <div className="text-2xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
+                                  </div>
+                                  
+                                  <div className={cn(
+                                    "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-3",
+                                    isRemoteConnected ? "bg-green-500/20 text-green-500 border border-green-500/20" : "bg-orange-500/20 text-orange-500 border border-orange-500/20"
+                                  )}>
+                                    <div className={cn("w-1.5 h-1.5 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-orange-500")} />
+                                    {isRemoteConnected ? 'KUMANDA BAĞLANDI' : 'BAĞLANTI BEKLENİYOR...'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="pt-4 border-t border-white/5">
+                                <p className="text-[9px] text-zinc-600 font-medium max-w-xs mx-auto">
+                                  Not: Aynı ağda olmalıdır. QR çalışmazsa manuel URL girin.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                    </motion.div>
+                  )}
+
+                  {activeSettingsTab === 4 && (
+                    <motion.div 
+                      key="tab-4"
+                      initial={{ opacity: 0, y: 10 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: -10 }}
+                      className="space-y-8"
+                    >
+                      <div className="flex items-center gap-4 mb-6">
+                        <div className="p-4 bg-blue-500/20 rounded-3xl">
+                          <Sparkles className="w-8 h-8 text-blue-400" />
+                        </div>
+                        <div>
+                          <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">AI Gözcü</h2>
+                          <p className="text-zinc-500 text-xs font-medium">Yapay zeka senin için yayınları takip eder</p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-6">
+                        <div className="bg-white/5 border border-white/10 rounded-[32px] p-8 space-y-6">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-lg font-black text-white uppercase tracking-tight">Takip Listesi</h3>
+                            <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-[10px] font-black rounded-full uppercase">
+                              {watcherRules.length} AKTİF GÖREV
+                            </span>
+                          </div>
+
+                          {watcherRules.length === 0 ? (
+                            <div className="py-12 text-center space-y-4">
+                              <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto">
+                                <Bell className="w-8 h-8 text-zinc-700" />
+                              </div>
+                              <p className="text-zinc-500 text-sm font-medium max-w-[200px] mx-auto">
+                                Henüz bir takip görevi yok. AI asistanına "Maç başlayınca haber ver" diyerek başlayabilirsin.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {watcherRules.map((rule) => (
+                                <div 
+                                  key={rule.id}
+                                  className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-blue-500/30 transition-all"
+                                >
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
+                                      <Search className="w-5 h-5 text-blue-400" />
+                                    </div>
+                                    <div>
+                                      <p className="text-white font-bold text-sm">{rule.keyword}</p>
+                                      <p className="text-zinc-500 text-[10px] uppercase font-black tracking-widest">
+                                        {rule.type === 'title' ? 'Başlık Takibi' : rule.type === 'category' ? 'Kategori Takibi' : 'Genel Takip'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        setWatcherRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r));
+                                      }}
+                                      className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all",
+                                        rule.isActive ? "bg-green-500/20 text-green-500" : "bg-zinc-800 text-zinc-500"
+                                      )}
+                                    >
+                                      {rule.isActive ? 'Aktif' : 'Pasif'}
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setWatcherRules(prev => prev.filter(r => r.id !== rule.id));
+                                      }}
+                                      className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="bg-gradient-to-br from-blue-600/20 to-purple-600/20 border border-blue-500/20 rounded-[32px] p-8 flex items-center gap-6">
+                          <div className="flex-1 space-y-2">
+                            <h4 className="text-white font-black uppercase italic tracking-tight">Nasıl Kullanılır?</h4>
+                            <p className="text-zinc-400 text-xs leading-relaxed">
+                              AI Gözcü'ye yeni görevler vermek için arama çubuğuna doğal dilde isteklerini yazabilirsin. 
+                              Örneğin: <span className="text-blue-400 font-bold">"Bana aksiyon filmleri başlayınca haber ver"</span>
+                            </p>
+                          </div>
+                          <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
+                            <Mic className="w-10 h-10 text-white/20" />
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -6620,11 +6628,31 @@ export default function App() {
             channel={channelForDetail}
             themeColor={themeColor}
             uiMode={uiMode}
+            cinemaModeEnabled={cinemaModeEnabled}
+            tmdbEnabled={tmdbEnabled}
             activeFocus={detailFocus}
             onFocusChange={setDetailFocus}
             onClose={() => {
               setChannelForDetail(null);
               setNavContext('browse');
+            }}
+            onNext={() => {
+              if (!channelForDetail || allFlattenedChannels.length === 0) return;
+              const currentIndex = allFlattenedChannels.findIndex(ch => ch.id === channelForDetail.id);
+              if (currentIndex !== -1) {
+                const nextIndex = (currentIndex + 1) % allFlattenedChannels.length;
+                setChannelForDetail(allFlattenedChannels[nextIndex]);
+                setDetailFocus(0);
+              }
+            }}
+            onPrev={() => {
+              if (!channelForDetail || allFlattenedChannels.length === 0) return;
+              const currentIndex = allFlattenedChannels.findIndex(ch => ch.id === channelForDetail.id);
+              if (currentIndex !== -1) {
+                const prevIndex = (currentIndex - 1 + allFlattenedChannels.length) % allFlattenedChannels.length;
+                setChannelForDetail(allFlattenedChannels[prevIndex]);
+                setDetailFocus(0);
+              }
             }}
             onPlay={(channel) => {
               // Force play by bypassing the VOD check in handleChannelSelect
@@ -6643,6 +6671,8 @@ export default function App() {
             onToggleMultiChannel={(id) => toggleManualCategory(id, 'multi')}
             playbackProgress={playbackProgress}
             epgData={epgData}
+            onActorFilter={handleActorFilter}
+            onNavContextChange={setNavContext}
           />
         )}
       </AnimatePresence>
@@ -6701,27 +6731,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Toast Container */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] flex flex-col gap-2 pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((toast) => (
-            <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: 20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-              className={cn(
-                "px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 min-w-[280px] backdrop-blur-md border",
-                toast.type === 'error' 
-                  ? "bg-red-600/90 border-red-500 text-white" 
-                  : "bg-zinc-900/90 border-zinc-800 text-white"
-              )}
-            >
-              {toast.type === 'error' ? <X className="w-5 h-5" /> : <Check className="w-5 h-5" />}
-              <span className="text-sm font-bold tracking-wide">{toast.message}</span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      <ToastContainer toasts={toasts} />
 
       {/* Exit Confirmation Dialog */}
       <AnimatePresence>
@@ -6816,6 +6826,55 @@ export default function App() {
         />
       )}
 
+      {/* AI Gözcü Notifications */}
+      <div className="fixed top-8 right-8 z-[1000] flex flex-col gap-4 pointer-events-none">
+        <AnimatePresence>
+          {watcherNotifications.map((notif) => (
+            <motion.div
+              key={notif.id}
+              initial={{ opacity: 0, x: 100, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 100, scale: 0.9 }}
+              className="w-80 bg-black/80 backdrop-blur-2xl border border-blue-500/30 rounded-3xl p-5 shadow-2xl pointer-events-auto cursor-pointer group"
+              onClick={() => {
+                const ch = channels.find(c => c.id === notif.channelId);
+                if (ch) handleChannelSelect(ch);
+                setWatcherNotifications(prev => prev.filter(n => n.id !== notif.id));
+              }}
+            >
+              <div className="flex items-start gap-4">
+                <div className="p-3 bg-blue-500/20 rounded-2xl">
+                  <Sparkles className="w-6 h-6 text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-blue-400 text-[10px] font-black uppercase tracking-widest">AI GÖZCÜ BULDİ!</span>
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWatcherNotifications(prev => prev.filter(n => n.id !== notif.id));
+                      }}
+                      className="text-zinc-500 hover:text-white transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <h4 className="text-white font-bold text-sm truncate mb-1">{notif.programTitle}</h4>
+                  <p className="text-zinc-400 text-xs font-medium truncate">{notif.channelName}</p>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between">
+                <span className="text-zinc-500 text-[10px] font-bold uppercase">Şu an yayında</span>
+                <div className="flex items-center gap-2 text-blue-400 group-hover:translate-x-1 transition-transform">
+                  <span className="text-[10px] font-black uppercase">İzle</span>
+                  <ChevronRight className="w-3 h-3" />
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {/* Video Player */}
       {currentChannel && !isMiniPlayer && (
         <div className="fixed inset-0 z-[150] bg-black">
@@ -6844,6 +6903,16 @@ export default function App() {
           onMuteToggle={setIsMuted}
           playerEngine={playerEngine}
           ambilightMode={ambilightMode}
+          isPlaying={isGlobalPlaying}
+          onPlayPauseToggle={setIsGlobalPlaying}
+          loadingStyle={loadingStyle}
+          geminiApiKey={geminiApiKey}
+          isLiveTranslationEnabled={isLiveTranslationEnabled}
+          onToggleLiveTranslation={() => setIsLiveTranslationEnabled(prev => !prev)}
+          showSummary={showSummary}
+          isSummaryLoading={isSummaryLoading}
+          currentSummary={currentSummary}
+          onToggleSummary={handleToggleSummary}
         />
       </div>
       )}
@@ -6869,6 +6938,251 @@ export default function App() {
             setActiveRow(0);
             setActiveCol(0);
           }}
+        />
+      )}
+
+      {/* Quick Switch (Zapping) Menu */}
+      <AnimatePresence>
+        {showQuickSwitch && recentlyWatched.length > 0 && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-[450]"
+              onClick={() => {
+                setShowQuickSwitch(false);
+                setNavContext('player');
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, x: -100 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -100 }}
+              className="fixed left-0 top-0 bottom-0 w-80 bg-black/80 backdrop-blur-3xl z-[500] border-r border-white/10 p-8 flex flex-col shadow-[20px_0_50px_rgba(0,0,0,0.5)]"
+            >
+            <div className="flex items-center gap-3 mb-10">
+              <div className="p-3 bg-blue-500/20 rounded-2xl">
+                <RefreshCw className="w-6 h-6 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-white tracking-tighter uppercase">Hızlı Geçiş</h3>
+                <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Son İzlenenler</p>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-4">
+              {recentlyWatched
+                .filter(ch => ch.id !== currentChannel?.id)
+                .slice(0, 5)
+                .map((channel, i) => (
+                <motion.button
+                  key={`${channel.id}-${i}`}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  onClick={() => {
+                    handleChannelSelect(channel);
+                    setShowQuickSwitch(false);
+                    setNavContext('player');
+                  }}
+                  onMouseEnter={() => setQuickSwitchFocus(i)}
+                  className={cn(
+                    "w-full flex items-center gap-4 p-4 rounded-2xl transition-all border group relative overflow-hidden",
+                    quickSwitchFocus === i 
+                      ? "bg-white text-black border-white scale-105 shadow-2xl z-10" 
+                      : "bg-white/5 text-white border-white/5 hover:bg-white/10"
+                  )}
+                >
+                  {quickSwitchFocus === i && (
+                    <motion.div 
+                      layoutId="quick-switch-glow"
+                      className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-500/20"
+                    />
+                  )}
+                  
+                  <div className={cn(
+                    "w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 border transition-all",
+                    quickSwitchFocus === i ? "border-black/10" : "border-white/10"
+                  )}>
+                    <img 
+                      src={channel.logo || `https://picsum.photos/seed/${channel.name}/200/200`} 
+                      className="w-full h-full object-contain p-1"
+                      alt=""
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="font-black text-sm truncate uppercase tracking-tight">
+                      {channel.name}
+                    </p>
+                    <p className={cn(
+                      "text-[10px] font-bold uppercase tracking-widest truncate",
+                      quickSwitchFocus === i ? "text-black/40" : "text-white/40"
+                    )}>
+                      {channel.group}
+                    </p>
+                  </div>
+
+                  {quickSwitchFocus === i && (
+                    <ChevronRight className="w-5 h-5 animate-pulse" />
+                  )}
+                </motion.button>
+              ))}
+            </div>
+
+            <div className="mt-auto pt-8 border-t border-white/5 flex flex-col gap-4">
+              <div className="flex items-center gap-3 text-white/40">
+                <div className="p-2 bg-white/5 rounded-lg">
+                  <Monitor className="w-4 h-4" />
+                </div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em]">Kapatmak için Geri</p>
+              </div>
+            </div>
+          </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Edge Trigger for Quick Switch */}
+      {navContext === 'player' && !showQuickSwitch && (
+        <div 
+          className="fixed left-0 top-0 bottom-0 w-4 z-[400] group cursor-pointer"
+          onMouseEnter={() => {
+            if (recentlyWatched.length > 0) {
+              setShowQuickSwitch(true);
+              setQuickSwitchFocus(0);
+              setNavContext('quick-switch');
+            }
+          }}
+        >
+          <div className="absolute inset-y-0 left-0 w-1 bg-white/0 group-hover:bg-white/20 transition-all" />
+        </div>
+      )}
+
+      {/* Global Volume Indicator */}
+      {/* Device Info Overlay */}
+      <AnimatePresence>
+        {showGlobalVolumeIndicator && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: -20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: -20 }}
+            className="fixed top-10 left-1/2 -translate-x-1/2 z-[9999] bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-4 rounded-3xl flex items-center gap-4 shadow-2xl"
+          >
+            <div className="p-2 bg-white/10 rounded-full">
+              {isMuted || globalVolume === 0 ? (
+                <VolumeX className="w-6 h-6 text-red-500" />
+              ) : (
+                <Volume2 className="w-6 h-6 text-white" />
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex justify-between items-center w-40">
+                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">SES SEVİYESİ</span>
+                <span className="text-xs font-black text-white tabular-nums">{Math.round(globalVolume * 100)}%</span>
+              </div>
+              <div className="w-40 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: 0 }}
+                  animate={{ width: `${globalVolume * 100}%` }}
+                  className="h-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.3)]"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDeviceInfo && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-4"
+            onClick={() => setShowDeviceInfo(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-zinc-950/95 backdrop-blur-3xl border border-white/20 p-8 rounded-[40px] shadow-[0_20px_50px_rgba(0,0,0,0.8)] max-w-lg w-full relative overflow-hidden mx-auto my-auto"
+              onClick={e => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setShowDeviceInfo(false)}
+                className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full text-white/40 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-8 border-b border-white/10 pb-4">
+                <Monitor className="w-6 h-6 text-blue-400" />
+                <h3 className="text-xl font-black uppercase tracking-[0.2em] text-white">Sistem Detayları</h3>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-x-8 gap-y-6 mb-8">
+                {[
+                  { label: 'Cihaz', value: getDeviceInfo().device },
+                  { label: 'Tarayıcı', value: getDeviceInfo().browser },
+                  { label: 'Çözünürlük', value: getDeviceInfo().screenRes },
+                  { label: 'Pencere', value: getDeviceInfo().windowSize },
+                  { label: 'Bellek (RAM)', value: getDeviceInfo().memory },
+                  { label: 'İşlemci', value: getDeviceInfo().cores + ' Çekirdek' },
+                  { label: 'Bağlantı', value: getDeviceInfo().connection.toUpperCase() },
+                  { label: 'Dil', value: getDeviceInfo().language.toUpperCase() }
+                ].map((item, i) => (
+                  <div key={i} className="flex flex-col gap-1">
+                    <span className="text-zinc-500 uppercase font-bold text-[10px] tracking-widest">{item.label}</span>
+                    <span className="text-white font-black text-sm">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 pt-6 border-t border-white/10">
+                <span className="text-zinc-500 uppercase font-bold text-[10px] tracking-widest block mb-3">User Agent String</span>
+                <div className="text-[10px] text-zinc-400 break-all leading-relaxed bg-white/5 p-4 rounded-2xl font-mono border border-white/5">
+                  {getDeviceInfo().raw}
+                </div>
+              </div>
+
+              <div className="mt-8 flex flex-col items-center gap-2">
+                <p className="text-zinc-500 text-[10px] opacity-50 uppercase tracking-widest">Kapatmak için Enter veya Geri tuşuna basın</p>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <SportsDashboard 
+        isOpen={showSportsDashboard}
+        onClose={() => setShowSportsDashboard(false)}
+        matches={liveMatches}
+        themeColor={themeColor}
+        onPlayChannel={(channelId) => {
+          const channel = channels.find(c => c.id === channelId);
+          if (channel) {
+            handleChannelSelect(channel);
+            setShowSportsDashboard(false);
+            setNavContext('player');
+          }
+        }}
+      />
+
+      <LiveSubtitleOverlay 
+        subtitle={currentSubtitle}
+        isEnabled={isLiveTranslationEnabled}
+        isProcessing={isTranslationProcessing}
+      />
+
+      {showSummary && (
+        <ProgramSummary 
+          summary={currentSummary}
+          isLoading={isSummaryLoading}
+          onClose={() => setShowSummary(false)}
+          themeColor={themeColor}
         />
       )}
     </div>

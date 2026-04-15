@@ -32,12 +32,14 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   onToggleCollapse,
   customProxyUrl,
   uiMode,
+  layoutMode = 'scroll',
   playbackProgress = {},
   epgData,
   now,
   isGrid = false,
   top10Style,
-  focusEffect
+  focusEffect,
+  channelNumbers = {}
 }) => {
   const listRef = useRef<any>(null);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -49,13 +51,13 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   const [pressingId, setPressingId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isActiveRow && rowRef.current) {
+    if (isActiveRow && rowRef.current && layoutMode === 'scroll') {
       rowRef.current.scrollIntoView({
         behavior: 'smooth',
         block: 'nearest',
       });
     }
-  }, [isActiveRow]);
+  }, [isActiveRow, layoutMode]);
 
   useEffect(() => {
     if (isActiveRow && !isCollapsed && listRef.current && activeCol >= 0) {
@@ -93,9 +95,11 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
 
   const itemWidth = getItemWidth();
   const gap = 16;
-  const top10Offset = title === 'Top 10' ? 90 : 0;
+  const top10Offset = title === 'Top 10' ? (layoutMode === 'fixed-focus' ? 50 : 90) : 0;
   const itemSize = itemWidth + gap + top10Offset;
-  const listHeight = orientation === 'landscape' ? (itemWidth * 9/16 + 80) : (itemWidth * 3/2 + 80);
+  const listHeight = orientation === 'landscape' 
+    ? (itemWidth * 9/16 + (layoutMode === 'fixed-focus' ? 40 : 120)) 
+    : (itemWidth * 3/2 + (layoutMode === 'fixed-focus' ? 40 : 120));
 
   if (isGrid) {
     return (
@@ -160,6 +164,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
               channels={channels}
               top10Style={top10Style}
               focusEffect={focusEffect}
+              channelNumbers={channelNumbers}
             />
           ))}
         </div>
@@ -170,13 +175,16 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   return (
     <div 
       ref={rowRef} 
-      className={cn("space-y-2 group/row relative", title === 'Top 10' ? "mb-8" : "mb-2")}
+      className={cn(
+        "space-y-1 group/row relative transition-all duration-500", 
+        layoutMode === 'fixed-focus' ? "mb-1" : (title === 'Top 10' ? "mb-8" : "mb-2")
+      )}
     >
       <div className="flex items-center px-4 md:px-12">
         <div 
           onClick={onToggleCollapse}
-          onPointerDown={() => onFocus(0, -1)} // Simplified for revert
-          onMouseEnter={() => onFocus(0, -1)} // Simplified for revert
+          onPointerDown={() => onFocus(rowIndex, -1)}
+          onMouseEnter={() => onFocus(rowIndex, -1)}
           style={{ 
             backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
             color: 'white',
@@ -211,15 +219,18 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
         {!isCollapsed && (
           <motion.div 
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
+            animate={{ height: listHeight + 60, opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="relative"
           >
-            <div ref={listContainerRef} className="px-4 md:px-12 pt-0 pb-2 -mt-6">
+            <div ref={listContainerRef} className={cn(
+              "px-4 md:px-12 pt-1",
+              layoutMode === 'fixed-focus' ? "pb-2" : "pb-12"
+            )}>
               <List
                 ref={listRef}
-                height={listHeight + 80}
+                height={listHeight + 40}
                 itemCount={channels.length}
                 itemSize={itemSize}
                 layout="horizontal"
@@ -259,10 +270,12 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
                     handlePressStart={handlePressStart}
                     handlePressEnd={handlePressEnd}
                     customProxyUrl={customProxyUrl}
+                    layoutMode={layoutMode}
                     style={{ ...style, top: (style.top as number) + 20 }}
                     channels={channels}
                     top10Style={top10Style}
                     focusEffect={focusEffect}
+                    channelNumbers={channelNumbers}
                   />
                 )}
               </List>

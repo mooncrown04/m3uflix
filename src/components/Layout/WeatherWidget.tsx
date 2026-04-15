@@ -60,7 +60,7 @@ export const WeatherWidget: React.FC<WeatherWidgetProps> = ({ city, themeColor }
   if (!weather) return null;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md mr-4">
+    <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
       <span className="text-xl">{getEmoji(weather.code, weather.isDay)}</span>
       <div className="flex flex-col leading-none">
         <span style={{ color: themeColor }} className="text-sm font-black italic">{weather.temp}°C</span>

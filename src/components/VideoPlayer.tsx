@@ -3,13 +3,17 @@ import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
 import shaka from 'shaka-player';
 import mpegts from 'mpegts.js';
-import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star, Cpu } from 'lucide-react';
+import { X, Settings, Volume2, VolumeX, Languages, Check, Clock, Play, List, ChevronLeft, ChevronRight, Tv, Pause, Link2, Subtitles, Settings2, FastForward, Rewind, Monitor, Star, Cpu, Zap, Loader2, RefreshCw, Activity, CircleDashed, Sparkles, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { cn } from '../utils/cn';
 import { M3UChannel } from '../utils/m3uParser';
 import { EPGData, EPGProgram } from '../utils/epgParser';
 import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
+import { findRepairAlternatives } from '../utils/channelRepair';
+import { suggestRepairExplanation } from '../services/aiSearchService';
+import { ProgramSummary as ProgramSummaryType } from '../types';
+import { ProgramSummary } from './ProgramSummary';
 
 interface VideoPlayerProps {
   url: string;
@@ -31,6 +35,16 @@ interface VideoPlayerProps {
   onMuteToggle?: (isMuted: boolean) => void;
   playerEngine?: 'hls' | 'shaka';
   ambilightMode?: 'none' | 'soft' | 'vibrant' | 'cinema';
+  isPlaying?: boolean;
+  onPlayPauseToggle?: (isPlaying: boolean) => void;
+  loadingStyle?: 'classic' | 'minimal' | 'pulse' | 'bars' | 'orbit' | 'glitch';
+  geminiApiKey?: string;
+  isLiveTranslationEnabled?: boolean;
+  onToggleLiveTranslation?: () => void;
+  showSummary?: boolean;
+  isSummaryLoading?: boolean;
+  currentSummary?: ProgramSummaryType | null;
+  onToggleSummary?: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ 
@@ -52,7 +66,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onVolumeChange,
   onMuteToggle,
   playerEngine = 'hls',
-  ambilightMode = 'soft'
+  ambilightMode = 'soft',
+  isPlaying: externalIsPlaying,
+  onPlayPauseToggle,
+  loadingStyle = 'classic',
+  geminiApiKey,
+  isLiveTranslationEnabled,
+  onToggleLiveTranslation,
+  showSummary,
+  isSummaryLoading,
+  currentSummary,
+  onToggleSummary
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,8 +87,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [subtitleTracks, setSubtitleTracks] = useState<any[]>([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState<number>(-1);
   const [currentSubtitleTrack, setCurrentSubtitleTrack] = useState<number>(-1);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(externalIsPlaying ?? true);
+  
+  useEffect(() => {
+    if (externalIsPlaying !== undefined) {
+      setIsPlaying(externalIsPlaying);
+    }
+  }, [externalIsPlaying]);
+
+  const togglePlayPause = () => {
+    const newState = !isPlaying;
+    setIsPlaying(newState);
+    if (onPlayPauseToggle) onPlayPauseToggle(newState);
+    setShowControls(true);
+  };
   const [isBuffering, setIsBuffering] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [showExtraControls, setShowExtraControls] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'none' | 'audio' | 'subtitle' | 'channels' | 'sources' | 'details' | 'volume'>('none');
@@ -72,6 +110,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Details, 10: Category Selector, 11+: Menu items
   const [currentTime, setCurrentTime] = useState(new Date());
   const [hasError, setHasError] = useState(false);
+  const [repairSuggestions, setRepairSuggestions] = useState<M3UChannel[]>([]);
+  const [repairExplanation, setRepairExplanation] = useState<string | null>(null);
+  const [isRepairing, setIsRepairing] = useState(false);
   const [currentUrlIndex, setCurrentUrlIndex] = useState(0);
   const [seekInfo, setSeekInfo] = useState<{ type: 'forward' | 'backward', amount: number } | null>(null);
   const [seekStep, setSeekStep] = useState(10);
@@ -80,31 +121,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [volume, setVolume] = useState(externalVolume ?? 1);
   const [isMuted, setIsMuted] = useState(externalIsMuted ?? false);
   const [showVolumeIndicator, setShowVolumeIndicator] = useState(false);
+  const [isAutoSurfActive, setIsAutoSurfActive] = useState(false);
+  const [autoSurfCountdown, setAutoSurfCountdown] = useState(15);
   const volumeIndicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isFirstVolumeChange = useRef(true);
 
+  const prevVolumeRef = useRef(volume);
+  const prevMutedRef = useRef(isMuted);
+
   useEffect(() => {
-    if (isFirstVolumeChange.current) {
-      isFirstVolumeChange.current = false;
-      return;
-    }
-
-    if (activeMenu !== 'volume') {
-      setShowVolumeIndicator(true);
-      if (volumeIndicatorTimeoutRef.current) {
-        clearTimeout(volumeIndicatorTimeoutRef.current);
-      }
-      volumeIndicatorTimeoutRef.current = setTimeout(() => {
-        setShowVolumeIndicator(false);
-      }, 3000);
-    }
-
-    return () => {
-      if (volumeIndicatorTimeoutRef.current) {
-        clearTimeout(volumeIndicatorTimeoutRef.current);
-      }
-    };
-  }, [volume, isMuted, activeMenu]);
+    // We no longer show the volume indicator automatically on volume change
+    // as per user request to only show it when the 'Ses' tab is active.
+    prevVolumeRef.current = volume;
+    prevMutedRef.current = isMuted;
+  }, [volume, isMuted]);
 
   useEffect(() => {
     if (externalVolume !== undefined) setVolume(externalVolume);
@@ -234,18 +264,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return `${proxyBase}${encodeURIComponent(rawUrl)}`;
   }, [url, channel, currentUrlIndex, useProxy, customProxyUrl]);
 
+  useEffect(() => {
+    setIsInitialLoading(true);
+    setIsBuffering(true);
+    setHasError(false);
+  }, [currentUrl]);
+
   // Initialize selectedGroup when channel changes
   useEffect(() => {
     if (channel?.group) {
       setSelectedGroup(channel.group);
     }
-    setHasError(false);
     setCurrentUrlIndex(0);
     setUseProxy(false);
     setShowControls(true);
     setIsPlaying(true);
-    setIsBuffering(true);
     setMetadata(null);
+    setRepairSuggestions([]);
+    setRepairExplanation(null);
   }, [channel]);
 
   useEffect(() => {
@@ -276,6 +312,99 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const group = selectedGroup || channel?.group || '';
     return channels.filter(ch => ch.group === group);
   }, [selectedGroup, channel, channels]);
+
+  const [previewChannel, setPreviewChannel] = useState<M3UChannel | undefined>(channel);
+  const [previewMetadata, setPreviewMetadata] = useState<MediaMetadata | null>(null);
+  const [loadingPreviewMetadata, setLoadingPreviewMetadata] = useState(false);
+
+  // Sync previewChannel when details menu opens
+  useEffect(() => {
+    if (activeMenu === 'details') {
+      setPreviewChannel(channel);
+    }
+  }, [activeMenu, channel]);
+
+  // Load metadata for previewChannel
+  useEffect(() => {
+    const loadPreviewMetadata = async () => {
+      if (previewChannel?.type === 'video') {
+        if (previewChannel.id === channel?.id) {
+          setPreviewMetadata(metadata);
+          return;
+        }
+        setLoadingPreviewMetadata(true);
+        const data = await fetchMediaMetadata(previewChannel.name, previewChannel.group, previewChannel.type);
+        setPreviewMetadata(data);
+        setLoadingPreviewMetadata(false);
+      } else {
+        setPreviewMetadata(null);
+      }
+    };
+    loadPreviewMetadata();
+  }, [previewChannel, channel, metadata]);
+
+  const handlePrevPreview = React.useCallback(() => {
+    const list = categoryChannels.length > 0 ? categoryChannels : channels;
+    if (list.length > 0) {
+      const currentIdx = list.findIndex(ch => ch.id === previewChannel?.id);
+      const nextIdx = (currentIdx - 1 + list.length) % list.length;
+      setPreviewChannel(list[nextIdx]);
+    }
+  }, [categoryChannels, channels, previewChannel]);
+
+  const handleNextPreview = React.useCallback(() => {
+    const list = categoryChannels.length > 0 ? categoryChannels : channels;
+    if (list.length > 0) {
+      const currentIdx = list.findIndex(ch => ch.id === previewChannel?.id);
+      const nextIdx = (currentIdx + 1) % list.length;
+      setPreviewChannel(list[nextIdx]);
+    }
+  }, [categoryChannels, channels, previewChannel]);
+
+  const handlePrevChannel = React.useCallback(() => {
+    const list = categoryChannels.length > 0 ? categoryChannels : channels;
+    if (list.length > 0) {
+      const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+      const nextIdx = (currentIdx - 1 + list.length) % list.length;
+      const nextChannel = list[nextIdx];
+      if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+    }
+  }, [categoryChannels, channels, channel, onChannelSelect]);
+
+  const handleNextChannel = React.useCallback(() => {
+    const list = categoryChannels.length > 0 ? categoryChannels : channels;
+    if (list.length > 0) {
+      const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+      const nextIdx = (currentIdx + 1) % list.length;
+      const nextChannel = list[nextIdx];
+      if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+    }
+  }, [categoryChannels, channels, channel, onChannelSelect]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    let countdownTimer: NodeJS.Timeout;
+
+    if (isAutoSurfActive) {
+      setAutoSurfCountdown(15);
+      
+      countdownTimer = setInterval(() => {
+        setAutoSurfCountdown(prev => {
+          if (prev <= 1) return 15;
+          return prev - 1;
+        });
+      }, 1000);
+
+      timer = setInterval(() => {
+        handleNextChannel();
+      }, 15000);
+    }
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(countdownTimer);
+    };
+  }, [isAutoSurfActive, handleNextChannel]);
 
   const channelListRef = useRef<HTMLDivElement>(null);
 
@@ -309,9 +438,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   const handleVolumeChange = React.useCallback((e: React.MouseEvent | React.TouchEvent) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
-    const y = Math.max(0, Math.min(clientY - rect.top, rect.height));
-    const percentage = 1 - (y / rect.height);
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const percentage = x / rect.width;
     updateVolume(percentage);
     updateMute(false);
     setShowControls(true);
@@ -335,8 +464,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!video) return;
 
     const handleWaiting = () => setIsBuffering(true);
-    const handlePlaying = () => setIsBuffering(false);
-    const handleCanPlay = () => setIsBuffering(false);
+    const handlePlaying = () => {
+      setIsBuffering(false);
+      setIsInitialLoading(false);
+    };
+    const handleCanPlay = () => {
+      setIsBuffering(false);
+      setIsInitialLoading(false);
+    };
     const handleTimeUpdate = () => {
       if (video) {
         setPlaybackTime(video.currentTime);
@@ -701,7 +836,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [currentUrl, playerEngine]);
 
-  const handleVideoError = () => {
+  const handleVideoError = async () => {
     console.error('Video error occurred for URL:', currentUrl);
     const urls = channel?.urls || [url];
     
@@ -716,11 +851,31 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       setCurrentUrlIndex(0);
       setHasError(false);
     }
-    // 3. If everything failed
+    // 3. If everything failed, trigger AI Repair
     else {
       setHasError(true);
       setIsPlaying(false);
       setIsBuffering(false);
+      
+      if (channel && channels.length > 0) {
+        setIsRepairing(true);
+        const alternatives = findRepairAlternatives(channel, channels);
+        setRepairSuggestions(alternatives);
+        
+        if (geminiApiKey && alternatives.length > 0) {
+          try {
+            const explanation = await suggestRepairExplanation(
+              channel.name, 
+              alternatives.map(a => a.name), 
+              geminiApiKey
+            );
+            setRepairExplanation(explanation);
+          } catch (e) {
+            console.error('Repair explanation failed:', e);
+          }
+        }
+        setIsRepairing(false);
+      }
     }
   };
 
@@ -734,8 +889,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // Normalize TV remote keys
       if (key === 'Select' || key === 'OK') key = 'Enter';
       if (key === 'Back' || key === 'GoBack' || key === 'XF86Back' || key === 'MediaStop') key = 'Backspace';
-      if (key === 'Up' || key === 'ChannelUp') key = 'ArrowUp';
-      if (key === 'Down' || key === 'ChannelDown') key = 'ArrowDown';
+      
+      // Handle Channel keys directly
+      if (key === 'ChannelUp') {
+        e.preventDefault();
+        const list = categoryChannels.length > 0 ? categoryChannels : channels;
+        if (list.length > 0) {
+          const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+          const nextIdx = (currentIdx + 1) % list.length;
+          const nextChannel = list[nextIdx];
+          if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+        }
+        return;
+      }
+      if (key === 'ChannelDown') {
+        e.preventDefault();
+        const list = categoryChannels.length > 0 ? categoryChannels : channels;
+        if (list.length > 0) {
+          const currentIdx = list.findIndex(ch => ch.id === channel?.id);
+          const nextIdx = (currentIdx - 1 + list.length) % list.length;
+          const nextChannel = list[nextIdx];
+          if (nextChannel && onChannelSelect) onChannelSelect(nextChannel);
+        }
+        return;
+      }
+
+      if (key === 'Up') key = 'ArrowUp';
+      if (key === 'Down') key = 'ArrowDown';
       if (key === 'Left' || key === 'MediaRewind') key = 'ArrowLeft';
       if (key === 'Right' || key === 'MediaFastForward') key = 'ArrowRight';
       if (key === 'Tab') {
@@ -766,8 +946,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       // Global keys
       if (key === ' ') {
         e.preventDefault();
-        setIsPlaying(prev => !prev);
-        setShowControls(true);
+        togglePlayPause();
+        return;
+      }
+
+      if (key.toLowerCase() === 'o') {
+        e.preventDefault();
+        togglePlayPause();
         return;
       }
 
@@ -871,11 +1056,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (activeMenu === 'none') {
         if (key === 'ArrowLeft') {
           e.preventDefault();
-          setFocusIndex(prev => Math.max(0, prev - 1));
+          if (focusIndex === 1) setFocusIndex(12);
+          else if (focusIndex === 12) setFocusIndex(11);
+          else if (focusIndex === 11) setFocusIndex(0);
+          else setFocusIndex(prev => Math.max(0, prev - 1));
         } else if (key === 'ArrowRight') {
           e.preventDefault();
-          const maxIdx = showExtraControls ? 8 : 1;
-          setFocusIndex(prev => Math.min(maxIdx, prev + 1));
+          const maxIdx = showExtraControls ? 10 : 12;
+          if (focusIndex === 0) setFocusIndex(11);
+          else if (focusIndex === 11) setFocusIndex(12);
+          else if (focusIndex === 12) setFocusIndex(1);
+          else if (focusIndex < maxIdx) setFocusIndex(prev => prev + 1);
         } else if (key === 'ArrowUp') {
           e.preventDefault();
           // Stay in Layer 1, do nothing
@@ -885,6 +1076,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         } else if (key === 'Enter') {
           e.preventDefault();
           if (focusIndex === 0) onClose?.();
+          else if (focusIndex === 11) onToggleLiveTranslation?.();
+          else if (focusIndex === 12) onToggleSummary?.();
           else if (focusIndex === 1) setShowExtraControls(!showExtraControls);
           else if (focusIndex === 2) {
             setActiveMenu('volume');
@@ -900,9 +1093,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           else if (focusIndex === 6) setActiveMenu('sources');
           else if (focusIndex === 7) {
             setActiveMenu('details');
-            setFocusIndex(50);
+            setPreviewChannel(channel);
+            setFocusIndex(51);
           }
           else if (focusIndex === 8) togglePip();
+          else if (focusIndex === 9) setIsAutoSurfActive(!isAutoSurfActive);
         }
         return;
       }
@@ -921,8 +1116,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           } else if (activeMenu === 'sources') {
             setFocusIndex(prev => Math.max(40, prev - 1));
           } else if (activeMenu === 'details') {
-            // Only one interactive item in details for now
-            setFocusIndex(50);
+            if (focusIndex === 50) setFocusIndex(53);
+            else if (focusIndex === 53) setFocusIndex(51);
           } else if (activeMenu === 'volume') {
             updateVolume(Math.min(1, volume + 0.1));
             updateMute(false);
@@ -941,7 +1136,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             const urls = channel?.urls || [url];
             setFocusIndex(prev => Math.min(40 + urls.length - 1, prev + 1));
           } else if (activeMenu === 'details') {
-            setFocusIndex(50);
+            if (focusIndex === 51 || focusIndex === 52 || focusIndex === 53) setFocusIndex(50);
           } else if (activeMenu === 'volume') {
             updateVolume(Math.max(0, volume - 0.1));
           }
@@ -953,8 +1148,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             const currentIdx = groups.indexOf(selectedGroup || 'Tümü');
             const nextIdx = (currentIdx - 1 + groups.length) % groups.length;
             setSelectedGroup(groups[nextIdx] === 'Tümü' ? '' : groups[nextIdx]);
-          } else if (activeMenu === 'details' && focusIndex === 50) {
-            setSeekStep(prev => Math.max(5, prev - 5));
+          } else if (activeMenu === 'details') {
+            if (focusIndex === 52) setFocusIndex(53);
+            else if (focusIndex === 53) setFocusIndex(51);
+            else if (focusIndex === 50) setSeekStep(prev => Math.max(5, prev - 5));
           }
           break;
         case 'ArrowRight':
@@ -964,8 +1161,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             const currentIdx = groups.indexOf(selectedGroup || 'Tümü');
             const nextIdx = (currentIdx + 1) % groups.length;
             setSelectedGroup(groups[nextIdx] === 'Tümü' ? '' : groups[nextIdx]);
-          } else if (activeMenu === 'details' && focusIndex === 50) {
-            setSeekStep(prev => Math.min(60, prev + 5));
+          } else if (activeMenu === 'details') {
+            if (focusIndex === 51) setFocusIndex(53);
+            else if (focusIndex === 53) setFocusIndex(52);
+            else if (focusIndex === 50) setSeekStep(prev => Math.min(60, prev + 5));
           }
           break;
         case 'Enter':
@@ -1009,6 +1208,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             }
             setActiveMenu('none');
             setFocusIndex(6);
+          } else if (activeMenu === 'details') {
+            if (focusIndex === 51) handlePrevPreview();
+            else if (focusIndex === 52) handleNextPreview();
+            else if (focusIndex === 53 && previewChannel) {
+              onChannelSelect?.(previewChannel);
+            }
           } else if (activeMenu === 'volume') {
             setIsMuted(prev => !prev);
           }
@@ -1087,84 +1292,133 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Loading Indicator */}
         <AnimatePresence>
-          {isBuffering && !hasError && !seekInfo && (
+          {isInitialLoading && !hasError && !seekInfo && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="absolute inset-0 flex flex-col items-center justify-center z-40 pointer-events-none"
             >
-              <div className="bg-black/60 backdrop-blur-xl p-10 rounded-[40px] border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center">
-                <div className="relative flex items-center justify-center scale-75">
-                  {/* Ripple Effect */}
-                  <motion.div
-                    animate={{
-                      scale: [1, 1.5, 2],
-                      opacity: [0.5, 0.2, 0],
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeOut",
-                    }}
-                    className="absolute w-24 h-24 rounded-full border-2 border-white/20"
-                    style={{ borderColor: `${themeColor}40` }}
-                  />
-                  <motion.div
-                    animate={{
-                      scale: [1, 1.3, 1.6],
-                      opacity: [0.3, 0.1, 0],
-                    }}
-                    transition={{
-                      duration: 2,
-                      repeat: Infinity,
-                      ease: "easeOut",
-                      delay: 0.5,
-                    }}
-                    className="absolute w-24 h-24 rounded-full border-2 border-white/10"
-                    style={{ borderColor: `${themeColor}20` }}
-                  />
-                  
-                  {/* Central Icon Container */}
-                  <div className="relative z-10 bg-black/40 p-6 rounded-3xl border border-white/10 backdrop-blur-md shadow-2xl">
-                    <div className="relative">
-                      <Tv className="w-12 h-12 text-white opacity-20" />
+              {loadingStyle === 'classic' && (
+                <div className="bg-black/60 backdrop-blur-xl p-10 rounded-[40px] border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col items-center">
+                  <div className="relative flex items-center justify-center scale-75">
+                    <motion.div
+                      animate={{ scale: [1, 1.5, 2], opacity: [0.5, 0.2, 0] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
+                      className="absolute w-24 h-24 rounded-full border-2 border-white/20"
+                      style={{ borderColor: `${themeColor}40` }}
+                    />
+                    <div className="relative z-10 bg-black/40 p-6 rounded-3xl border border-white/10 backdrop-blur-md shadow-2xl">
+                      <div className="relative">
+                        <Tv className="w-12 h-12 text-white opacity-20" />
+                        <motion.div
+                          animate={{ height: ["0%", "100%", "0%"], top: ["0%", "0%", "100%"] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                          className="absolute left-0 right-0 w-full bg-white/40 blur-[2px]"
+                          style={{ backgroundColor: themeColor }}
+                        />
+                        <Tv className="absolute inset-0 w-12 h-12 text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-6 flex flex-col items-center gap-2">
+                    <p className="text-white font-black uppercase tracking-[0.3em] text-[10px] italic opacity-80">Yayın Hazırlanıyor</p>
+                    <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
                       <motion.div
-                        animate={{
-                          height: ["0%", "100%", "0%"],
-                          top: ["0%", "0%", "100%"],
-                        }}
-                        transition={{
-                          duration: 1.5,
-                          repeat: Infinity,
-                          ease: "easeInOut",
-                        }}
-                        className="absolute left-0 right-0 w-full bg-white/40 blur-[2px]"
+                        animate={{ x: ["-100%", "100%"] }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-full h-full bg-white"
                         style={{ backgroundColor: themeColor }}
                       />
-                      <Tv className="absolute inset-0 w-12 h-12 text-white" />
                     </div>
                   </div>
                 </div>
-                
-                <div className="mt-6 flex flex-col items-center gap-2">
-                  <p className="text-white font-black uppercase tracking-[0.3em] text-[10px] italic opacity-80">
-                    Yayın Hazırlanıyor
-                  </p>
-                  <div className="w-32 h-1 bg-white/10 rounded-full overflow-hidden">
+              )}
+
+              {loadingStyle === 'minimal' && (
+                <div className="flex flex-col items-center gap-4">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    className="w-16 h-16 border-4 border-white/10 border-t-white rounded-full"
+                    style={{ borderTopColor: themeColor }}
+                  />
+                  <span className="text-white font-bold tracking-widest text-xs uppercase opacity-50">Yükleniyor</span>
+                </div>
+              )}
+
+              {loadingStyle === 'pulse' && (
+                <motion.div
+                  animate={{ scale: [1, 1.1, 1], opacity: [0.5, 1, 0.5] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                  className="relative"
+                >
+                  <div className="absolute inset-0 blur-2xl opacity-50" style={{ backgroundColor: themeColor }} />
+                  <Tv className="w-20 h-20 text-white relative z-10" />
+                </motion.div>
+              )}
+
+              {loadingStyle === 'bars' && (
+                <div className="flex items-end gap-1 h-12">
+                  {[0, 1, 2, 3, 4].map((i) => (
                     <motion.div
-                      animate={{
-                        x: ["-100%", "100%"],
-                      }}
-                      transition={{
-                        duration: 1,
-                        repeat: Infinity,
-                        ease: "linear",
-                      }}
-                      className="w-full h-full bg-white"
+                      key={i}
+                      animate={{ height: [10, 48, 10] }}
+                      transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.1 }}
+                      className="w-2 bg-white rounded-full"
                       style={{ backgroundColor: themeColor }}
                     />
-                  </div>
+                  ))}
+                </div>
+              )}
+
+              {loadingStyle === 'orbit' && (
+                <div className="relative w-24 h-24 flex items-center justify-center">
+                  <Tv className="w-10 h-10 text-white opacity-50" />
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    className="absolute inset-0"
+                  >
+                    <div className="w-3 h-3 rounded-full bg-white absolute top-0 left-1/2 -translate-x-1/2" style={{ backgroundColor: themeColor }} />
+                  </motion.div>
+                </div>
+              )}
+
+              {loadingStyle === 'glitch' && (
+                <div className="relative">
+                  <motion.h2
+                    animate={{ 
+                      x: [-2, 2, -2, 2, 0],
+                      opacity: [1, 0.8, 1, 0.9, 1]
+                    }}
+                    transition={{ duration: 0.2, repeat: Infinity }}
+                    className="text-4xl font-black text-white tracking-tighter italic uppercase"
+                  >
+                    YÜKLENİYOR
+                  </motion.h2>
+                  <div className="absolute inset-0 bg-red-500 mix-blend-screen opacity-50 animate-pulse" style={{ backgroundColor: themeColor }} />
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Auto-Surf Indicator */}
+        <AnimatePresence>
+          {isAutoSurfActive && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="absolute top-8 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 bg-yellow-500/90 backdrop-blur-md px-6 py-3 rounded-full border border-white/20 shadow-2xl"
+            >
+              <Zap className="w-5 h-5 text-white animate-pulse" />
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-white/70 uppercase tracking-widest leading-none mb-1">OTOMATİK TARAMA</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-white font-black text-sm tracking-tighter">SIRADAKİ KANAL:</span>
+                  <span className="text-white font-black text-xl tabular-nums">{autoSurfCountdown}s</span>
                 </div>
               </div>
             </motion.div>
@@ -1187,17 +1441,92 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <p className="text-zinc-400 text-sm max-w-md font-medium leading-relaxed">
                 Bu kanal şu anda oynatılamıyor. Lütfen başka bir kaynak deneyin veya daha sonra tekrar kontrol edin.
               </p>
-              <button 
-                onClick={() => {
-                  setHasError(false);
-                  setIsPlaying(true);
-                  setIsBuffering(true);
-                  setCurrentUrlIndex(0);
-                }}
-                className="mt-8 px-8 py-3 bg-white text-black font-black rounded-full hover:scale-105 transition-transform uppercase tracking-widest text-xs"
-              >
-                Yeniden Dene
-              </button>
+
+              {/* AI Repair Section */}
+              <AnimatePresence>
+                {(isRepairing || repairSuggestions.length > 0) && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-8 w-full max-w-lg bg-white/5 rounded-3xl p-6 border border-white/10 backdrop-blur-xl"
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="p-2 bg-blue-500/20 rounded-xl">
+                        <Sparkles className="w-5 h-5 text-blue-400" />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="text-white font-bold text-sm uppercase tracking-wider">Kanal Tamirci</h4>
+                        <p className="text-blue-400/80 text-[10px] font-bold uppercase">Yapay Zeka Destekli Çözüm</p>
+                      </div>
+                    </div>
+
+                    {isRepairing ? (
+                      <div className="flex items-center gap-3 py-4">
+                        <CircleDashed className="w-5 h-5 text-blue-400 animate-spin" />
+                        <span className="text-zinc-400 text-xs font-medium italic">Alternatif kanallar aranıyor...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {repairExplanation && (
+                          <p className="text-white text-xs font-medium mb-4 text-left leading-relaxed italic">
+                            "{repairExplanation}"
+                          </p>
+                        )}
+                        <div className="grid grid-cols-1 gap-2">
+                          {repairSuggestions.map((alt) => (
+                            <button
+                              key={alt.id}
+                              onClick={() => {
+                                if (onChannelSelect) onChannelSelect(alt);
+                                setHasError(false);
+                              }}
+                              className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-2xl border border-white/5 transition-all group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-black/40 rounded-lg flex items-center justify-center overflow-hidden border border-white/10">
+                                  {alt.logo ? (
+                                    <img src={alt.logo} alt="" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <Tv className="w-4 h-4 text-zinc-500" />
+                                  )}
+                                </div>
+                                <div className="text-left">
+                                  <div className="text-white text-[11px] font-bold truncate max-w-[200px]">{alt.name}</div>
+                                  <div className="text-zinc-500 text-[9px] font-medium uppercase tracking-tighter">{alt.group}</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-blue-400 text-[9px] font-black uppercase">İzle</span>
+                                <Play className="w-3 h-3 text-blue-400 fill-current" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="flex items-center gap-4 mt-8">
+                <button 
+                  onClick={() => {
+                    setHasError(false);
+                    setIsPlaying(true);
+                    setIsBuffering(true);
+                    setCurrentUrlIndex(0);
+                  }}
+                  className="px-8 py-3 bg-white text-black font-black rounded-full hover:scale-105 transition-transform uppercase tracking-widest text-xs shadow-xl"
+                >
+                  Yeniden Dene
+                </button>
+                <button 
+                  onClick={onClose}
+                  className="px-8 py-3 bg-white/10 text-white font-black rounded-full hover:bg-white/20 transition-all uppercase tracking-widest text-xs border border-white/10"
+                >
+                  Kapat
+                </button>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1212,7 +1541,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               className="absolute inset-0 flex items-center justify-center pointer-events-none z-40"
             >
               <div className="bg-black/40 p-8 rounded-full backdrop-blur-md border border-white/10 shadow-2xl">
-                {isPlaying ? (
+                {metadata?.logoUrl ? (
+                  <img 
+                    src={metadata.logoUrl} 
+                    alt={channel?.name} 
+                    className="w-32 md:w-48 h-auto object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : isPlaying ? (
                   <Play className="w-16 h-16 text-white fill-current" />
                 ) : (
                   <Pause className="w-16 h-16 text-white fill-current" />
@@ -1255,6 +1591,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           )}
         </AnimatePresence>
 
+        {/* Volume Indicator Overlay - REMOVED as per user request */}
+
         {/* Custom Controls Overlay */}
         <AnimatePresence>
           {showControls && !isMini && (
@@ -1277,6 +1615,32 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   >
                     <X className="w-8 h-8" />
                   </button>
+
+                  <button 
+                    onClick={onToggleLiveTranslation}
+                    onPointerDown={() => setFocusIndex(11)}
+                    className={cn(
+                      "p-3 rounded-full transition-all flex items-center gap-3",
+                      focusIndex === 11 ? "bg-white text-black scale-110 ring-4 ring-white/30" : (isLiveTranslationEnabled ? "bg-blue-500 text-white" : "bg-black/40 text-white hover:bg-black/60")
+                    )}
+                    title={isLiveTranslationEnabled ? "Canlı Çeviriyi Kapat" : "Canlı Çeviriyi Aç"}
+                  >
+                    <Languages className={cn("w-8 h-8", isLiveTranslationEnabled && "animate-pulse")} />
+                    <span className="text-sm font-black uppercase tracking-tighter">AI Çeviri</span>
+                  </button>
+
+                  <button 
+                    onClick={onToggleSummary}
+                    onPointerDown={() => setFocusIndex(12)}
+                    className={cn(
+                      "p-3 rounded-full transition-all flex items-center gap-3",
+                      focusIndex === 12 ? "bg-white text-black scale-110 ring-4 ring-white/30" : (showSummary ? "bg-emerald-500 text-white" : "bg-black/40 text-white hover:bg-black/60")
+                    )}
+                    title="Program Özeti (Özet Geç)"
+                  >
+                    <FileText className={cn("w-8 h-8", isSummaryLoading && "animate-pulse")} />
+                    <span className="text-sm font-black uppercase tracking-tighter">Özet Geç</span>
+                  </button>
                   <button 
                     onClick={() => setShowExtraControls(!showExtraControls)}
                     onPointerDown={() => setFocusIndex(1)}
@@ -1290,94 +1654,170 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   </button>
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <AnimatePresence>
-                    {showExtraControls && (
-                      <motion.div 
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: 20 }}
-                        className="flex items-center gap-4"
-                      >
-                        <button 
-                          onClick={() => setActiveMenu('volume')}
-                          onPointerDown={() => setFocusIndex(2)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
+                <div className="flex flex-col items-end gap-4">
+                  <div className="flex items-center gap-4">
+                    <AnimatePresence>
+                      {showExtraControls && (
+                        <motion.div 
+                          initial={{ opacity: 0, x: 20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: 20 }}
+                          className="flex items-center gap-4"
                         >
-                          <Volume2 className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Ses</span>
-                        </button>
-                        <button 
-                          onClick={() => setActiveMenu('audio')}
-                          onPointerDown={() => setFocusIndex(3)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
-                        >
-                          <Volume2 className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Dil</span>
-                        </button>
-                        <button 
-                          onClick={() => setActiveMenu('subtitle')}
-                          onPointerDown={() => setFocusIndex(4)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
-                        >
-                          <Languages className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Altyazı</span>
-                        </button>
-                        <button 
-                          onClick={() => setActiveMenu('channels')}
-                          onPointerDown={() => setFocusIndex(5)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
-                        >
-                          <List className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Kanallar</span>
-                        </button>
-                        <button 
-                          onClick={() => setActiveMenu('sources')}
-                          onPointerDown={() => setFocusIndex(6)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 6 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
-                        >
-                          <Link2 className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
-                        </button>
-                        <button 
-                          onClick={() => setActiveMenu('details')}
-                          onPointerDown={() => setFocusIndex(7)}
-                          className={cn(
-                            "p-3 rounded-full transition-all flex items-center gap-2",
-                            focusIndex === 7 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
-                          )}
-                        >
-                          <Settings2 className="w-8 h-8" />
-                          <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
-                        </button>
-                        {isPipSupported && (
                           <button 
-                            onClick={togglePip}
-                            onPointerDown={() => setFocusIndex(8)}
+                            onClick={() => setActiveMenu('volume')}
+                            onPointerDown={() => setFocusIndex(2)}
                             className={cn(
                               "p-3 rounded-full transition-all flex items-center gap-2",
-                              focusIndex === 8 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                              focusIndex === 2 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
                             )}
                           >
-                            <Monitor className="w-8 h-8" />
-                            <span className="text-sm font-bold uppercase tracking-tighter">PIP</span>
+                            <Volume2 className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Ses</span>
                           </button>
-                        )}
+                          <button 
+                            onClick={() => setActiveMenu('audio')}
+                            onPointerDown={() => setFocusIndex(3)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 3 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <Volume2 className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Dil</span>
+                          </button>
+                          <button 
+                            onClick={() => setActiveMenu('subtitle')}
+                            onPointerDown={() => setFocusIndex(4)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 4 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <Languages className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Altyazı</span>
+                          </button>
+                          <button 
+                            onClick={() => setActiveMenu('channels')}
+                            onPointerDown={() => setFocusIndex(5)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 5 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <List className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Kanallar</span>
+                          </button>
+                          <button 
+                            onClick={() => setActiveMenu('sources')}
+                            onPointerDown={() => setFocusIndex(6)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 6 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <Link2 className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Kaynaklar</span>
+                          </button>
+                          <button 
+                            onClick={() => setActiveMenu('details')}
+                            onPointerDown={() => setFocusIndex(7)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 7 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                            )}
+                          >
+                            <Settings2 className="w-8 h-8" />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Detaylar</span>
+                          </button>
+                          {isPipSupported && (
+                            <button 
+                              onClick={togglePip}
+                              onPointerDown={() => setFocusIndex(8)}
+                              className={cn(
+                                "p-3 rounded-full transition-all flex items-center gap-2",
+                                focusIndex === 8 ? "bg-white text-black scale-110 ring-4 ring-white/30" : "bg-black/40 text-white hover:bg-black/60"
+                              )}
+                            >
+                              <Monitor className="w-8 h-8" />
+                              <span className="text-sm font-bold uppercase tracking-tighter">PIP</span>
+                            </button>
+                          )}
+                          <button 
+                            onClick={() => setIsAutoSurfActive(!isAutoSurfActive)}
+                            onPointerDown={() => setFocusIndex(9)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 9 ? "bg-white text-black scale-110 ring-4 ring-white/30" : (isAutoSurfActive ? "bg-yellow-500 text-white" : "bg-black/40 text-white hover:bg-black/60")
+                            )}
+                            title={isAutoSurfActive ? "Tarama Modunu Kapat" : "Tarama Modunu Aç"}
+                          >
+                            <Zap className={cn("w-8 h-8", isAutoSurfActive && "animate-pulse")} />
+                            <span className="text-sm font-bold uppercase tracking-tighter">Tarama</span>
+                          </button>
+                          <button 
+                            onClick={onToggleLiveTranslation}
+                            onPointerDown={() => setFocusIndex(10)}
+                            className={cn(
+                              "p-3 rounded-full transition-all flex items-center gap-2",
+                              focusIndex === 10 ? "bg-white text-black scale-110 ring-4 ring-white/30" : (isLiveTranslationEnabled ? "bg-blue-500 text-white" : "bg-black/40 text-white hover:bg-black/60")
+                            )}
+                            title={isLiveTranslationEnabled ? "Canlı Çeviriyi Kapat" : "Canlı Çeviriyi Aç"}
+                          >
+                            <Languages className={cn("w-8 h-8", isLiveTranslationEnabled && "animate-pulse")} />
+                            <span className="text-sm font-bold uppercase tracking-tighter">AI Çeviri</span>
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* Horizontal Volume Bar below tabs */}
+                  <AnimatePresence>
+                    {activeMenu === 'volume' && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="flex items-center gap-4 bg-black/60 backdrop-blur-xl border border-white/10 p-3 rounded-2xl"
+                      >
+                        <button
+                          onClick={() => updateMute(!isMuted)}
+                          className={cn(
+                            "p-2 rounded-full transition-all",
+                            isMuted ? "bg-red-500 text-white" : "bg-white/10 text-white hover:bg-white/20"
+                          )}
+                        >
+                          {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                        </button>
+                        
+                        <div className="flex flex-col gap-1">
+                          <div className="flex justify-between items-center w-64">
+                            <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">SES SEVİYESİ</span>
+                            <span className="text-[10px] font-black text-white tabular-nums">{isMuted ? '0' : Math.round(volume * 100)}%</span>
+                          </div>
+                          <div 
+                            className="w-64 h-3 bg-white/10 rounded-full relative overflow-hidden cursor-pointer group/vol-bar"
+                            onClick={handleVolumeChange}
+                            onMouseDown={(e) => {
+                              const move = (moveEvent: MouseEvent) => handleVolumeChange(moveEvent as any);
+                              const up = () => {
+                                window.removeEventListener('mousemove', move);
+                                window.removeEventListener('mouseup', up);
+                              };
+                              window.addEventListener('mousemove', move);
+                              window.addEventListener('mouseup', up);
+                            }}
+                            onTouchMove={(e) => handleVolumeChange(e)}
+                          >
+                            <motion.div 
+                              className="absolute top-0 bottom-0 left-0 rounded-r-full"
+                              style={{ backgroundColor: themeColor }}
+                              initial={false}
+                              animate={{ width: `${isMuted ? 0 : volume * 100}%` }}
+                            />
+                          </div>
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1385,104 +1825,155 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               </div>
 
               {/* Menus */}
-              <div className="flex justify-end items-center gap-8">
+              <div className="flex justify-center md:justify-end items-center gap-8">
                 {activeMenu === 'details' && (
                   <motion.div 
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-zinc-900/95 backdrop-blur-2xl border border-white/10 p-6 rounded-3xl w-96 shadow-2xl"
+                    className="bg-zinc-900/95 backdrop-blur-2xl border border-white/10 p-4 rounded-2xl w-80 shadow-2xl flex flex-col max-h-[80vh]"
                   >
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
-                        <Settings2 className="w-8 h-8 text-red-500" />
+                    <div className="flex items-center justify-between gap-4 mb-4 shrink-0">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
+                          <Settings2 className="w-5 h-5 text-red-500" />
+                        </div>
+                        <div>
+                          <h3 className="text-white font-black text-base tracking-tighter">Kanal Detayları</h3>
+                          <p className="text-zinc-500 text-[7px] font-bold uppercase tracking-widest">M3U Bilgileri</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-white font-black text-xl tracking-tighter">Kanal Detayları</h3>
-                        <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">M3U Bilgileri</p>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={handlePrevPreview}
+                          onPointerDown={() => setFocusIndex(51)}
+                          className={cn(
+                            "p-2 rounded-lg transition-all",
+                            focusIndex === 51 ? "bg-white text-black scale-110 ring-2 ring-white/30" : "bg-white/5 text-white hover:bg-white/10"
+                          )}
+                          title="Önceki Kanal"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => previewChannel && onChannelSelect?.(previewChannel)}
+                          onPointerDown={() => setFocusIndex(53)}
+                          className={cn(
+                            "flex-1 p-2 rounded-lg transition-all text-[10px] font-bold uppercase flex items-center justify-center gap-1",
+                            focusIndex === 53 ? "bg-red-500 text-white scale-105" : "bg-white/5 text-white hover:bg-white/10",
+                            previewChannel?.id === channel?.id && "opacity-50 cursor-default"
+                          )}
+                        >
+                          <Play className="w-3 h-3" />
+                          {previewChannel?.id === channel?.id ? 'Oynatılıyor' : 'Oynat'}
+                        </button>
+                        <button
+                          onClick={handleNextPreview}
+                          onPointerDown={() => setFocusIndex(52)}
+                          className={cn(
+                            "p-2 rounded-lg transition-all",
+                            focusIndex === 52 ? "bg-white text-black scale-110 ring-2 ring-white/30" : "bg-white/5 text-white hover:bg-white/10"
+                          )}
+                          title="Sonraki Kanal"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    <div className="space-y-3 overflow-y-auto pr-1 scrollbar-hide">
+                      {loadingPreviewMetadata && (
+                        <div className="flex items-center justify-center py-4">
+                          <div className="w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                      
                       <div 
                         className={cn(
-                          "p-4 rounded-2xl transition-all border flex items-center justify-between",
+                          "p-3 rounded-xl transition-all border flex items-center justify-between shrink-0",
                           focusIndex === 50 ? "bg-white text-black scale-105 border-white" : "bg-white/5 text-white border-white/5"
                         )}
                       >
                         <div className="flex flex-col">
-                          <p className="text-[8px] font-black uppercase tracking-widest mb-1 opacity-50">OYNATMA AYARI</p>
-                          <p className="font-bold text-sm">Hızlı Sarma Süresi</p>
+                          <p className="text-[7px] font-black uppercase tracking-widest mb-0.5 opacity-50">OYNATMA AYARI</p>
+                          <p className="font-bold text-xs">Hızlı Sarma Süresi</p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <ChevronLeft className={cn("w-4 h-4", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
-                          <span className="text-xl font-black tabular-nums">{seekStep}s</span>
-                          <ChevronRight className={cn("w-4 h-4", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
+                        <div className="flex items-center gap-2">
+                          <ChevronLeft className={cn("w-3 h-3", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
+                          <span className="text-lg font-black tabular-nums">{seekStep}s</span>
+                          <ChevronRight className={cn("w-3 h-3", focusIndex === 50 ? "text-black" : "text-zinc-500")} />
                         </div>
                       </div>
 
-                      {channel?.genre && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">TÜR</p>
-                          <p className="text-white font-bold text-sm">{channel.genre}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {previewChannel?.genre && (
+                          <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                            <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">TÜR</p>
+                            <p className="text-white font-bold text-xs truncate">{previewChannel.genre}</p>
+                          </div>
+                        )}
+                        {previewChannel?.year && (
+                          <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                            <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">YIL</p>
+                            <p className="text-white font-bold text-xs truncate">{previewChannel.year}</p>
+                          </div>
+                        )}
+                        {previewChannel?.language && (
+                          <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                            <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">DİL</p>
+                            <p className="text-white font-bold text-xs truncate">{previewChannel.language}</p>
+                          </div>
+                        )}
+                        {previewMetadata?.imdbScore && (
+                          <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                            <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">IMDb</p>
+                            <div className="flex items-center gap-1 text-yellow-500 font-black text-xs">
+                              <Star className="w-3 h-3 fill-current" />
+                              <span>{previewMetadata.imdbScore}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {previewChannel?.actor && (
+                        <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                          <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">OYUNCULAR</p>
+                          <p className="text-white font-bold text-xs">{previewChannel.actor}</p>
                         </div>
                       )}
-                      {channel?.actor && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">OYUNCULAR</p>
-                          <p className="text-white font-bold text-sm">{channel.actor}</p>
-                        </div>
-                      )}
-                      {channel?.year && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">YIL</p>
-                          <p className="text-white font-bold text-sm">{channel.year}</p>
-                        </div>
-                      )}
-                      {channel?.language && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">DİL</p>
-                          <p className="text-white font-bold text-sm">{channel.language}</p>
-                        </div>
-                      )}
-                      {metadata ? (
+
+                      {previewMetadata && (
                         <>
-                          {metadata.imdbScore && (
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">IMDb PUANI</p>
-                              <div className="flex items-center gap-2 text-yellow-500 font-black">
-                                <Star className="w-4 h-4 fill-current" />
-                                <span>{metadata.imdbScore}</span>
-                              </div>
+                          {previewMetadata.director && (
+                            <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                              <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">YÖNETMEN</p>
+                              <p className="text-white font-bold text-xs">{previewMetadata.director}</p>
                             </div>
                           )}
-                          {metadata.director && (
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">YÖNETMEN</p>
-                              <p className="text-white font-bold text-sm">{metadata.director}</p>
+                          {previewMetadata.cast && previewMetadata.cast.length > 0 && (
+                            <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                              <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">KADRO</p>
+                              <p className="text-white font-bold text-xs">{previewMetadata.cast.slice(0, 3).join(', ')}</p>
                             </div>
                           )}
-                          {metadata.cast && metadata.cast.length > 0 && (
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">OYUNCULAR</p>
-                              <p className="text-white font-bold text-sm">{metadata.cast.slice(0, 5).join(', ')}</p>
-                            </div>
-                          )}
-                          {metadata.summary && (
-                            <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                              <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">ÖZET</p>
-                              <p className="text-white font-medium text-xs leading-relaxed opacity-80">{metadata.summary}</p>
+                          {previewMetadata.summary && (
+                            <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                              <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">ÖZET</p>
+                              <p className="text-white font-medium text-[10px] leading-relaxed opacity-70 line-clamp-4">{previewMetadata.summary}</p>
                             </div>
                           )}
                         </>
-                      ) : channel?.description && (
-                        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-                          <p className="text-[8px] text-zinc-500 font-black uppercase tracking-widest mb-1">AÇIKLAMA</p>
-                          <p className="text-white font-medium text-xs leading-relaxed opacity-80">{channel.description}</p>
+                      )}
+                      
+                      {!previewMetadata && previewChannel?.description && (
+                        <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                          <p className="text-[7px] text-zinc-500 font-black uppercase tracking-widest mb-0.5">AÇIKLAMA</p>
+                          <p className="text-white font-medium text-[10px] leading-relaxed opacity-70 line-clamp-4">{previewChannel.description}</p>
                         </div>
                       )}
-                      {!metadata && !channel?.genre && !channel?.actor && !channel?.year && !channel?.language && !channel?.description && (
-                        <div className="text-center py-8">
-                          <p className="text-zinc-500 italic text-sm">Bu kanal için ek bilgi bulunamadı.</p>
+
+                      {!previewMetadata && !previewChannel?.genre && !previewChannel?.actor && !previewChannel?.year && !previewChannel?.language && !previewChannel?.description && (
+                        <div className="text-center py-4">
+                          <p className="text-zinc-500 italic text-xs">Ek bilgi bulunamadı.</p>
                         </div>
                       )}
                     </div>
@@ -1588,58 +2079,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                           {channel?.id === ch.id && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
                         </button>
                       ))}
-                    </div>
-                  </motion.div>
-                )}
-
-                {activeMenu === 'volume' && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-zinc-900/90 backdrop-blur-xl border border-white/10 p-6 rounded-2xl w-80 shadow-2xl flex flex-col items-center gap-6"
-                  >
-                    <h3 className="text-zinc-400 text-xs font-black uppercase tracking-widest px-2">Ses Seviyesi</h3>
-                    <div className="flex flex-col items-center gap-2">
-                      <div 
-                        className="h-48 w-12 bg-white/10 rounded-2xl relative overflow-hidden cursor-pointer group/vol-menu"
-                        onClick={handleVolumeChange}
-                        onMouseDown={(e) => {
-                          const move = (moveEvent: MouseEvent) => handleVolumeChange(moveEvent as any);
-                          const up = () => {
-                            window.removeEventListener('mousemove', move);
-                            window.removeEventListener('mouseup', up);
-                          };
-                          window.addEventListener('mousemove', move);
-                          window.addEventListener('mouseup', up);
-                        }}
-                        onTouchMove={(e) => handleVolumeChange(e)}
-                      >
-                        <motion.div 
-                          className="absolute bottom-0 left-0 right-0 rounded-t-xl"
-                          style={{ backgroundColor: themeColor }}
-                          initial={false}
-                          animate={{ height: `${isMuted ? 0 : volume * 100}%` }}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <span className="text-white font-black text-xl drop-shadow-md">
-                            {isMuted ? '0' : Math.round(volume * 100)}
-                          </span>
-                        </div>
-                      </div>
-                      <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">AYARLAMAK İÇİN ↑ ↓</span>
-                    </div>
-                    <div className="flex gap-4 w-full">
-                      <button
-                        onClick={() => updateMute(!isMuted)}
-                        onPointerDown={() => setFocusIndex(60)}
-                        className={cn(
-                          "flex-1 p-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2",
-                          focusIndex === 60 ? "bg-white text-black scale-105 ring-4 ring-white/30" : (isMuted ? "bg-red-500 text-white" : "bg-white/10 text-white hover:bg-white/20")
-                        )}
-                      >
-                        {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                        <span>{isMuted ? 'Sesi Aç' : 'Sessiz'}</span>
-                      </button>
                     </div>
                   </motion.div>
                 )}
