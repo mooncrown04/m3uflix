@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Dispatch, SetStateAction } from 'react';
-import { NavContext, M3UChannel } from '../types';
+import { NavContext, M3UChannel, KeyMap } from '../types';
 import { DEFAULT_M3U_URL, MULTI_CATEGORIES } from '../constants';
 
 interface KeyboardNavigationProps {
@@ -8,17 +8,17 @@ interface KeyboardNavigationProps {
   currentChannel: M3UChannel | null;
   setCurrentChannel: (channel: M3UChannel | null) => void;
   showSettings: boolean;
-  setShowSettings: (show: boolean) => void;
+  setShowSettings: (show: boolean | ((prev: boolean) => boolean)) => void;
   showQuickSettings: boolean;
-  setShowQuickSettings: (show: boolean) => void;
+  setShowQuickSettings: (show: boolean | ((prev: boolean) => boolean)) => void;
   showEPGTimeline: boolean;
-  setShowEPGTimeline: (show: boolean) => void;
+  setShowEPGTimeline: (show: boolean | ((prev: boolean) => boolean)) => void;
   isMiniPlayer: boolean;
-  setIsMiniPlayer: (is: boolean) => void;
+  setIsMiniPlayer: (is: boolean | ((prev: boolean) => boolean)) => void;
   setIsGlobalPlaying: (is: boolean | ((prev: boolean) => boolean)) => void;
   globalVolume: number;
-  updateGlobalVolume: (vol: number) => void;
-  setIsMuted: (muted: boolean) => void;
+  updateGlobalVolume: (vol: number | ((prev: number) => number)) => void;
+  setIsMuted: (muted: boolean | ((prev: boolean) => boolean)) => void;
   handleChannelSelect: (channel: M3UChannel) => void;
   toggleFavorite: (id: string) => void;
   toggleManualCategory: (id: string, cat: string, sub?: string) => void;
@@ -31,11 +31,12 @@ interface KeyboardNavigationProps {
   setChannelMenuId: (id: string | null) => void;
   setChannelMenuCategory: (cat: string | null) => void;
   setChannelForDetail: (channel: M3UChannel | null) => void;
-  setShowRemotePairingModal: (show: boolean) => void;
-  setShowDeviceInfo: (show: boolean) => void;
+  setShowRemotePairingModal: (show: boolean | ((prev: boolean) => boolean)) => void;
+  setShowDeviceInfo: (show: boolean | ((prev: boolean) => boolean)) => void;
   showDeviceInfo: boolean;
   themeColor: string;
   setThemeColor: (color: string) => void;
+  uiMode: any;
   setUiMode: (mode: any) => void;
   setPlayerEngine: (engine: any) => void;
   setAmbilightMode: (mode: any) => void;
@@ -70,30 +71,30 @@ interface KeyboardNavigationProps {
   setCollapsedRows: (updater: (prev: Set<string>) => Set<string>) => void;
   extraUrl: string;
   detailFocus: number;
-  setDetailFocus: Dispatch<SetStateAction<number>>;
+  setDetailFocus: (focus: number | ((prev: number) => number)) => void;
   allFlattenedChannels: M3UChannel[];
   navContext: NavContext;
-  setNavContext: Dispatch<SetStateAction<NavContext>>;
+  setNavContext: (context: NavContext | ((prev: NavContext) => NavContext)) => void;
   activeRow: number;
-  setActiveRow: Dispatch<SetStateAction<number>>;
+  setActiveRow: (row: number | ((prev: number) => number)) => void;
   activeCol: number;
-  setActiveCol: Dispatch<SetStateAction<number>>;
-  settingsArea: 'tabs' | 'sections' | 'content';
-  setSettingsArea: Dispatch<SetStateAction<'tabs' | 'sections' | 'content'>>;
+  setActiveCol: (col: number | ((prev: number) => number)) => void;
+  settingsArea: 'tabs' | 'sections' | 'content' | 'none';
+  setSettingsArea: (area: 'tabs' | 'sections' | 'content' | 'none' | ((prev: any) => any)) => void;
   settingsSection: number;
-  setSettingsSection: Dispatch<SetStateAction<number>>;
+  setSettingsSection: (section: number | ((prev: number) => number)) => void;
   settingsFocus: number;
-  setSettingsFocus: Dispatch<SetStateAction<number>>;
+  setSettingsFocus: (focus: number | ((prev: number) => number)) => void;
   sidebarFocus: number;
-  setSidebarFocus: Dispatch<SetStateAction<number>>;
+  setSidebarFocus: (focus: number | ((prev: number) => number)) => void;
   channelMenuFocus: number;
-  setChannelMenuFocus: Dispatch<SetStateAction<number>>;
+  setChannelMenuFocus: (focus: number | ((prev: number) => number)) => void;
   quickSettingsFocus: number;
-  setQuickSettingsFocus: Dispatch<SetStateAction<number>>;
+  setQuickSettingsFocus: (focus: number | ((prev: number) => number)) => void;
   quickSwitchFocus: number;
-  setQuickSwitchFocus: Dispatch<SetStateAction<number>>;
+  setQuickSwitchFocus: (focus: number | ((prev: number) => number)) => void;
   showQuickSwitch: boolean;
-  setShowQuickSwitch: (show: boolean) => void;
+  setShowQuickSwitch: (show: boolean | ((prev: boolean) => boolean)) => void;
   recentlyWatched: M3UChannel[];
   searchQuery: string;
   isAISearching: boolean;
@@ -104,6 +105,7 @@ interface KeyboardNavigationProps {
   setExpandedSections: Dispatch<SetStateAction<Record<string, boolean>>>;
   showSportsDashboard: boolean;
   setShowSportsDashboard: (show: boolean) => void;
+  keyMap: KeyMap;
 }
 
 export function useKeyboardNavigation(props: KeyboardNavigationProps) {
@@ -116,7 +118,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
     setRecentlyWatched, setTypedNumber, setChannelNumbers, setShowNumberInput,
     setNumberInputChannelId, setChannelMenuId, setChannelMenuCategory,
     setChannelForDetail, setShowRemotePairingModal, setShowDeviceInfo,
-    showDeviceInfo, themeColor, setThemeColor, setUiMode, setPlayerEngine,
+    showDeviceInfo, themeColor, setThemeColor, uiMode, setUiMode, setPlayerEngine,
     setAmbilightMode, setSleepTimer, setSleepTimerActive, mixedColor,
     setProfilePic, setDeviceType, setDynamicThemeEnabled, setVoiceControlEnabled,
     setTmdbApiKey, setGeminiApiKey, setCustomProxyUrl, setClockStyle,
@@ -135,7 +137,8 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
     showSportsDashboard, setShowSportsDashboard,
     recentlyWatched, searchQuery,
     isAISearching, handleAISearch,
-    activeSettingsTab, setActiveSettingsTab, expandedSections, setExpandedSections
+    activeSettingsTab, setActiveSettingsTab, expandedSections, setExpandedSections,
+    keyMap
   } = props;
 
   const toggleSection = (tabIndex: number, sectionIndex: number) => {
@@ -186,8 +189,26 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
   }, [activeRow, groupedChannels, filterHeroButtons, primaryHeroButtons, activeCol, setActiveCol, setActiveRow, navContext]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    let key = e.key;
-    if (key === 'Select' || key === 'OK') key = 'Enter';
+    let rawKey = e.key;
+    if (rawKey === 'Select' || rawKey === 'OK') rawKey = 'Enter';
+
+    // Map raw key to logical key
+    let key = rawKey;
+    if (rawKey === keyMap.up) key = 'ArrowUp';
+    else if (rawKey === keyMap.down) key = 'ArrowDown';
+    else if (rawKey === keyMap.left) key = 'ArrowLeft';
+    else if (rawKey === keyMap.right) key = 'ArrowRight';
+    else if (rawKey === keyMap.enter) key = 'Enter';
+    else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
+    else if (rawKey === keyMap.settings) key = 's';
+    else if (rawKey === keyMap.guide) key = 'g';
+    else if (rawKey === keyMap.voice) key = 'v';
+    else if (rawKey === keyMap.miniPlayer) key = 'm';
+    else if (rawKey === keyMap.playPause) key = 'o';
+    else if (rawKey === keyMap.volumeUp) key = 'VolumeUp';
+    else if (rawKey === keyMap.volumeDown) key = 'VolumeDown';
+    else if (rawKey === keyMap.channelUp) key = 'ChannelUp';
+    else if (rawKey === keyMap.channelDown) key = 'ChannelDown';
     
     // Handle number keys for quick channel access
     const isNumber = /^\d$/.test(key);
@@ -871,6 +892,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
               else if (settingsSection === 6 && settingsFocus === 16) setSettingsFocus(17);
             } else if (activeSettingsTab === 3) {
               if (settingsFocus === 100) setSettingsFocus(102);
+              else if (settingsFocus >= 200 && settingsFocus < 214) setSettingsFocus(prev => prev + 1);
             }
           }
           break;
@@ -878,7 +900,11 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
         case 'ArrowLeft':
           e.preventDefault();
           if (settingsArea === 'content') {
-            setSettingsArea('sections');
+            if (activeSettingsTab === 3 && settingsFocus > 200) {
+              setSettingsFocus(prev => prev - 1);
+            } else {
+              setSettingsArea('sections');
+            }
           } else if (settingsArea === 'sections') {
             setSettingsArea('tabs');
             setSidebarFocus(activeSettingsTab);
@@ -978,6 +1004,11 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
               } else if (settingsSection === 5) {
                 setSettingsSection(6); setSettingsFocus(16);
               }
+            } else if (activeSettingsTab === 3) {
+              if (settingsFocus === 100) setSettingsFocus(500);
+              else if (settingsFocus === 500) setSettingsFocus(200);
+              else if (settingsFocus >= 200 && settingsFocus <= 211) setSettingsFocus(prev => prev + 3);
+              else if (settingsFocus >= 212 && settingsFocus < 300) setSettingsFocus(300);
             }
           }
           break;
@@ -1059,6 +1090,12 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
               } else if (settingsSection === 6) {
                 setSettingsSection(5); setSettingsFocus(15);
               }
+            } else if (activeSettingsTab === 3) {
+              if (settingsFocus >= 300) setSettingsFocus(212);
+              else if (settingsFocus >= 203) setSettingsFocus(prev => prev - 3);
+              else if (settingsFocus >= 200) setSettingsFocus(500);
+              else if (settingsFocus === 500) setSettingsFocus(100);
+              else setSettingsArea('sections');
             }
           }
           break;
@@ -1067,6 +1104,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
     }
 
     if (navContext === 'browse') {
+      if (uiMode === 'bento') return; // Let BentoDashboard handle it
       switch (key) {
         case 'ArrowUp':
           e.preventDefault();
@@ -1094,7 +1132,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
         case 'ArrowLeft':
           e.preventDefault();
           if (activeRow === -4) return;
-          if (activeRow === -3) setActiveCol(prev => Math.max(0, prev - 1));
+          else if (activeRow === -3) setActiveCol(prev => Math.max(0, prev - 1));
           else if (activeRow === -2) setActiveCol(prev => Math.max(0, prev - 1));
           else if (activeRow === -1) setActiveCol(prev => Math.max(0, prev - 1));
           else setActiveCol(prev => Math.max(-1, prev - 1));
@@ -1102,7 +1140,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
         case 'ArrowRight':
           e.preventDefault();
           if (activeRow === -4) return;
-          if (activeRow === -3) setActiveCol(prev => Math.min(primaryHeroButtons.length - 1, prev + 1));
+          else if (activeRow === -3) setActiveCol(prev => Math.min(primaryHeroButtons.length - 1, prev + 1));
           else if (activeRow === -2) {
             const searchRowButtons = filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice' || b.id === 'remote-toggle' || b.id === 'device-info');
             setActiveCol(prev => Math.min(searchRowButtons.length - 1, prev + 1));
@@ -1180,13 +1218,8 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
               setSettingsFocus(0);
             }
           } else if (activeRow === -4) {
-            setShowSettings(true);
-            setNavContext('settings');
-            setSettingsArea('content');
-            setSidebarFocus(0);
-            setActiveSettingsTab(0);
-            setSettingsSection(0);
-            setSettingsFocus(0);
+            const profileBtn = document.querySelector('button.rounded-sm.overflow-hidden') as HTMLElement;
+            if (profileBtn) profileBtn.click();
           } else if (activeRow === -3) {
             const button = primaryHeroButtons[activeCol];
             if (button) button.action();

@@ -45,7 +45,7 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
   const isFocused = activeRow === rowIndex && colIndex === activeCol;
   const isPreviewing = isFocused && previewChannelId === channel.id;
   const isFavorite = Array.isArray(favorites) && favorites.includes(channel.id);
-  const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
+  const isMulti = Object.values(multiSessions || {}).some((ids: any) => Array.isArray(ids) && ids.includes(channel.id));
   const isCanli = Array.isArray(canliChannels) && canliChannels.includes(channel.id);
   const isFilm = Array.isArray(filmChannels) && filmChannels.includes(channel.id);
   const isDizi = Array.isArray(diziChannels) && diziChannels.includes(channel.id);
@@ -157,22 +157,26 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
           "absolute z-0 pointer-events-none select-none flex overflow-visible",
           layoutMode === 'fixed-focus' 
             ? "left-0 w-12 top-0 h-[70%] items-center justify-center" 
-            : "left-[-60px] bottom-[-5px] h-full items-end justify-center"
+            : "left-[-60px] bottom-[-15px] h-full items-end justify-center"
         )}>
           <span 
-            className="font-black italic leading-none"
+            className="font-black italic leading-none select-none"
             style={{ 
-              WebkitTextStroke: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
-                ? `${layoutMode === 'fixed-focus' ? '2px' : '5px'} ${top10Style === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` 
+              WebkitTextStroke: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'theme-original' || top10Style === 'theme-neon') 
+                ? `${layoutMode === 'fixed-focus' ? '3px' : '8px'} ${top10Style.startsWith('theme') ? themeColor : 'rgba(255,255,255,0.8)'}` 
                 : 'none',
-              color: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'outline-theme') 
+              color: (top10Style === 'original' || top10Style === 'neon' || top10Style === 'theme-original' || top10Style === 'theme-neon') 
                 ? 'transparent' 
-                : (top10Style === 'theme' ? themeColor : 'white'),
-              fontSize: layoutMode === 'fixed-focus' ? '60px' : '160px',
+                : (top10Style === 'theme-filled' ? themeColor : (top10Style === 'glass' ? 'rgba(255,255,255,0.1)' : 'white')),
+              fontSize: layoutMode === 'fixed-focus' ? '70px' : '220px',
               fontWeight: '900',
-              textShadow: top10Style === 'neon' 
-                ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` 
-                : (top10Style === 'filled' ? '0 15px 30px rgba(0,0,0,0.8)' : 'none')
+              backdropFilter: top10Style === 'glass' ? 'blur(10px)' : 'none',
+              textShadow: (top10Style === 'neon' || top10Style === 'theme-neon')
+                ? `0 0 40px ${themeColor}, 0 0 80px ${themeColor}` 
+                : (top10Style === 'filled' || top10Style === 'theme-filled' ? '0 15px 30px rgba(0,0,0,0.8)' : (top10Style === 'glass' ? '0 0 20px rgba(255,255,255,0.3)' : 'none')),
+              opacity: isFocused ? 1 : 0.6,
+              transform: isFocused ? 'scale(1.1) translateY(-10px)' : 'scale(1)',
+              transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
             }}
           >
             {colIndex + 1}
@@ -296,15 +300,24 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
                 </div>
               </div>
             ) : channel.logo ? (
-              <img 
-                src={channel.logo} 
-                alt={channel.name} 
-                className="w-full h-full object-cover pointer-events-none"
-                referrerPolicy="no-referrer"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=101010&color=fff&size=512`;
-                }}
-              />
+              <div className="relative w-full h-full">
+                <div className="absolute inset-0 bg-white/5 animate-pulse" />
+                <motion.img 
+                  animate={{ opacity: 1, scale: isFocused ? 1.15 : 1 }}
+                  transition={{ duration: 0.6 }}
+                  src={channel.logo} 
+                  alt={channel.name} 
+                  className="w-full h-full object-cover pointer-events-none transition-transform duration-700"
+                  style={{ imageRendering: 'auto' }}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(channel.name)}&background=101010&color=fff&size=512`;
+                  }}
+                />
+                {isFocused && (
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none" />
+                )}
+              </div>
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900 pointer-events-none">
                 <Tv className="w-8 h-8 text-zinc-700" />
@@ -313,13 +326,10 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
           </>
         )}
 
-        {/* EPG Info Overlay */}
+        {/* EPG Info Progress Bar Overlay only (removed title overlay) */}
         {currentProgram && (
-          <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-[60] pointer-events-none">
-            <div className="text-[10px] font-bold text-white truncate mb-1">
-              {currentProgram.title}
-            </div>
-            <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
+          <div className="absolute bottom-0 left-0 right-0 h-1 z-[60] pointer-events-none">
+            <div className="w-full h-full bg-white/20">
               <motion.div 
                 initial={{ width: 0 }}
                 animate={{ width: `${progress}%` }}
@@ -428,65 +438,113 @@ export const ChannelCard = React.memo<ChannelCardProps>(({
             className="absolute bottom-0 left-0 h-1.5 bg-white z-[110] pointer-events-none"
           />
         )}
-        <div className="absolute top-2 left-2 z-[100] flex flex-col gap-1.5 pointer-events-none">
-          {channelNumbers[channel.id] && (
-            <div 
-              style={{ backgroundColor: themeColor }}
-              className="text-[10px] font-black text-white px-2 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
-            >
-              {channelNumbers[channel.id]}
-            </div>
-          )}
-          {badges.map((b, i) => (
-            <div 
-              key={i}
-              style={{ backgroundColor: themeColor }}
-              className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
-            >
-              {b}
-            </div>
-          ))}
+        <div className="absolute top-2 left-2 z-[100] flex flex-col gap-1.5 pointer-events-none max-w-full pr-2">
+          <div className="flex gap-1.5">
+            {channelNumbers[channel.id] && (
+              <div 
+                style={{ 
+                  backgroundColor: themeColor,
+                  boxShadow: (top10Style === 'neon' || top10Style === 'theme-neon') ? `0 0 10px ${themeColor}` : '0 4px 6px rgba(0,0,0,0.3)'
+                }}
+                className="text-[10px] font-black text-white px-2 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
+              >
+                {channelNumbers[channel.id]}
+              </div>
+            )}
+            {badges.map((b, i) => (
+              <div 
+                key={i}
+                style={{ backgroundColor: themeColor }}
+                className="text-[10px] font-black text-white w-5 h-5 rounded shadow-lg flex items-center justify-center border border-white/20 backdrop-blur-sm"
+              >
+                {b}
+              </div>
+            ))}
+          </div>
         </div>
       </motion.div>
       <div className={cn(
-        "mt-0.5 transition-all duration-300 relative z-10",
+        "mt-1 transition-all duration-300 relative z-10 flex flex-col gap-1",
         uiMode === 'minimalist' && "mt-0"
       )}>
-        <p className={cn(
-          "text-sm font-bold truncate transition-all duration-300",
-          orientation === 'landscape' ? "w-full" : "w-full",
-          isFocused ? "text-white translate-y-[-2px]" : "text-zinc-300",
-          uiMode === 'minimalist' && isFocused && "text-white tracking-widest uppercase",
-          uiMode === 'classic' && isFocused && "text-white"
+        {/* Channel Name Badge - Now at the bottom */}
+        <div className={cn(
+          "px-2.5 py-1 rounded-lg backdrop-blur-md border border-white/5 shadow-xl transition-all self-start max-w-full",
+          isFocused ? "bg-white/20 border-white/30 translate-x-1" : "bg-black/50",
+          uiMode === 'modern' && "rounded-xl",
+          uiMode === 'classic' && "rounded-none border-l-[3px] border-l-white"
         )}>
-          {channel.name}
-        </p>
-        {currentProgram && (
           <p className={cn(
-            "text-[10px] truncate mt-0.5 flex items-center gap-1.5",
-            isFocused ? "text-zinc-200" : "text-zinc-400"
+            "text-[11px] font-black text-white truncate max-w-[140px] md:max-w-none",
+            isFocused ? "tracking-widest" : "tracking-normal"
           )}>
-            <span className="opacity-60 font-mono shrink-0">
-              {currentProgram.start.getHours().toString().padStart(2, '0')}:
-              {currentProgram.start.getMinutes().toString().padStart(2, '0')}
-            </span>
-            <span className="truncate font-medium">{currentProgram.title}</span>
+            {channel.name}
           </p>
+        </div>
+        {currentProgram && (
+          <div className={cn(
+            "text-[10px] truncate flex flex-col gap-1 px-1",
+            isFocused ? "text-white" : "text-zinc-400"
+          )}>
+            <div className="flex items-center gap-1.5">
+              <span className="opacity-90 font-mono shrink-0 bg-white/10 px-1 py-0.5 rounded text-[8px] border border-white/5 font-bold uppercase">
+                {currentProgram.start.getHours().toString().padStart(2, '0')}:
+                {currentProgram.start.getMinutes().toString().padStart(2, '0')}
+              </span>
+              <span className="truncate font-semibold text-[10px]">{currentProgram.title}</span>
+            </div>
+          </div>
         )}
-        {nextProgram && (
-          <p className={cn(
-            "text-[9px] text-zinc-500 truncate mt-0.5 flex items-center gap-1.5",
+        {nextProgram && isFocused && (
+          <div className={cn(
+            "text-[9px] text-zinc-500 truncate flex items-center gap-1.5 px-1",
             uiMode === 'minimalist' && "opacity-60 italic"
           )}>
-            <span className="opacity-40 font-black text-[7px] uppercase tracking-tighter shrink-0">Sonraki</span>
-            <span className="opacity-60 font-mono shrink-0">
+            <span className="opacity-30 font-black text-[7px] uppercase tracking-wider shrink-0 border border-white/10 px-1 rounded">Sonraki</span>
+            <span className="opacity-60 font-mono shrink-0 text-[8px]">
               {nextProgram.start.getHours().toString().padStart(2, '0')}:
               {nextProgram.start.getMinutes().toString().padStart(2, '0')}
             </span>
             <span className="truncate opacity-80">{nextProgram.title}</span>
-          </p>
+          </div>
         )}
       </div>
     </div>
   );
+}, (prevProps, nextProps) => {
+  // Custom comparison to prevent unnecessary re-renders
+  if (prevProps.channel.id !== nextProps.channel.id) return false;
+  if (prevProps.rowIndex !== nextProps.rowIndex) return false;
+  if (prevProps.colIndex !== nextProps.colIndex) return false;
+  if (prevProps.activeRow !== nextProps.activeRow) {
+    // Only re-render if focus entered or left this card
+    const wasFocused = prevProps.activeRow === prevProps.rowIndex && prevProps.activeCol === prevProps.colIndex;
+    const isFocused = nextProps.activeRow === nextProps.rowIndex && nextProps.activeCol === nextProps.colIndex;
+    if (wasFocused !== isFocused) return false;
+  }
+  if (prevProps.activeCol !== nextProps.activeCol) {
+    const wasFocused = prevProps.activeRow === prevProps.rowIndex && prevProps.activeCol === nextProps.colIndex;
+    const isFocused = nextProps.activeRow === nextProps.rowIndex && nextProps.activeCol === nextProps.colIndex;
+    if (wasFocused !== isFocused) return false;
+  }
+  if (prevProps.previewChannelId !== nextProps.previewChannelId) return false;
+  if (prevProps.themeColor !== nextProps.themeColor) return false;
+  if (prevProps.uiMode !== nextProps.uiMode) return false;
+  if (prevProps.deviceType !== nextProps.deviceType) return false;
+  if (prevProps.orientation !== nextProps.orientation) return false;
+  
+  // Favorites check
+  const wasFav = Array.isArray(prevProps.favorites) && prevProps.favorites.includes(prevProps.channel.id);
+  const isFav = Array.isArray(nextProps.favorites) && nextProps.favorites.includes(nextProps.channel.id);
+  if (wasFav !== isFav) return false;
+
+  // Progress check - only re-render if this channel's progress changed
+  if (prevProps.playbackProgress[prevProps.channel.id] !== nextProps.playbackProgress[nextProps.channel.id]) return false;
+
+  // EPG check - only re-render if now passed a threshold or epgData for this channel changed
+  // We check 'now' by minute to reduce re-renders from the 1-minute ticker
+  if (prevProps.epgData !== nextProps.epgData) return false;
+  if (Math.floor(prevProps.now.getTime() / 60000) !== Math.floor(nextProps.now.getTime() / 60000)) return false;
+
+  return true;
 });

@@ -88,14 +88,22 @@ export const Logo: React.FC<LogoProps> = ({ uiMode, logoStyle }) => {
         return (
           <motion.div
             key="mooncrown-glass"
-            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-            animate={{ opacity: 1, backdropFilter: 'blur(8px)' }}
-            className="flex items-center gap-2 bg-white/10 border border-white/20 px-4 py-1 rounded-full backdrop-blur-md"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center gap-2 bg-white/5 border border-white/10 px-4 py-1.5 rounded-2xl backdrop-blur-xl shadow-xl group/logo cursor-pointer"
           >
-            <Tv className="text-white w-6 h-6 fill-current" />
-            <span className="font-black text-xl md:text-2xl tracking-tighter uppercase italic flex">
-              <span className="text-white/90">MOONCROWN</span>
-              <span style={{ color: 'var(--theme-color)' }}>3FLİX</span>
+            <div className="relative">
+              <Tv className="text-white w-7 h-7 md:w-8 md:h-8 fill-white/10" />
+              <motion.div 
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="absolute inset-0 bg-white/20 blur-md rounded-full pointer-events-none" 
+              />
+            </div>
+            <span className="font-black text-xl md:text-2xl tracking-tighter uppercase italic flex gap-0.5">
+              <span className="text-white/90 drop-shadow-sm">MOON</span>
+              <span style={{ color: 'var(--theme-color)', filter: 'brightness(1.2)' }} className="drop-shadow-sm">CROWN</span>
+              <span className="text-white/40 font-light ml-1">3FX</span>
             </span>
           </motion.div>
         );

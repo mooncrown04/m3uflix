@@ -1,86 +1,37 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, Sun, List as ListIcon, Settings, Smartphone, 
   ChevronLeft, ChevronRight, ChevronDown, Plus, 
-  Check, Tv, Grid, Equal, Monitor, Tablet, 
+  Check, Tv, Grid, Equal, Monitor, Tablet, Info,
   User, Link as LinkIcon, Link2, RefreshCw, Trash2,
   Bell, FastForward, Mic, MicOff, Key, Globe, Mail,
   ExternalLink, CircleDashed, Activity, Sparkles, Copy,
-  Clock
+  Clock, Download, Hash
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { cn } from '../../lib/utils';
-import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect } from '../../types';
-import { useSettings } from '../../hooks/useSettings';
+import { Playlist, UIMode, LogoStyle, Top10Style, FocusEffect, KeyMap, DEFAULT_KEY_MAP } from '../../types';
+import { Logo } from '../Layout/Logo';
+import { useSettingsStore } from '../../store/useSettingsStore';
+import { useChannelStore } from '../../store/useChannelStore';
+import { useNavigationStore } from '../../store/useNavigationStore';
+import { useRemoteControl } from '../../hooks/useRemoteControl';
+import { useToasts } from '../../hooks/useToasts';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  settings: any; // From useSettings hook
-  playlists: Playlist[];
-  setPlaylists: (playlists: Playlist[]) => void;
-  currentPlaylistId: string | null;
-  setCurrentPlaylistId: (id: string | null) => void;
-  loadPlaylist: (url: string, epgUrl?: string) => Promise<void>;
-  isLoading: boolean;
-  setNavContext: (context: any) => void;
-  setActiveRow: (row: number) => void;
-  setActiveCol: (col: number) => void;
-  newPlaylistName: string;
-  setNewPlaylistName: (name: string) => void;
-  newPlaylistUrl: string;
-  setNewPlaylistUrl: (url: string) => void;
-  playlistUrl: string;
-  setPlaylistUrl: (url: string) => void;
-  epgUrl: string;
-  setEpgUrl: (url: string) => void;
-  extraUrl: string;
-  setExtraUrl: (url: string) => void;
-  showToast: (message: string, type?: 'error' | 'success' | 'info') => void;
-  pairingCode: string | null;
-  pairingStatus: 'idle' | 'pairing' | 'connected' | 'error';
-  onAddPlaylist: (url: string) => void;
-  onRefreshPlaylist: (id: string) => void;
-  onDeletePlaylist: (id: string) => void;
-  onUpdateEPG: (url: string) => void;
-  themeColor: string;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
-  onClose,
-  settings,
-  playlists,
-  setPlaylists,
-  currentPlaylistId,
-  setCurrentPlaylistId,
-  loadPlaylist,
-  isLoading,
-  setNavContext,
-  setActiveRow,
-  setActiveCol,
-  newPlaylistName,
-  setNewPlaylistName,
-  newPlaylistUrl,
-  setNewPlaylistUrl,
-  playlistUrl,
-  setPlaylistUrl,
-  epgUrl,
-  setEpgUrl,
-  extraUrl,
-  setExtraUrl,
-  showToast,
-  pairingCode,
-  pairingStatus,
-  onAddPlaylist,
-  onRefreshPlaylist,
-  onDeletePlaylist,
-  onUpdateEPG,
-  themeColor
+  onClose
 }) => {
   const settingsSidebarRef = useRef<HTMLDivElement>(null);
   const settingsContentRef = useRef<HTMLDivElement>(null);
+
+  const [capturingKey, setCapturingKey] = React.useState<string | null>(null);
 
   const {
     setThemeColor,
@@ -95,24 +46,147 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     dynamicThemeEnabled, setDynamicThemeEnabled,
     voiceControlEnabled, setVoiceControlEnabled,
     cinemaModeEnabled, setCinemaModeEnabled,
+    sportsTickerEnabled, setSportsTickerEnabled,
+    newsTickerEnabled, setNewsTickerEnabled,
     tmdbEnabled, setTmdbEnabled,
     tmdbApiKey, setTmdbApiKey,
     geminiApiKey, setGeminiApiKey,
     customProxyUrl, setCustomProxyUrl,
     playerEngine, setPlayerEngine,
     ambilightMode, setAmbilightMode,
+    mixColor1, setMixColor1,
+    mixColor2, setMixColor2,
+    keyMap, setKeyMap,
+    themeColor
+  } = useSettingsStore();
+
+  const {
+    playlists,
+    currentPlaylistId,
+    setCurrentPlaylistId,
+    setPlaylistUrl,
+    setPlaylists,
+    searchQuery,
+    setSearchQuery,
+    epgData,
+    addPlaylist,
+    deletePlaylist,
+    refreshPlaylist,
+    updateEPG,
+    epgUrl,
+    setEpgUrl
+  } = useChannelStore();
+
+  const {
+    setNavContext,
+    setActiveRow,
+    setActiveCol,
+    installPrompt,
+    setInstallPrompt,
     activeSettingsTab, setActiveSettingsTab,
     settingsArea, setSettingsArea,
     settingsSection, setSettingsSection,
     settingsFocus, setSettingsFocus,
     sidebarFocus, setSidebarFocus,
-    expandedSections, setExpandedSections,
-    toggleSection,
-    mixColor1, setMixColor1,
-    mixColor2, setMixColor2,
-    mixedColor,
-    PROFILE_PICS
-  } = settings;
+  } = useNavigationStore();
+
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (id: string) => {
+    setExpandedSections(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+  const mixedColor = themeColor;
+
+  const {
+    remoteRoomId: pairingCode,
+    isRemoteConnected,
+    isTvSocketConnected
+  } = useRemoteControl();
+  const pairingStatus: 'connected' | 'disconnected' | 'pairing' = isRemoteConnected ? 'connected' : (isTvSocketConnected ? 'pairing' : 'disconnected');
+
+  const { showToast } = useToasts();
+
+  const PROFILE_PICS = [
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Bear',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Caitlyn',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Dave',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Eliot',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Fiona',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=George',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Heidi',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Isaac',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Jack',
+    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=1',
+    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=2',
+    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=3',
+    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=4',
+    'https://api.dicebear.com/7.x/fun-emoji/svg?seed=5',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=1',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=2',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=3',
+    'https://api.dicebear.com/7.x/pixel-art/svg?seed=1',
+    'https://api.dicebear.com/7.x/pixel-art/svg?seed=2',
+    'https://api.dicebear.com/7.x/pixel-art/svg?seed=3',
+    'https://api.dicebear.com/7.x/lorelei/svg?seed=1',
+    'https://api.dicebear.com/7.x/lorelei/svg?seed=2',
+    'https://api.dicebear.com/7.x/shapes/svg?seed=1',
+    'https://api.dicebear.com/7.x/shapes/svg?seed=2',
+    'https://api.dicebear.com/7.x/personas/svg?seed=1',
+    'https://api.dicebear.com/7.x/personas/svg?seed=2',
+    'https://api.dicebear.com/7.x/miniavs/svg?seed=1',
+    'https://api.dicebear.com/7.x/miniavs/svg?seed=2',
+    'https://api.dicebear.com/7.x/big-smile/svg?seed=1',
+    'https://api.dicebear.com/7.x/big-smile/svg?seed=2',
+    'https://api.dicebear.com/7.x/bottts-neutral/svg?seed=1',
+    'https://api.dicebear.com/7.x/bottts-neutral/svg?seed=2',
+    'https://api.dicebear.com/7.x/adventurer/svg?seed=1',
+    'https://api.dicebear.com/7.x/adventurer/svg?seed=2',
+    'https://api.dicebear.com/7.x/croodles/svg?seed=1',
+    'https://api.dicebear.com/7.x/croodles/svg?seed=2',
+    'https://api.dicebear.com/7.x/open-peeps/svg?seed=1',
+    'https://api.dicebear.com/7.x/open-peeps/svg?seed=2',
+    'COLOR:#ef4444',
+    'COLOR:#3b82f6',
+    'COLOR:#10b981',
+    'COLOR:#f59e0b',
+    'COLOR:#8b5cf6',
+    'COLOR:#ec4899',
+    'COLOR:#06b6d4',
+    'COLOR:#84cc16',
+    'COLOR:#71717a',
+    'LOGO:mooncrown',
+    'LOGO:mooncrown-gold',
+    'LOGO:mooncrown-silver',
+    'LOGO:mooncrown-neon',
+    'LOGO:mooncrown-glass',
+    'LOGO:mooncrown-fire',
+    'LOGO:minimal',
+    'LOGO:neon',
+    'LOGO:retro',
+    'LOGO:glitch',
+    'THEME_COLOR'
+  ];
+
+  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [newPlaylistUrl, setNewPlaylistUrl] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+
+  useEffect(() => {
+    if (!capturingKey) return;
+
+    const handleCapturingKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setKeyMap((prev: any) => ({ ...prev, [capturingKey]: e.key }));
+      setCapturingKey(null);
+      showToast(`${capturingKey} için ${e.key} tuşu atandı.`, 'success');
+    };
+
+    window.addEventListener('keydown', handleCapturingKey, true);
+    return () => window.removeEventListener('keydown', handleCapturingKey, true);
+  }, [capturingKey, setKeyMap, showToast]);
 
   const scrollSidebar = (direction: 'left' | 'right') => {
     if (settingsSidebarRef.current) {
@@ -132,18 +206,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key;
+      if (capturingKey) return; // Prevent navigation while capturing a key
+
+      const rawKey = e.key;
+      let key = rawKey;
+
+      if (rawKey === keyMap.up) key = 'ArrowUp';
+      else if (rawKey === keyMap.down) key = 'ArrowDown';
+      else if (rawKey === keyMap.left) key = 'ArrowLeft';
+      else if (rawKey === keyMap.right) key = 'ArrowRight';
+      else if (rawKey === keyMap.enter || rawKey === 'OK' || rawKey === 'Select') key = 'Enter';
+      else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
 
       switch (key) {
         case 'Enter':
         case 'OK':
           e.preventDefault();
           if (settingsArea === 'tabs') {
-            if (sidebarFocus <= 3) {
+            if (sidebarFocus <= 5) {
               if (sidebarFocus === 3) {
                 setSettingsArea('content');
                 setSettingsSection(0);
                 setSettingsFocus(100);
+              } else if (sidebarFocus === 5) {
+                setSettingsArea('content');
+                setSettingsSection(0);
+                setSettingsFocus(300);
               } else {
                 setSettingsArea('sections');
                 setSettingsSection(0);
@@ -152,11 +240,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   setExpandedSections((prev: any) => ({ ...prev, [key]: true }));
                 }
               }
-            } else if (sidebarFocus === 4) {
+            } else if (sidebarFocus === 6) {
               onClose();
             }
           } else if (settingsArea === 'sections') {
-            toggleSection(activeSettingsTab, settingsSection);
+            toggleSection(`${activeSettingsTab}-${settingsSection}`);
           } else if (settingsArea === 'content') {
             const focusedElement = document.querySelector('.settings-focused') as HTMLElement;
             if (focusedElement) {
@@ -189,84 +277,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           e.preventDefault();
           if (settingsArea === 'tabs') {
             if (window.innerWidth < 768) {
-              const nextFocus = (sidebarFocus + 1) % 5;
+              const nextFocus = (sidebarFocus + 1) % 6;
               setSidebarFocus(nextFocus);
               setActiveSettingsTab(nextFocus);
             } else {
-              if (sidebarFocus < 4) {
-                setSettingsArea('sections');
-                setSettingsSection(0);
-              } else if (sidebarFocus === 4) {
-                setSettingsArea('content');
-                setSettingsFocus(100);
+              if (sidebarFocus < 6) {
+                if (activeSettingsTab === 0 || activeSettingsTab === 1) {
+                  setSettingsArea('sections');
+                  setSettingsSection(0);
+                } else {
+                  setSettingsArea('content');
+                  if (activeSettingsTab === 2) setSettingsFocus(0);
+                  if (activeSettingsTab === 3) setSettingsFocus(200);
+                  if (activeSettingsTab === 4) setSettingsFocus(0);
+                  if (activeSettingsTab === 5) setSettingsFocus(300);
+                }
               }
             }
           } else if (settingsArea === 'sections') {
             const key = `${activeSettingsTab}-${settingsSection}`;
             if (!expandedSections[key]) {
-              toggleSection(activeSettingsTab, settingsSection);
+              toggleSection(`${activeSettingsTab}-${settingsSection}`);
             } else {
               setSettingsArea('content');
-              // Focus initialization logic...
               if (activeSettingsTab === 0) {
                 if (settingsSection === 0) setSettingsFocus(0);
                 else if (settingsSection === 1) setSettingsFocus(20);
                 else if (settingsSection === 2) setSettingsFocus(13);
-                else if (settingsSection === 3) setSettingsFocus(15);
+                else if (settingsSection === 3) setSettingsFocus(30);
                 else if (settingsSection === 4) setSettingsFocus(40);
                 else if (settingsSection === 5) setSettingsFocus(50);
                 else if (settingsSection === 6) setSettingsFocus(60);
-                else if (settingsSection === 7) setSettingsFocus(70);
-                else if (settingsSection === 8) setSettingsFocus(80);
-                else if (settingsSection === 9) setSettingsFocus(90);
-                else if (settingsSection === 10) setSettingsFocus(100);
-                else if (settingsSection === 11) setSettingsFocus(17);
               } else if (activeSettingsTab === 1) {
                 if (settingsSection === 0) setSettingsFocus(0);
-                else if (settingsSection === 1) setSettingsFocus(1);
-                else if (settingsSection === 2) setSettingsFocus(4);
-                else if (settingsSection === 3) setSettingsFocus(6);
-                else if (settingsSection === 4) setSettingsFocus(8);
                 else if (settingsSection === 5) setSettingsFocus(20);
-                else if (settingsSection === 6) setSettingsFocus(14);
-              } else if (activeSettingsTab === 2) {
-                if (settingsSection === 0) setSettingsFocus(0);
-                else if (settingsSection === 1) setSettingsFocus(1);
-                else if (settingsSection === 2) setSettingsFocus(2);
-                else if (settingsSection === 3) setSettingsFocus(3);
-                else if (settingsSection === 4) setSettingsFocus(11);
-                else if (settingsSection === 5) setSettingsFocus(15);
-                else if (settingsSection === 6) setSettingsFocus(16);
-              } else if (activeSettingsTab === 3) {
-                setSettingsFocus(100);
               }
             }
           } else if (settingsArea === 'content') {
-            // Content navigation logic...
             if (activeSettingsTab === 0) {
-              if (settingsSection === 0 && settingsFocus < 12) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 1 && settingsFocus < 23) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 2 && settingsFocus === 13) setSettingsFocus(14);
-              else if (settingsSection === 3 && settingsFocus === 15) setSettingsFocus(16);
-              else if (settingsSection === 4 && settingsFocus < 50) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 5 && settingsFocus < 54) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 6 && settingsFocus < 65) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 7 && settingsFocus < 74) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 10 && settingsFocus < 115) setSettingsFocus((prev: number) => prev + 1);
-            } else if (activeSettingsTab === 1) {
-              if (settingsSection === 1 && settingsFocus === 1) setSettingsFocus(2);
-              else if (settingsSection === 2 && settingsFocus === 4) setSettingsFocus(5);
-              else if (settingsSection === 3 && settingsFocus === 6) setSettingsFocus(7);
-              else if (settingsSection === 4 && settingsFocus < 13) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 5) {
-                if (settingsFocus === 20) setSettingsFocus(21);
-                else if (settingsFocus >= 30 && settingsFocus % 2 === 0) setSettingsFocus((prev: number) => prev + 1);
-              }
-              else if (settingsSection === 6 && settingsFocus === 14) setSettingsFocus(15);
-            } else if (activeSettingsTab === 2) {
-              if (settingsSection === 3 && settingsFocus < 10) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 4 && settingsFocus < 14) setSettingsFocus((prev: number) => prev + 1);
-              else if (settingsSection === 6 && settingsFocus === 16) setSettingsFocus(17);
+              if (settingsSection === 0 && settingsFocus < 11) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 1 && settingsFocus < 22) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 2 && settingsFocus < 23) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 3 && settingsFocus < 34) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 4 && settingsFocus < 41) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 5 && settingsFocus < 53) setSettingsFocus((prev: number) => prev + 1);
+              else if (settingsSection === 6 && settingsFocus < 66) setSettingsFocus((prev: number) => prev + 1);
+            } else if (activeSettingsTab === 5) {
+              if (settingsFocus < 300 + Object.keys(keyMap).length - 1) setSettingsFocus((prev: number) => prev + 1);
             }
           }
           break;
@@ -275,43 +332,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           e.preventDefault();
           if (settingsArea === 'tabs') {
             if (window.innerWidth < 768) {
-              const nextFocus = (sidebarFocus - 1 + 5) % 5;
+              const nextFocus = (sidebarFocus - 1 + 6) % 6;
               setSidebarFocus(nextFocus);
               setActiveSettingsTab(nextFocus);
             }
           } else if (settingsArea === 'sections') {
             setSettingsArea('tabs');
           } else if (settingsArea === 'content') {
+            // Internal content navigation
             if (activeSettingsTab === 0) {
               if (settingsSection === 0 && settingsFocus > 0) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 1 && settingsFocus > 20) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 2 && settingsFocus === 14) setSettingsFocus(13);
-              else if (settingsSection === 3 && settingsFocus === 16) setSettingsFocus(15);
+              else if (settingsSection === 2 && settingsFocus > 13) setSettingsFocus((prev: number) => prev - 1);
+              else if (settingsSection === 3 && settingsFocus > 30) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 4 && settingsFocus > 40) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 5 && settingsFocus > 50) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 6 && settingsFocus > 60) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 7 && settingsFocus > 70) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 10 && settingsFocus > 100) setSettingsFocus((prev: number) => prev - 1);
-              else setSettingsArea('sections');
-            } else if (activeSettingsTab === 1) {
-              if (settingsSection === 1 && settingsFocus === 2) setSettingsFocus(1);
-              else if (settingsSection === 2 && settingsFocus === 5) setSettingsFocus(4);
-              else if (settingsSection === 3 && settingsFocus === 7) setSettingsFocus(6);
-              else if (settingsSection === 4 && settingsFocus > 8) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 5) {
-                if (settingsFocus === 21) setSettingsFocus(20);
-                else if (settingsFocus >= 31 && settingsFocus % 2 !== 0) setSettingsFocus((prev: number) => prev - 1);
-                else setSettingsArea('sections');
-              }
-              else if (settingsSection === 6 && settingsFocus === 15) setSettingsFocus(14);
-              else setSettingsArea('sections');
-            } else if (activeSettingsTab === 2) {
-              if (settingsSection === 3 && settingsFocus > 3) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 4 && settingsFocus > 11) setSettingsFocus((prev: number) => prev - 1);
-              else if (settingsSection === 6 && settingsFocus === 17) setSettingsFocus(16);
-              else setSettingsArea('sections');
+              else if (activeSettingsTab === 0 || activeSettingsTab === 1) setSettingsArea('sections');
+              else setSettingsArea('tabs');
+            } else if (activeSettingsTab === 5) {
+              if (settingsFocus > 300) setSettingsFocus((prev: number) => prev - 1);
+              else setSettingsArea('tabs');
             } else {
-              setSettingsArea('sections');
+              if (activeSettingsTab === 0 || activeSettingsTab === 1) setSettingsArea('sections');
+              else setSettingsArea('tabs');
             }
           }
           break;
@@ -319,16 +363,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         case 'ArrowDown':
           e.preventDefault();
           if (settingsArea === 'tabs') {
-            const nextFocus = (sidebarFocus + 1) % 6;
-            setSidebarFocus(nextFocus);
-            if (nextFocus < 5) {
-              setActiveSettingsTab(nextFocus);
-              setSettingsSection(0);
-              setSettingsFocus(0);
-              setExpandedSections({});
+            if (window.innerWidth < 768) {
+              // On mobile, ArrowDown enters the first section/content of the active tab
+              const firstSectionHeader = document.querySelector('h3.font-black.uppercase') as HTMLElement;
+              if (firstSectionHeader) {
+                setSettingsArea('sections');
+                setSettingsSection(0);
+              } else {
+                setSettingsArea('content');
+                setSettingsFocus(0);
+              }
+            } else {
+              const nextFocus = (sidebarFocus + 1) % 7;
+              setSidebarFocus(nextFocus);
+              if (nextFocus < 6) {
+                setActiveSettingsTab(nextFocus);
+                setSettingsSection(0);
+                setSettingsFocus(0);
+                setExpandedSections({});
+              }
             }
           } else if (settingsArea === 'sections') {
-            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : activeSettingsTab === 2 ? 7 : activeSettingsTab === 4 ? 1 : 1;
+            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : 1;
             setSettingsSection((prev: number) => (prev + 1) % maxSections);
           } else if (settingsArea === 'content') {
             if (activeSettingsTab === 1 && settingsSection === 5) {
@@ -338,6 +394,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               if (settingsFocus < 6) setSettingsFocus((prev: number) => prev + 6);
             } else if (activeSettingsTab === 0 && settingsSection === 1) {
               if (settingsFocus < 22) setSettingsFocus((prev: number) => prev + 2);
+            } else if (activeSettingsTab === 2 && settingsSection === 0) {
+              if (settingsFocus === 0) setSettingsFocus(50);
+            } else if (activeSettingsTab === 4) {
+              if (settingsFocus < 4) setSettingsFocus((prev: number) => prev + 1);
+            } else if (activeSettingsTab === 5) {
+              if (settingsFocus < 300 + Object.keys(keyMap).length - 2) setSettingsFocus((prev: number) => prev + 2);
+              else if (settingsFocus < 350) setSettingsFocus(350);
             }
           }
           break;
@@ -345,16 +408,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         case 'ArrowUp':
           e.preventDefault();
           if (settingsArea === 'tabs') {
-            const nextFocus = (sidebarFocus - 1 + 6) % 6;
-            setSidebarFocus(nextFocus);
-            if (nextFocus < 5) {
-              setActiveSettingsTab(nextFocus);
-              setSettingsSection(0);
-              setSettingsFocus(0);
-              setExpandedSections({});
+            if (window.innerWidth >= 768) {
+              const nextFocus = (sidebarFocus - 1 + 7) % 7;
+              setSidebarFocus(nextFocus);
+              if (nextFocus < 6) {
+                setActiveSettingsTab(nextFocus);
+                setSettingsSection(0);
+                setSettingsFocus(0);
+                setExpandedSections({});
+              }
             }
           } else if (settingsArea === 'sections') {
-            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : activeSettingsTab === 2 ? 7 : activeSettingsTab === 4 ? 1 : 1;
+            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : 1;
             setSettingsSection((prev: number) => (prev - 1 + maxSections) % maxSections);
           } else if (settingsArea === 'content') {
             if (activeSettingsTab === 1 && settingsSection === 5) {
@@ -364,6 +429,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               if (settingsFocus >= 6) setSettingsFocus((prev: number) => prev - 6);
             } else if (activeSettingsTab === 0 && settingsSection === 1) {
               if (settingsFocus >= 22) setSettingsFocus((prev: number) => prev - 2);
+            } else if (activeSettingsTab === 2 && settingsSection === 0) {
+              if (settingsFocus === 50) setSettingsFocus(0);
+            } else if (activeSettingsTab === 4) {
+              if (settingsFocus > 0) setSettingsFocus((prev: number) => prev - 1);
+            } else if (activeSettingsTab === 5) {
+              if (settingsFocus >= 302) setSettingsFocus((prev: number) => prev - 2);
+              else if (settingsFocus === 350) setSettingsFocus(300 + Object.keys(keyMap).length - 1);
             }
           }
           break;
@@ -375,23 +447,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, settingsArea, sidebarFocus, settingsSection, settingsFocus, activeSettingsTab, expandedSections, playlists.length, onClose, setNavContext, setActiveRow, setActiveCol, toggleSection, setSettingsArea, setSettingsSection, setSettingsFocus, setSidebarFocus, setActiveSettingsTab, setExpandedSections]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-0 sm:p-4"
-    >
-      <motion.div
-        initial={{ y: 50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 50, opacity: 0 }}
-        className={cn(
-          "w-full h-full sm:h-[600px] sm:max-h-[90vh] sm:max-w-4xl shadow-2xl flex flex-col md:flex-row overflow-hidden",
-          uiMode === 'modern' && "bg-white/5 backdrop-blur-3xl border border-white/20 sm:rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
-          uiMode === 'classic' && "bg-zinc-950 border-0 sm:border-4 border-zinc-800 sm:rounded-none shadow-[30px_30px_0_rgba(0,0,0,0.3)]",
-          uiMode === 'minimalist' && "bg-black border-0 sm:border border-white/10 sm:rounded-none"
-        )}
-      >
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-0 sm:p-4"
+        >
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className={cn(
+              "w-full h-full sm:h-[600px] sm:max-h-[90vh] sm:max-w-4xl shadow-2xl flex flex-col md:flex-row overflow-hidden",
+              uiMode === 'modern' && "bg-white/5 backdrop-blur-3xl border border-white/20 sm:rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
+              uiMode === 'classic' && "bg-zinc-950 border-0 sm:border-4 border-zinc-800 sm:rounded-none shadow-[30px_30px_0_rgba(0,0,0,0.3)]",
+              uiMode === 'minimalist' && "bg-black border-0 sm:border border-white/10 sm:rounded-none"
+            )}
+          >
         {uiMode === 'modern' && (
           <div 
             className="absolute -top-48 -left-48 w-96 h-96 rounded-full blur-[120px] opacity-20 animate-pulse"
@@ -421,50 +495,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
           <div 
             ref={settingsSidebarRef}
-            className="w-full h-full px-8 py-3 md:p-5 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-y-auto custom-scrollbar scroll-smooth"
+            className="w-full h-full px-8 py-3 md:p-3 flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-y-auto custom-scrollbar scroll-smooth"
           >
             <div className="hidden md:block mb-6">
               <h2 className="text-xl font-black italic tracking-tighter uppercase text-white opacity-50">Ayarlar</h2>
             </div>
-          {[
-            { id: 0, label: 'Görünüm', icon: Sun },
-            { id: 1, label: 'Liste', icon: ListIcon },
-            { id: 2, label: 'Genel', icon: Settings },
-            { id: 3, label: 'Kumanda', icon: Smartphone },
-            { id: 4, label: 'AI Gözcü', icon: Sparkles }
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              data-tab-id={tab.id}
-              data-sidebar-focus={tab.id}
-              onClick={() => {
-                setActiveSettingsTab(tab.id);
-                setSidebarFocus(tab.id);
-                setSettingsArea('content');
-                setSettingsSection(0);
-                setSettingsFocus(0);
-                setExpandedSections({});
-              }}
-              className={cn(
-                "relative flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 font-bold transition-all whitespace-nowrap overflow-hidden",
-                uiMode === 'modern' && "rounded-lg",
-                uiMode === 'classic' && "rounded-none border-l-2 border-transparent",
-                uiMode === 'minimalist' && "rounded-none border-0",
-                activeSettingsTab === tab.id 
-                  ? (uiMode === 'modern' 
-                      ? "bg-white/20 text-white scale-105 shadow-lg backdrop-blur-md border border-white/20" 
-                      : uiMode === 'classic'
-                      ? "bg-zinc-800 text-white border-l-4 border-white"
-                      : "text-white border-b-2 border-white")
-                  : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
-                settingsArea === 'tabs' && sidebarFocus === tab.id && "ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused"
-              )}
-            >
+            {[
+              { id: 0, label: 'Görünüm', icon: Sun },
+              { id: 1, label: 'Liste', icon: ListIcon },
+              { id: 2, label: 'Genel', icon: Settings },
+              { id: 3, label: 'Kumanda', icon: Smartphone },
+              { id: 4, label: 'AI Gözcü', icon: Sparkles },
+              { id: 5, label: 'Tuş Atamaları', icon: Key }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                data-tab-id={tab.id}
+                data-sidebar-focus={tab.id}
+                onClick={() => {
+                  setActiveSettingsTab(tab.id);
+                  setSidebarFocus(tab.id);
+                  setSettingsArea('content');
+                  setSettingsSection(0);
+                  setSettingsFocus(0);
+                  setExpandedSections({});
+                }}
+                onMouseEnter={() => {
+                  setSettingsArea('tabs');
+                  setSidebarFocus(tab.id);
+                  setActiveSettingsTab(tab.id);
+                }}
+                className={cn(
+                  "relative flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 font-bold transition-all whitespace-nowrap overflow-hidden",
+                  uiMode === 'modern' && "rounded-lg",
+                  uiMode === 'classic' && "rounded-none border-l-2 border-transparent",
+                  uiMode === 'minimalist' && "rounded-none border-0",
+                  activeSettingsTab === tab.id 
+                    ? (uiMode === 'modern' 
+                        ? "bg-white/20 text-white scale-105 shadow-lg backdrop-blur-md border border-white/20" 
+                        : uiMode === 'classic'
+                        ? "bg-zinc-800 text-white border-l-4 border-white"
+                        : "text-white border-b-2 border-white")
+                    : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
+                  settingsArea === 'tabs' && sidebarFocus === tab.id && "ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused"
+                )}
+              >
               {activeSettingsTab === tab.id && (
                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-600" style={{ backgroundColor: themeColor }} />
               )}
               <tab.icon className="w-4 h-4 md:w-5 md:h-5" />
               <span className="text-xs md:text-sm">{tab.label}</span>
+              {tab.id === 1 && playlists.length > 0 && (
+                <span className="ml-auto bg-white/10 text-[10px] px-1.5 py-0.5 rounded-full font-black">
+                  {playlists.length}
+                </span>
+              )}
             </button>
           ))}
           </div>
@@ -472,12 +557,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="hidden md:block mt-auto pt-4 space-y-4">
             <button
               onClick={onClose}
+              onMouseEnter={() => {
+                setSettingsArea('tabs');
+                setSidebarFocus(6);
+              }}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 font-bold transition-all",
                 uiMode === 'modern' && "rounded-xl",
                 uiMode === 'classic' && "rounded-none border border-zinc-800",
                 uiMode === 'minimalist' && "rounded-none border-0",
-                settingsArea === 'tabs' && sidebarFocus === 4 
+                settingsArea === 'tabs' && sidebarFocus === 6 
                   ? (uiMode === 'modern' ? "bg-white text-black ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b-2 border-white settings-focused") 
                   : "text-zinc-500 hover:bg-white/5 hover:text-white"
               )}
@@ -507,13 +596,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="md:hidden p-4 border-b border-white/5 flex justify-between items-center">
             <h2 className="text-xl font-black italic uppercase text-white">
-              {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : activeSettingsTab === 2 ? 'Genel' : 'Kumanda'}
+              {activeSettingsTab === 0 ? 'Görünüm' : 
+               activeSettingsTab === 1 ? 'Liste' : 
+               activeSettingsTab === 2 ? 'Genel' : 
+               activeSettingsTab === 3 ? 'Kumanda' :
+               activeSettingsTab === 4 ? 'AI Gözcü' : 'Tuş Atamaları'}
             </h2>
             <button onClick={onClose} className="p-2 bg-white/5 rounded-full"><X className="w-5 h-5" /></button>
           </div>
 
           <div className={cn(
-            "flex-1 overflow-y-auto p-6 md:p-10 pb-[50vh] space-y-10 custom-scrollbar scroll-smooth transition-all duration-500",
+            "flex-1 overflow-y-auto p-4 md:p-6 pb-[40vh] space-y-2 custom-scrollbar scroll-smooth transition-all duration-500",
             settingsArea === 'tabs' ? "opacity-30 grayscale-[0.5] scale-[0.98]" : "opacity-100 grayscale-0 scale-100"
           )} ref={settingsContentRef}>
             <AnimatePresence mode="wait">
@@ -524,12 +617,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   initial={{ opacity: 0, y: 10 }} 
                   animate={{ opacity: 1, y: 0 }} 
                   exit={{ opacity: 0, y: -10 }}
-                  className="space-y-10"
+                  className="space-y-5"
                 >
                   {/* Tema Rengi */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 0)}
+                      onClick={() => toggleSection('0-0')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(0);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -565,6 +662,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <div key={c.color} className="flex flex-col items-center gap-2">
                                 <button
                                   onClick={() => setThemeColor(c.color)}
+                                  onMouseEnter={() => {
+                                    setSettingsArea('content');
+                                    setSettingsFocus(i);
+                                  }}
                                   style={{ backgroundColor: c.color }}
                                   className={cn(
                                     "w-10 h-10 md:w-12 md:h-12 transition-all border-4",
@@ -584,9 +685,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </AnimatePresence>
                   </section>
                   {/* UI Modu */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 1)}
+                      onClick={() => toggleSection('0-1')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(1);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -613,6 +718,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 key={mode.id}
                                 onClick={() => setUiMode(mode.id as UIMode)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(20 + i);
+                                }}
                                 className={cn(
                                   "p-4 flex flex-col items-center gap-3 transition-all border-2 text-center",
                                   uiMode === 'modern' && "rounded-2xl",
@@ -636,11 +745,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       )}
                     </AnimatePresence>
                   </section>
-
                   {/* Logo Stili */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 2)}
+                      onClick={() => toggleSection('0-2')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(2);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -658,27 +770,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <AnimatePresence>
                       {expandedSections['0-2'] && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                          <div className="flex flex-wrap gap-4 p-2">
+                          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 p-2">
                             {[
                               { id: 'default', label: 'Varsayılan' },
-                              { id: 'glass', label: 'Cam' },
-                              { id: 'neon', label: 'Neon' }
+                              { id: 'mooncrown', label: 'MoonCrown' },
+                              { id: 'mooncrown-gold', label: 'Altın' },
+                              { id: 'mooncrown-silver', label: 'Gümüş' },
+                              { id: 'mooncrown-neon', label: 'Neon' },
+                              { id: 'mooncrown-glass', label: 'Cam' },
+                              { id: 'mooncrown-fire', label: 'Ateş' },
+                              { id: 'minimal', label: 'Minimalist' },
+                              { id: 'neon', label: 'Saf Neon' },
+                              { id: 'retro', label: 'Retro' },
+                              { id: 'glitch', label: 'Glitch' }
                             ].map((style, i) => (
                               <button
                                 key={style.id}
                                 onClick={() => setLogoStyle(style.id as LogoStyle)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(13 + i);
+                                }}
                                 className={cn(
-                                  "px-6 py-3 font-bold transition-all border-2",
+                                  "px-4 py-3 font-bold transition-all border-2 text-[10px] uppercase tracking-widest overflow-hidden relative group",
                                   uiMode === 'modern' && "rounded-xl",
                                   uiMode === 'classic' && "rounded-none",
                                   uiMode === 'minimalist' && "rounded-none border-0",
                                   logoStyle === style.id 
-                                    ? "bg-white/10 border-white text-white" 
-                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10",
+                                    ? "bg-white/10 border-white text-white shadow-lg" 
+                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10 hover:border-white/20",
                                   settingsArea === 'content' && settingsFocus === 13 + i && "ring-4 ring-white scale-105 z-10 settings-focused"
                                 )}
                               >
-                                {style.label}
+                                {logoStyle === style.id && (
+                                  <motion.div 
+                                    layoutId="logo-active-glow"
+                                    className="absolute inset-0 bg-white/5 blur-xl group-hover:bg-white/10"
+                                  />
+                                )}
+                                <span className="relative z-10">{style.label}</span>
                               </button>
                             ))}
                           </div>
@@ -687,9 +817,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </AnimatePresence>
                   </section>
                   {/* Odak Efekti */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 3)}
+                      onClick={() => toggleSection('0-3')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(3);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -707,28 +841,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <AnimatePresence>
                       {expandedSections['0-3'] && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                          <div className="flex flex-wrap gap-4 p-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-2">
                             {[
                               { id: 'default', label: 'Varsayılan' },
                               { id: 'glow', label: 'Parlayan' },
+                              { id: 'pulse', label: 'Mıknatıs' },
                               { id: 'border', label: 'Kenarlık' },
-                              { id: 'none', label: 'Yok' }
+                              { id: 'scale', label: 'Büyütme' }
                             ].map((effect, i) => (
                               <button
                                 key={effect.id}
                                 onClick={() => setFocusEffect(effect.id as FocusEffect)}
                                 className={cn(
-                                  "px-6 py-3 font-bold transition-all border-2",
+                                  "px-2 py-4 flex flex-col items-center justify-center gap-2 transition-all border-2 text-center overflow-hidden relative",
                                   uiMode === 'modern' && "rounded-xl",
                                   uiMode === 'classic' && "rounded-none",
                                   uiMode === 'minimalist' && "rounded-none border-0",
                                   focusEffect === effect.id 
-                                    ? "bg-white/10 border-white text-white" 
-                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10",
-                                  settingsArea === 'content' && settingsFocus === 15 + i && "ring-4 ring-white scale-105 z-10 settings-focused"
+                                    ? "bg-white/10 border-white text-white shadow-xl" 
+                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10 hover:border-white/20",
+                                  settingsArea === 'content' && settingsFocus === 30 + i && "ring-4 ring-white scale-105 z-10 settings-focused"
                                 )}
                               >
-                                {effect.label}
+                                <div className={cn(
+                                  "w-6 h-6 rounded border-2 transition-all",
+                                  effect.id === 'default' && "border-white/20",
+                                  effect.id === 'glow' && "border-white shadow-[0_0_10px_white]",
+                                  effect.id === 'pulse' && "border-white animate-pulse",
+                                  effect.id === 'border' && "border-white border-dashed",
+                                  effect.id === 'scale' && "border-white scale-125"
+                                )} />
+                                <span className="text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">{effect.label}</span>
                               </button>
                             ))}
                           </div>
@@ -738,9 +881,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Poster Yönü */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 4)}
+                      onClick={() => toggleSection('0-4')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(4);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -787,9 +934,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Saat Stili */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 5)}
+                      onClick={() => toggleSection('0-5')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(5);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -838,9 +989,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Top 10 Stili */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 6)}
+                      onClick={() => toggleSection('0-6')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(6);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -858,29 +1013,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <AnimatePresence>
                       {expandedSections['0-6'] && (
                         <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-                          <div className="flex flex-wrap gap-4 p-2">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-6">
                             {[
-                              { id: 'default', label: 'Varsayılan' },
-                              { id: 'netflix', label: 'Netflix' },
-                              { id: 'prime', label: 'Prime' },
-                              { id: 'disney', label: 'Disney+' },
-                              { id: 'none', label: 'Yok' }
+                              { id: 'original', label: 'Klasik Beyaz' },
+                              { id: 'filled', label: 'Dolu Beyaz' },
+                              { id: 'neon', label: 'Neon Beyaz' },
+                              { id: 'theme-original', label: 'Kenarlı Tema' },
+                              { id: 'theme-filled', label: 'Dolu Tema' },
+                              { id: 'theme-neon', label: 'Neon Tema' },
+                              { id: 'glass', label: 'Cam Efekti' }
                             ].map((style, i) => (
                               <button
                                 key={style.id}
                                 onClick={() => setTop10Style(style.id as Top10Style)}
                                 className={cn(
-                                  "px-6 py-3 font-bold transition-all border-2",
-                                  uiMode === 'modern' && "rounded-xl",
+                                  "group relative w-full h-36 flex flex-col items-center justify-center gap-2 transition-all border-2 overflow-hidden",
+                                  uiMode === 'modern' && "rounded-3xl",
                                   uiMode === 'classic' && "rounded-none",
                                   uiMode === 'minimalist' && "rounded-none border-0",
                                   top10Style === style.id 
-                                    ? "bg-white/10 border-white text-white" 
-                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10",
-                                  settingsArea === 'content' && settingsFocus === 60 + i && "ring-4 ring-white scale-105 z-10 settings-focused"
+                                    ? "bg-white/10 border-white text-white shadow-2xl scale-[1.02]" 
+                                    : "bg-white/5 border-transparent text-zinc-500 hover:bg-white/10 hover:border-white/20",
+                                  settingsArea === 'content' && settingsFocus === 60 + i && "ring-4 ring-white scale-105 z-10 settings-focused shadow-2xl"
                                 )}
                               >
-                                {style.label}
+                                {/* Preview Background Image */}
+                                <div className="absolute inset-0 opacity-20 group-hover:opacity-40 transition-all duration-500">
+                                  <img 
+                                    src="https://picsum.photos/seed/sample/200/300" 
+                                    alt="sample" 
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+                                </div>
+
+                                {/* Preview of the Number 1 */}
+                                <div className="absolute -left-2 bottom-0 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                                  <span 
+                                    className="font-black italic text-8xl leading-none"
+                                    style={{ 
+                                      WebkitTextStroke: (style.id === 'original' || style.id === 'neon' || style.id === 'theme-original' || style.id === 'theme-neon') 
+                                        ? `3px ${style.id.startsWith('theme') ? themeColor : 'rgba(255,255,255,0.9)'}` 
+                                        : 'none',
+                                      color: (style.id === 'original' || style.id === 'neon' || style.id === 'theme-original' || style.id === 'theme-neon') 
+                                        ? 'transparent' 
+                                        : (style.id === 'theme-filled' ? themeColor : 'white'),
+                                      textShadow: (style.id === 'neon' || style.id === 'theme-neon')
+                                        ? `0 0 25px ${themeColor}, 0 0 50px ${themeColor}` 
+                                        : (style.id === 'filled' || style.id === 'theme-filled' ? '0 10px 30px rgba(0,0,0,0.8)' : 'none'),
+                                      filter: style.id === 'glass' ? 'blur(1px)' : 'none'
+                                    }}
+                                  >
+                                    1
+                                  </span>
+                                </div>
+
+                                {/* Label positioned at the top-left */}
+                                <div className="absolute top-3 left-3 z-10 bg-black/80 backdrop-blur-md px-3 py-1 rounded-lg border border-white/20 shadow-xl">
+                                  <span className="text-[10px] font-black uppercase tracking-widest leading-none text-white">{style.label}</span>
+                                </div>
+
+                                {top10Style === style.id && (
+                                  <div className="absolute top-3 right-3 w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-2xl ring-2 ring-white/20">
+                                    <Check className="w-4 h-4 text-black" />
+                                  </div>
+                                )}
+
+                                {/* Hover Glow */}
+                                <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                               </button>
                             ))}
                           </div>
@@ -890,9 +1090,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Profil Resmi */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 7)}
+                      onClick={() => toggleSection('0-7')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(7);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -915,8 +1119,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 key={pic}
                                 onClick={() => setProfilePic(pic)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(70 + i);
+                                }}
                                 className={cn(
-                                  "w-12 h-12 md:w-16 md:h-16 transition-all border-4 overflow-hidden",
+                                  "w-12 h-12 md:w-16 md:h-16 transition-all border-4 overflow-hidden flex items-center justify-center bg-zinc-900",
                                   uiMode === 'modern' && "rounded-2xl",
                                   uiMode === 'classic' && "rounded-none",
                                   uiMode === 'minimalist' && "rounded-none border-0",
@@ -924,7 +1132,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   settingsArea === 'content' && settingsFocus === 70 + i && "ring-4 ring-white scale-125 z-10 opacity-100 settings-focused"
                                 )}
                               >
-                                <img src={pic} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                {pic.startsWith('LOGO:') ? (
+                                  <div className="scale-[0.3] md:scale-[0.4] whitespace-nowrap">
+                                    <Logo uiMode={uiMode} logoStyle={pic.split(':')[1] as LogoStyle} />
+                                  </div>
+                                ) : pic.startsWith('COLOR:') ? (
+                                  <div className="w-full h-full" style={{ backgroundColor: pic.split(':')[1] }} />
+                                ) : pic === 'THEME_COLOR' ? (
+                                  <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: themeColor }}>
+                                    <User className="w-6 h-6 text-white" />
+                                  </div>
+                                ) : (
+                                  <img src={pic} alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                )}
                               </button>
                             ))}
                           </div>
@@ -934,9 +1154,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Cihaz Tipi */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <button 
-                      onClick={() => toggleSection(0, 8)}
+                      onClick={() => toggleSection('0-8')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(8);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -963,6 +1187,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 key={type.id}
                                 onClick={() => setDeviceType(type.id as any)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(80 + i);
+                                }}
                                 className={cn(
                                   "px-6 py-3 flex items-center gap-2 font-bold transition-all border-2",
                                   uiMode === 'modern' && "rounded-xl",
@@ -987,7 +1215,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Dinamik Tema */}
                   <section className="space-y-4">
                     <button 
-                      onClick={() => toggleSection(0, 9)}
+                      onClick={() => toggleSection('0-9')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(9);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -1008,6 +1240,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <div className="p-2">
                             <button
                               onClick={() => setDynamicThemeEnabled(!dynamicThemeEnabled)}
+                              onMouseEnter={() => {
+                                setSettingsArea('content');
+                                setSettingsFocus(90);
+                              }}
                               className={cn(
                                 "w-full p-4 flex items-center justify-between transition-all border-2",
                                 uiMode === 'modern' && "rounded-2xl",
@@ -1040,7 +1276,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Ambilight Modu */}
                   <section className="space-y-4">
                     <button 
-                      onClick={() => toggleSection(0, 10)}
+                      onClick={() => toggleSection('0-10')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(10);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -1068,6 +1308,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 key={mode.id}
                                 onClick={() => setAmbilightMode(mode.id as any)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(100 + i);
+                                }}
                                 className={cn(
                                   "px-6 py-3 font-bold transition-all border-2",
                                   uiMode === 'modern' && "rounded-xl",
@@ -1091,7 +1335,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {/* Karışık Renkler */}
                   <section className="space-y-4">
                     <button 
-                      onClick={() => toggleSection(0, 11)}
+                      onClick={() => toggleSection('0-11')}
+                      onMouseEnter={() => {
+                        setSettingsArea('sections');
+                        setSettingsSection(11);
+                      }}
                       className={cn(
                         "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
                         uiMode === 'modern' && "rounded-xl",
@@ -1117,6 +1365,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type="color" 
                                   value={mixColor1}
                                   onChange={(e) => setMixColor1(e.target.value)}
+                                  onMouseEnter={() => {
+                                    setSettingsArea('content');
+                                    setSettingsFocus(17);
+                                  }}
                                   className={cn(
                                     "w-full h-12 bg-transparent cursor-pointer",
                                     settingsArea === 'content' && settingsFocus === 17 && "ring-4 ring-white scale-105 z-10 settings-focused"
@@ -1129,6 +1381,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type="color" 
                                   value={mixColor2}
                                   onChange={(e) => setMixColor2(e.target.value)}
+                                  onMouseEnter={() => {
+                                    setSettingsArea('content');
+                                    setSettingsFocus(18);
+                                  }}
                                   className={cn(
                                     "w-full h-12 bg-transparent cursor-pointer",
                                     settingsArea === 'content' && settingsFocus === 18 && "ring-4 ring-white scale-105 z-10 settings-focused"
@@ -1165,15 +1421,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   initial={{ opacity: 0, y: 10 }} 
                   animate={{ opacity: 1, y: 0 }} 
                   exit={{ opacity: 0, y: -10 }}
-                  className="space-y-8 pb-20"
+                  className="space-y-4 pb-10"
                 >
                   {/* Playlist Ekleme */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Playlist Ekle</h3>
+                  <section className="space-y-2">
+                    <div className="flex flex-col gap-1">
+                      <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Playlist Ekle</h3>
+                      <p className="text-zinc-600 text-[9px] px-1">M3U URL or Cutt.ly/T.ly link/code supported</p>
+                    </div>
                     <div className="flex gap-2">
                       <input
                         type="text"
-                        placeholder="M3U URL"
+                        value={newPlaylistUrl}
+                        onChange={(e) => setNewPlaylistUrl(e.target.value)}
+                        placeholder="M3U URL (Örn: eyuptv.m3u)"
                         className={cn(
                           "flex-1 bg-white/5 border-2 border-transparent px-4 py-3 text-white transition-all outline-none",
                           uiMode === 'modern' && "rounded-xl",
@@ -1183,12 +1444,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            onAddPlaylist(e.currentTarget.value);
-                            e.currentTarget.value = '';
+                            if (newPlaylistUrl) {
+                              addPlaylist(newPlaylistName || 'Yeni Liste', newPlaylistUrl);
+                              setNewPlaylistUrl('');
+                              setNewPlaylistName('');
+                              showToast('Playlist eklendi!', 'success');
+                            }
                           }
                         }}
                       />
                       <button
+                        onClick={() => {
+                          if (newPlaylistUrl) {
+                            addPlaylist(newPlaylistName || 'Yeni Liste', newPlaylistUrl);
+                            setNewPlaylistUrl('');
+                            setNewPlaylistName('');
+                            showToast('Playlist eklendi!', 'success');
+                          }
+                        }}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(101);
+                        }}
                         className={cn(
                           "px-6 py-3 font-black uppercase tracking-widest transition-all",
                           uiMode === 'modern' && "rounded-xl",
@@ -1204,33 +1481,55 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* Playlists Listesi */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Mevcut Listeler</h3>
+                  <section className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                      <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em]">Mevcut Listeler</h3>
+                      <span className="text-[10px] font-black bg-white/10 px-2 py-0.5 rounded-full text-zinc-400">{playlists.length} Liste</span>
+                    </div>
                     <div className="space-y-2">
                       {playlists.map((pl, i) => (
                         <div
                           key={pl.id}
+                          onClick={() => {
+                            setCurrentPlaylistId(pl.id);
+                            setPlaylistUrl(pl.url);
+                            if (pl.epgUrl) setEpgUrl(pl.epgUrl);
+                            showToast(`${pl.name} seçildi, yükleniyor...`, 'info');
+                          }}
+                          onMouseEnter={() => {
+                            setSettingsArea('content');
+                            setSettingsFocus(110 + i);
+                          }}
                           className={cn(
-                            "flex items-center justify-between p-4 transition-all",
-                            uiMode === 'modern' && "rounded-xl bg-white/5",
-                            uiMode === 'classic' && "rounded-none bg-zinc-900 border-l-4 border-zinc-700",
-                            uiMode === 'minimalist' && "rounded-none bg-transparent border-b border-white/10",
-                            settingsArea === 'content' && settingsFocus === 110 + i && "bg-white/10 ring-2 ring-white/20 settings-focused"
+                            "flex items-center justify-between p-4 transition-all cursor-pointer group",
+                            uiMode === 'modern' && "rounded-xl bg-white/5 hover:bg-white/10",
+                            uiMode === 'classic' && "rounded-none bg-zinc-900 border-l-4 border-zinc-700 hover:bg-zinc-800",
+                            uiMode === 'minimalist' && "rounded-none bg-transparent border-b border-white/10 hover:bg-white/5",
+                            currentPlaylistId === pl.id && (uiMode === 'modern' ? "bg-white/20 border-white/20 ring-2 ring-white/50" : "border-l-white bg-zinc-800"),
+                            settingsArea === 'content' && settingsFocus === 110 + i && "bg-white/10 ring-4 ring-white/20 settings-focused scale-[1.02]"
                           )}
                         >
-                          <div className="flex flex-col">
-                            <span className="font-bold text-sm truncate max-w-[200px]">{pl.name}</span>
-                            <span className="text-[10px] text-zinc-500">{pl.channels.length} Kanal</span>
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-8 h-8 rounded-full flex items-center justify-center transition-all",
+                              currentPlaylistId === pl.id ? "bg-green-500 scale-110 shadow-[0_0_15px_rgba(34,197,94,0.5)]" : "bg-white/5 group-hover:bg-white/20"
+                            )}>
+                              {currentPlaylistId === pl.id ? <Check className="w-5 h-5 text-white" /> : <ListIcon className="w-4 h-4 text-zinc-500 group-hover:text-white" />}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className={cn("font-bold text-sm truncate max-w-[200px]", currentPlaylistId === pl.id ? "text-white" : "text-zinc-300")}>{pl.name}</span>
+                              <span className="text-[10px] text-zinc-500">{pl.channelCount || pl.channels?.length || 0} Kanal</span>
+                            </div>
                           </div>
                           <div className="flex gap-2">
                             <button
-                              onClick={() => onRefreshPlaylist(pl.id)}
+                              onClick={() => refreshPlaylist(pl.id)}
                               className="p-2 hover:bg-white/10 rounded-lg transition-colors"
                             >
                               <RefreshCw className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => onDeletePlaylist(pl.id)}
+                              onClick={() => deletePlaylist(pl.id)}
                               className="p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1242,11 +1541,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
 
                   {/* EPG Ayarları */}
-                  <section className="space-y-4">
+                  <section className="space-y-2">
                     <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">EPG Kaynağı</h3>
                     <input
                       type="text"
                       defaultValue={epgUrl}
+                      onMouseEnter={() => {
+                        setSettingsArea('content');
+                        setSettingsFocus(120);
+                      }}
                       placeholder="EPG XML URL"
                       className={cn(
                         "w-full bg-white/5 border-2 border-transparent px-4 py-3 text-white transition-all outline-none",
@@ -1255,7 +1558,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
                         settingsArea === 'content' && settingsFocus === 120 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
                       )}
-                      onBlur={(e) => onUpdateEPG(e.target.value)}
+                      onBlur={(e) => updateEPG(e.target.value)}
                     />
                   </section>
                 </motion.div>
@@ -1268,123 +1571,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   initial={{ opacity: 0, y: 10 }} 
                   animate={{ opacity: 1, y: 0 }} 
                   exit={{ opacity: 0, y: -10 }}
-                  className="space-y-8 pb-20"
+                  className="space-y-4 pb-10"
                 >
-                  {/* Akıllı VOD / Sinema Modu */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Sinema Deneyimi</h3>
-                    <button
-                      onClick={() => setCinemaModeEnabled(!cinemaModeEnabled)}
-                      className={cn(
-                        "w-full p-4 flex items-center justify-between transition-all border-2",
-                        uiMode === 'modern' && "rounded-2xl",
-                        uiMode === 'classic' && "rounded-none",
-                        uiMode === 'minimalist' && "rounded-none border-0",
-                        cinemaModeEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
-                        settingsArea === 'content' && settingsFocus === 0 && "ring-4 ring-white scale-105 z-10 settings-focused"
-                      )}
-                    >
-                      <div className="flex flex-col items-start gap-1">
-                        <div className="flex items-center gap-2">
-                          <Sparkles className="w-4 h-4 text-amber-400" />
-                          <span className="font-bold">Akıllı VOD (Sinema Modu)</span>
-                        </div>
-                        <span className="text-[10px] opacity-50 text-left">Film ve diziler için TMDB destekli zengin içerik sayfasını aktif eder</span>
-                      </div>
-                      <div className={cn(
-                        "w-12 h-6 rounded-full transition-all relative",
-                        cinemaModeEnabled ? "bg-green-500" : "bg-zinc-700"
-                      )}>
-                        <div className={cn(
-                          "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                          cinemaModeEnabled ? "left-7" : "left-1"
-                        )} />
-                      </div>
-                    </button>
-                  </section>
-
-                  {/* TMDB Entegrasyonu */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Veri Kaynakları</h3>
-                    <button
-                      onClick={() => setTmdbEnabled(!tmdbEnabled)}
-                      className={cn(
-                        "w-full p-4 flex items-center justify-between transition-all border-2",
-                        uiMode === 'modern' && "rounded-2xl",
-                        uiMode === 'classic' && "rounded-none",
-                        uiMode === 'minimalist' && "rounded-none border-0",
-                        tmdbEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
-                        settingsArea === 'content' && settingsFocus === 10 && "ring-4 ring-white scale-105 z-10 settings-focused"
-                      )}
-                    >
-                      <div className="flex flex-col items-start gap-1">
-                        <div className="flex items-center gap-2">
-                          <Globe className="w-4 h-4 text-blue-400" />
-                          <span className="font-bold">TMDB Entegrasyonu</span>
-                        </div>
-                        <span className="text-[10px] opacity-50 text-left">Film afişleri ve detayları için TMDB veritabanını kullanır</span>
-                      </div>
-                      <div className={cn(
-                        "w-12 h-6 rounded-full transition-all relative",
-                        tmdbEnabled ? "bg-blue-500" : "bg-zinc-700"
-                      )}>
-                        <div className={cn(
-                          "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                          tmdbEnabled ? "left-7" : "left-1"
-                        )} />
-                      </div>
-                    </button>
-                  </section>
-
-                  {/* API Anahtarları */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">API Yapılandırması</h3>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Key className="w-3 h-3" />
-                          TMDB API Key
-                        </label>
-                        <input
-                          type="password"
-                          value={tmdbApiKey}
-                          onChange={(e) => setTmdbApiKey(e.target.value)}
-                          placeholder="TMDB API Anahtarınızı girin"
-                          className={cn(
-                            "w-full bg-white/5 border-2 border-transparent px-4 py-3 text-white transition-all outline-none",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
-                            settingsArea === 'content' && settingsFocus === 1 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
-                          )}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Sparkles className="w-3 h-3" />
-                          Gemini API Key
-                        </label>
-                        <input
-                          type="password"
-                          value={geminiApiKey}
-                          onChange={(e) => setGeminiApiKey(e.target.value)}
-                          placeholder="Gemini API Anahtarınızı girin"
-                          className={cn(
-                            "w-full bg-white/5 border-2 border-transparent px-4 py-3 text-white transition-all outline-none",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
-                            settingsArea === 'content' && settingsFocus === 2 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
-                          )}
-                        />
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Diğer Ayarlar */}
-                  <section className="space-y-4">
-                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Gelişmiş</h3>
+                  {/* Playlist Yönetimi */}
+                  <section className="space-y-2">
+                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Bağlantı</h3>
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
@@ -1395,45 +1586,114 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           type="text"
                           value={customProxyUrl}
                           onChange={(e) => setCustomProxyUrl(e.target.value)}
+                          onMouseEnter={() => {
+                            setSettingsArea('content');
+                            setSettingsFocus(0);
+                          }}
                           placeholder="https://proxy.example.com/?url="
                           className={cn(
                             "w-full bg-white/5 border-2 border-transparent px-4 py-3 text-white transition-all outline-none",
                             uiMode === 'modern' && "rounded-xl",
                             uiMode === 'classic' && "rounded-none",
                             uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
-                            settingsArea === 'content' && settingsFocus === 3 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
+                            settingsArea === 'content' && settingsFocus === 0 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
                           )}
                         />
                       </div>
 
-                      <button
-                        onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
-                        className={cn(
-                          "w-full p-4 flex items-center justify-between transition-all border-2",
-                          uiMode === 'modern' && "rounded-2xl",
-                          uiMode === 'classic' && "rounded-none",
-                          uiMode === 'minimalist' && "rounded-none border-0",
-                          voiceControlEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
-                          settingsArea === 'content' && settingsFocus === 4 && "ring-4 ring-white scale-105 z-10 settings-focused"
-                        )}
-                      >
-                        <div className="flex flex-col items-start gap-1">
-                          <div className="flex items-center gap-2">
-                            <Mic className="w-4 h-4" />
-                            <span className="font-bold">Sesli Kontrol</span>
+                      <div className="space-y-4 pt-4 border-t border-white/5">
+                        <div className="flex flex-col gap-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                                <Download className="w-5 h-5 text-blue-400" />
+                              </div>
+                              <div>
+                                <h4 className="text-white font-black uppercase italic tracking-tight">Android Uygulaması (APK)</h4>
+                                <p className="text-zinc-500 text-[10px]">Cihazınıza doğrudan kurun (PWA)</p>
+                              </div>
+                            </div>
+                            {installPrompt && !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) ? (
+                              <div className="flex flex-col items-end gap-2">
+                                <button
+                                  onClick={async () => {
+                                    if (!installPrompt) return;
+                                    try {
+                                      // Use prompt() directly
+                                      await installPrompt.prompt();
+                                      const { outcome } = await installPrompt.userChoice;
+                                      if (outcome === 'accepted') {
+                                        setInstallPrompt(null);
+                                        showToast("Yükleme başlatıldı!", "success");
+                                      }
+                                    } catch (e) {
+                                      console.error("Install prompt error:", e);
+                                      showToast("Yükleme başlatılamadı. Lütfen manuel kurun.", "error");
+                                    }
+                                  }}
+                                  className={cn(
+                                    "px-6 py-2.5 bg-blue-500 rounded-xl text-white text-[10px] font-black uppercase tracking-widest transition-all",
+                                    settingsArea === 'content' && settingsFocus === 50 && "scale-110 shadow-lg shadow-blue-500/40 settings-focused"
+                                  )}
+                                  onMouseEnter={() => setSettingsFocus(50)}
+                                >
+                                  YÜKLE
+                                </button>
+                                {window.self !== window.top && (
+                                  <span className="text-[8px] text-orange-400 font-bold uppercase animate-pulse text-right">Çerçeve İçinde Çalışıyor</span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-end gap-2">
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg">
+                                  <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                                  <span className="text-green-500 text-[10px] font-black uppercase tracking-widest">
+                                    {(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) ? "YÜKLÜ" : "UYUMLU"}
+                                  </span>
+                                </div>
+                                {window.self !== window.top && !installPrompt && (
+                                  <button
+                                    onClick={() => window.open(window.location.href, '_blank')}
+                                    className="px-4 py-1.5 bg-orange-500/20 border border-orange-500/40 rounded-lg text-orange-400 text-[9px] font-black uppercase tracking-widest hover:bg-orange-500 hover:text-white transition-all text-right"
+                                  >
+                                    YENİ SEKMEDE AÇ VE KUR
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <span className="text-[10px] opacity-50 text-left">Sesli komutlarla kanal değiştirme ve arama</span>
+                          
+                          {!installPrompt && (
+                            <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-3">
+                              <div className="flex items-center gap-2 text-zinc-400">
+                                <Info className="w-4 h-4" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Manuel Kurulum Rehberi</span>
+                              </div>
+                              
+                              {window.self !== window.top && (
+                                <div className="bg-orange-500/10 border border-orange-500/20 p-2 rounded-lg">
+                                  <p className="text-orange-400 text-[9px] font-bold leading-tight">
+                                    DİKKAT: Uygulama bir çerçeve (iframe) içinde çalışıyor. Yükleme butonunun çalışması için sağ üstteki "Yeni Sekmede Aç" butonuna tıklayarak uygulamayı ayrı sekmede açmalısınız.
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-3 text-[9px] text-zinc-500">
+                                <div className="space-y-1">
+                                  <p className="text-white font-bold opacity-80 uppercase tracking-tighter italic">Android / Chrome</p>
+                                  <p>1. Sağ üstteki üç noktaya tıklayın.</p>
+                                  <p>2. "Uygulamayı Yükle" veya "Ana Ekrana Ekle" seçeneğini seçin.</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-white font-bold opacity-80 uppercase tracking-tighter italic">iOS / Safari</p>
+                                  <p>1. Alt kısımdaki Paylaş butonuna tıklayın.</p>
+                                  <p>2. "Ana Ekrana Ekle" seçeneğini seçin.</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className={cn(
-                          "w-12 h-6 rounded-full transition-all relative",
-                          voiceControlEnabled ? "bg-green-500" : "bg-zinc-700"
-                        )}>
-                          <div className={cn(
-                            "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                            voiceControlEnabled ? "left-7" : "left-1"
-                          )} />
-                        </div>
-                      </button>
+                      </div>
                     </div>
                   </section>
                 </motion.div>
@@ -1446,9 +1706,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   initial={{ opacity: 0, y: 10 }} 
                   animate={{ opacity: 1, y: 0 }} 
                   exit={{ opacity: 0, y: -10 }}
-                  className="space-y-8 pb-20"
+                  className="space-y-4 pb-10"
                 >
-                  <section className="flex flex-col items-center justify-center space-y-8 py-10 text-center">
+                  <section className="flex flex-col items-center justify-center space-y-4 py-6 text-center">
                     <div className={cn(
                       "w-20 h-20 flex items-center justify-center bg-white/10 rounded-full mb-4",
                       pairingStatus === 'connected' && "bg-green-500/20 text-green-500",
@@ -1471,7 +1731,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {pairingStatus !== 'connected' && pairingCode && (
                       <div className="space-y-6 w-full max-w-[280px]">
                         <div className="p-4 bg-white rounded-2xl shadow-2xl">
-                          <QRCodeSVG 
+                          <QRCodeCanvas 
                             value={`${window.location.origin}/remote?code=${pairingCode}`}
                             size={240}
                             level="H"
@@ -1511,10 +1771,386 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </section>
                 </motion.div>
               )}
+
+              {/* Tab 4: AI Gözcü */}
+              {activeSettingsTab === 4 && (
+                <motion.div 
+                  key="tab-4"
+                  initial={{ opacity: 0, y: 10 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: -10 }}
+                  className="space-y-4 pb-10"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Toggles Group */}
+                    <div className="space-y-4">
+                      <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Yapay Zeka Özellikleri</h3>
+                      
+                      <button
+                        onClick={() => setCinemaModeEnabled(!cinemaModeEnabled)}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(0);
+                        }}
+                        className={cn(
+                          "w-full p-4 flex items-center justify-between transition-all border-2",
+                          uiMode === 'modern' && "rounded-2xl",
+                          uiMode === 'classic' && "rounded-none",
+                          uiMode === 'minimalist' && "rounded-none border-0",
+                          cinemaModeEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
+                          settingsArea === 'content' && settingsFocus === 0 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Sparkles className="w-4 h-4 text-amber-400" />
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">Akıllı VOD</span>
+                            <span className="text-[9px] opacity-50">Sinematik detay sayfası</span>
+                          </div>
+                        </div>
+                        <div className={cn("w-10 h-5 rounded-full transition-all relative", cinemaModeEnabled ? "bg-green-500" : "bg-zinc-700")}>
+                          <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", cinemaModeEnabled ? "left-6" : "left-1")} />
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(1);
+                        }}
+                        className={cn(
+                          "w-full p-4 flex items-center justify-between transition-all border-2",
+                          uiMode === 'modern' && "rounded-2xl",
+                          uiMode === 'classic' && "rounded-none",
+                          uiMode === 'minimalist' && "rounded-none border-0",
+                          voiceControlEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
+                          settingsArea === 'content' && settingsFocus === 1 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Mic className="w-4 h-4 text-blue-400" />
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">Sesli Kontrol</span>
+                            <span className="text-[9px] opacity-50">Sesle kanal & arama</span>
+                          </div>
+                        </div>
+                        <div className={cn("w-10 h-5 rounded-full transition-all relative", voiceControlEnabled ? "bg-blue-500" : "bg-zinc-700")}>
+                          <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", voiceControlEnabled ? "left-6" : "left-1")} />
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => setSportsTickerEnabled(!sportsTickerEnabled)}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(2);
+                        }}
+                        className={cn(
+                          "w-full p-4 flex items-center justify-between transition-all border-2",
+                          uiMode === 'modern' && "rounded-2xl",
+                          uiMode === 'classic' && "rounded-none",
+                          uiMode === 'minimalist' && "rounded-none border-0",
+                          sportsTickerEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
+                          settingsArea === 'content' && settingsFocus === 2 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Activity className="w-4 h-4 text-emerald-400" />
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">Canlı Skor Bandı</span>
+                            <span className="text-[9px] opacity-50">Alt kısımda anlık skorlar</span>
+                          </div>
+                        </div>
+                        <div className={cn("w-10 h-5 rounded-full transition-all relative", sportsTickerEnabled ? "bg-green-500" : "bg-zinc-700")}>
+                          <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", sportsTickerEnabled ? "left-6" : "left-1")} />
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => setNewsTickerEnabled(!newsTickerEnabled)}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(3);
+                        }}
+                        className={cn(
+                          "w-full p-4 flex items-center justify-between transition-all border-2",
+                          uiMode === 'modern' && "rounded-2xl",
+                          uiMode === 'classic' && "rounded-none",
+                          uiMode === 'minimalist' && "rounded-none border-0",
+                          newsTickerEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
+                          settingsArea === 'content' && settingsFocus === 3 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Globe className="w-4 h-4 text-emerald-400" />
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">Canlı Haber Bandı</span>
+                            <span className="text-[9px] opacity-50">Alt kısımda anlık haberler</span>
+                          </div>
+                        </div>
+                        <div className={cn("w-10 h-5 rounded-full transition-all relative", newsTickerEnabled ? "bg-emerald-500" : "bg-zinc-700")}>
+                          <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", newsTickerEnabled ? "left-6" : "left-1")} />
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => setTmdbEnabled(!tmdbEnabled)}
+                        onMouseEnter={() => {
+                          setSettingsArea('content');
+                          setSettingsFocus(2);
+                        }}
+                        className={cn(
+                          "w-full p-4 flex items-center justify-between transition-all border-2",
+                          uiMode === 'modern' && "rounded-2xl",
+                          uiMode === 'classic' && "rounded-none",
+                          uiMode === 'minimalist' && "rounded-none border-0",
+                          tmdbEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
+                          settingsArea === 'content' && settingsFocus === 2 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Globe className="w-4 h-4 text-blue-400" />
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">TMDB Verisi</span>
+                            <span className="text-[9px] opacity-50">Afiş ve detay çekme</span>
+                          </div>
+                        </div>
+                        <div className={cn("w-10 h-5 rounded-full transition-all relative", tmdbEnabled ? "bg-blue-500" : "bg-zinc-700")}>
+                          <div className={cn("absolute top-1 w-3 h-3 bg-white rounded-full transition-all", tmdbEnabled ? "left-6" : "left-1")} />
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* API Keys Group */}
+                    <div className="space-y-4">
+                      <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">API Yapılandırması</h3>
+                      
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Sparkles className="w-3 h-3 text-amber-400" />
+                          Gemini API Anahtarı
+                        </label>
+                        <div className="relative group">
+                          <input
+                            type="password"
+                            value={geminiApiKey}
+                            onChange={(e) => setGeminiApiKey(e.target.value)}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(3);
+                            }}
+                            placeholder="Gemini API Key"
+                            className={cn(
+                              "w-full bg-white/5 border border-white/10 px-4 py-2.5 text-xs text-white transition-all outline-none",
+                              uiMode === 'modern' && "rounded-xl focus:bg-white/10",
+                              uiMode === 'classic' && "rounded-none focus:bg-zinc-900",
+                              uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
+                              settingsArea === 'content' && settingsFocus === 3 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
+                            )}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Key className="w-3 h-3 text-blue-400" />
+                          TMDB API Anahtarı
+                        </label>
+                        <div className="relative group">
+                          <input
+                            type="password"
+                            value={tmdbApiKey}
+                            onChange={(e) => setTmdbApiKey(e.target.value)}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(4);
+                            }}
+                            placeholder="TMDB API Key"
+                            className={cn(
+                              "w-full bg-white/5 border border-white/10 px-4 py-2.5 text-xs text-white transition-all outline-none",
+                              uiMode === 'modern' && "rounded-xl focus:bg-white/10",
+                              uiMode === 'classic' && "rounded-none focus:bg-zinc-900",
+                              uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
+                              settingsArea === 'content' && settingsFocus === 4 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
+                            )}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                        <p className="text-[9px] text-blue-400 font-medium leading-relaxed italic">
+                          * AI özellikleri için Gemini API anahtarı gereklidir. Anahtarınız yoksa varsayılan modda çalışır.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Tab 5: Tuş Atamaları */}
+              {activeSettingsTab === 5 && (
+                <motion.div 
+                  key="tab-5"
+                  initial={{ opacity: 0, y: 10 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  exit={{ opacity: 0, y: -10 }}
+                  className="space-y-5 pb-10"
+                >
+                  <section className="space-y-4">
+                    <div className="flex flex-col gap-1">
+                      <h3 className="text-xl font-black uppercase tracking-tighter text-white">Tuş Atamaları</h3>
+                      <p className="text-zinc-500 text-xs text-balance">Uygulama genelinde kullanılacak kumanda ve klavye tuşlarını özelleştirebilirsiniz. Değiştirmek istediğiniz tuşun üzerine tıklayıp yeni tuşa basın.</p>
+                    </div>
+
+                    {[
+                      { title: 'Navigasyon Kontrolleri', keys: ['up', 'down', 'left', 'right', 'enter', 'back'] },
+                      { title: 'Oynatıcı Kontrolleri', keys: ['playPause', 'channelUp', 'channelDown', 'volumeUp', 'volumeDown'] },
+                      { title: 'Kısayollar & Menüler', keys: ['settings', 'guide', 'voice', 'miniPlayer'] }
+                    ].map((group, groupIdx) => (
+                      <div key={group.title} className="space-y-4">
+                        <div className="flex items-center gap-4">
+                          <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-white/30 whitespace-nowrap">{group.title}</h4>
+                          <div className="h-px w-full bg-white/5" />
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {group.keys.map((action, i) => {
+                            const actualIdx = (groupIdx === 0 ? 0 : groupIdx === 1 ? 6 : 11) + i;
+                            return (
+                              <button 
+                                key={action}
+                                disabled={capturingKey !== null}
+                                onClick={() => setCapturingKey(action)}
+                                onMouseEnter={() => {
+                                  setSettingsArea('content');
+                                  setSettingsFocus(300 + actualIdx);
+                                }}
+                                className={cn(
+                                  "flex items-center justify-between p-4 bg-white/5 border-2 border-transparent transition-all group relative overflow-hidden",
+                                  uiMode === 'modern' && "rounded-2xl",
+                                  uiMode === 'classic' && "rounded-none",
+                                  uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
+                                  settingsArea === 'content' && settingsFocus === 300 + actualIdx ? "bg-white/10 border-white ring-4 ring-white/20 settings-focused shadow-2xl scale-[1.01] z-10" : "hover:bg-white/5",
+                                  capturingKey === action && "animate-pulse border-white/50 bg-white/20"
+                                )}
+                              >
+                                <div className={cn(
+                                  "absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000",
+                                  capturingKey === action && "translate-x-0 animate-shimmer"
+                                )} />
+                                
+                                <div className="flex flex-col items-start text-left shrink-0">
+                                  <span className="font-bold text-sm text-white group-hover:text-white transition-colors capitalize">
+                                    {action === 'up' ? 'Yukarı' : 
+                                     action === 'down' ? 'Aşağı' : 
+                                     action === 'left' ? 'Sol' : 
+                                     action === 'right' ? 'Sağ' : 
+                                     action === 'enter' ? 'Seç / Tamam' : 
+                                     action === 'back' ? 'Geri / Çık' : 
+                                     action === 'settings' ? 'Ayarlar Menüsü' : 
+                                     action === 'guide' ? 'TV Rehberi' : 
+                                     action === 'voice' ? 'Sesli Arama' : 
+                                     action === 'miniPlayer' ? 'Mini Oynatıcı' : 
+                                     action === 'playPause' ? 'Oynat / Durdur' : 
+                                     action === 'volumeUp' ? 'Sesi Artır' : 
+                                     action === 'volumeDown' ? 'Sesi Azalt' : 
+                                     action === 'channelUp' ? 'Sonraki Kanal' : 
+                                     action === 'channelDown' ? 'Önceki Kanal' : action}
+                                  </span>
+                                </div>
+                                
+                                <div className={cn(
+                                  "px-4 py-2 border-2 transition-all min-w-[80px] flex items-center justify-center font-mono font-black text-xs uppercase",
+                                  uiMode === 'modern' && "rounded-xl",
+                                  uiMode === 'classic' && "rounded-none",
+                                  uiMode === 'minimalist' && "rounded-none border-0",
+                                  capturingKey === action 
+                                    ? "bg-white text-black border-white animate-bounce" 
+                                    : "bg-white/10 border-white/20 text-white/80 group-hover:bg-white/20 group-hover:border-white/40"
+                                )}>
+                                  {capturingKey === action ? '???' : (keyMap as any)[action]}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    <button
+                      onClick={() => {
+                        setKeyMap(DEFAULT_KEY_MAP);
+                        showToast('Tüm tuş atamaları varsayılana döndürüldü.', 'info');
+                      }}
+                      onMouseEnter={() => {
+                        setSettingsArea('content');
+                        setSettingsFocus(350);
+                      }}
+                      className={cn(
+                        "w-full p-5 flex items-center justify-center gap-3 transition-all border-2 font-black uppercase tracking-[0.2em] text-xs",
+                        uiMode === 'modern' && "rounded-2xl shadow-xl",
+                        uiMode === 'classic' && "rounded-none",
+                        uiMode === 'minimalist' && "rounded-none border-0",
+                        "bg-red-500/10 border-red-500/30 text-red-500 hover:bg-red-500 hover:text-white mt-4 disabled:opacity-50 disabled:pointer-events-none",
+                        settingsArea === 'content' && settingsFocus === 350 ? "ring-8 ring-red-500/20 scale-[1.02] z-10 bg-red-500 text-white border-white settings-focused shadow-2xl" : "hover:bg-red-500 hover:border-red-500"
+                      )}
+                      disabled={capturingKey !== null}
+                    >
+                      <RefreshCw className={cn("w-4 h-4", capturingKey && "animate-spin")} />
+                      Varsayılana Dön
+                    </button>
+                  </section>
+                </motion.div>
+              )}
+
+              <AnimatePresence>
+                {capturingKey && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-8 text-center"
+                  >
+                    <div className="max-w-md space-y-8">
+                      <div className="w-24 h-24 rounded-full bg-white/10 border border-white/20 flex items-center justify-center mx-auto animate-pulse">
+                        <Key className="w-12 h-12 text-white" />
+                      </div>
+                      <div className="space-y-4">
+                        <h2 className="text-4xl font-black uppercase tracking-tighter italic text-white leading-tight">YENİ TUŞ ATANIYOR</h2>
+                        <p className="text-xl font-bold text-white/60 capitalize">
+                          "{capturingKey === 'up' ? 'Yukarı' : 
+                            capturingKey === 'down' ? 'Aşağı' : 
+                            capturingKey === 'left' ? 'Sol' : 
+                            capturingKey === 'right' ? 'Sağ' : 
+                            capturingKey === 'enter' ? 'Seç / Tamam' : 
+                            capturingKey === 'back' ? 'Geri / Çık' : 
+                            capturingKey === 'settings' ? 'Ayarlar Menüsü' : 
+                            capturingKey === 'guide' ? 'TV Rehberi' : 
+                            capturingKey === 'voice' ? 'Sesli Arama' : 
+                            capturingKey === 'miniPlayer' ? 'Mini Oynatıcı' : 
+                            capturingKey === 'playPause' ? 'Oynat / Durdur' : 
+                            capturingKey === 'volumeUp' ? 'Sesi Artır' : 
+                            capturingKey === 'volumeDown' ? 'Sesi Azalt' : 
+                            capturingKey === 'channelUp' ? 'Sonraki Kanal' : 
+                            capturingKey === 'channelDown' ? 'Önceki Kanal' : capturingKey}" eylemi için kumandanızdan veya klavyenizden bir tuşa basın.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setCapturingKey(null)}
+                        className="px-8 py-3 bg-white/5 border border-white/10 rounded-full text-xs font-black uppercase tracking-widest text-zinc-500 hover:text-white transition-colors"
+                      >
+                        İPTAL ET
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </AnimatePresence>
           </div>
         </div>
       </motion.div>
-    </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };

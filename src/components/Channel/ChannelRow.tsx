@@ -97,140 +97,190 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
   const gap = 16;
   const top10Offset = title === 'Top 10' ? (layoutMode === 'fixed-focus' ? 50 : 90) : 0;
   const itemSize = itemWidth + gap + top10Offset;
-  const listHeight = orientation === 'landscape' 
-    ? (itemWidth * 9/16 + (layoutMode === 'fixed-focus' ? 40 : 120)) 
-    : (itemWidth * 3/2 + (layoutMode === 'fixed-focus' ? 40 : 120));
+    const isSpecialRow = title === 'Top 10' || title === 'İzlemeye Devam Et';
+    const extraHeight = title === 'Top 10' 
+      ? (layoutMode === 'fixed-focus' ? 100 : 160) 
+      : title === 'İzlemeye Devam Et'
+      ? (layoutMode === 'fixed-focus' ? 70 : 100)
+      : (layoutMode === 'fixed-focus' ? 60 : 90);
+    const listHeight = orientation === 'landscape' 
+    ? (itemWidth * 9/16 + extraHeight) 
+    : (itemWidth * 3/2 + extraHeight);
 
   if (isGrid) {
+    const columns = deviceType === 'tv' ? 6 : deviceType === 'phone' ? 2 : 4;
+    const rowCount = Math.ceil(channels.length / columns);
+    const gridItemWidth = (containerWidth - (columns - 1) * gap) / columns;
+    const gridItemHeight = orientation === 'landscape' ? gridItemWidth * 9/16 + 180 : gridItemWidth * 3/2 + 180;
+
     return (
       <div 
         ref={rowRef} 
         data-row-index={rowIndex}
-        className="space-y-6 group/row relative px-4 md:px-12 scroll-mt-[calc(var(--hero-height)+64px)]"
+        className="space-y-4 group/row relative px-4 md:px-12 scroll-mt-[calc(var(--hero-height)+64px)] w-full"
       >
-        <div className="flex items-center">
-          <div 
-            style={{ 
-              backgroundColor: themeColor,
-              color: 'white',
-              borderColor: 'white'
-            }}
-            className={cn(
-              "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border",
-              uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
-              uiMode === 'classic' && "rounded-none border-l-4 border-white",
-              uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold"
-            )}
-          >
-            <div className="w-2 h-2 rounded-full mr-3 animate-pulse bg-white" />
-            <span className="mr-3">{title}</span>
-            <span className="ml-2 text-[10px] opacity-50">({channels.length})</span>
+        <div className="flex flex-col">
+          <div className="flex items-center px-4 md:px-12 mb-6">
+            <div 
+              onClick={onToggleCollapse}
+              onPointerDown={() => onFocus(rowIndex, -1)}
+              onMouseEnter={() => onFocus(rowIndex, -1)}
+              style={{ 
+                backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
+                color: 'white',
+                borderColor: isHeaderFocused ? 'white' : 'transparent'
+              }}
+              className={cn(
+                "flex items-center px-5 py-2 text-xs font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
+                uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
+                uiMode === 'classic' && "rounded-none border-l-4 border-white",
+                uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
+                isHeaderFocused ? "scale-105 z-10" : "opacity-70 group-hover/row:opacity-100"
+              )}
+            >
+              <div className={cn(
+                "w-1.5 h-1.5 rounded-full mr-2.5",
+                isHeaderFocused ? "bg-white animate-pulse" : "bg-white/20"
+              )} />
+              <span className="mr-3">{title}</span>
+              {!isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+              <span className="ml-2 text-[9px] opacity-40">({channels.length})</span>
+            </div>
           </div>
+
+          <AnimatePresence>
+            {!isCollapsed && (
+              <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="w-full"
+              >
+                <div ref={listContainerRef} className="w-full h-full min-h-[500px] relative pt-1 pb-10">
+                  {uiMode === 'modern' && (
+                    <div className="absolute inset-0 bg-white/[0.02] rounded-[3rem] pointer-events-none" />
+                  )}
+                  <List
+                    height={800} // Fixed height for grid container or responsive
+                    itemCount={rowCount}
+                    itemSize={gridItemHeight + gap}
+                    width={containerWidth || (typeof window !== 'undefined' ? window.innerWidth : 1200)}
+                    className="no-scrollbar"
+                  >
+                    {({ index, style }: { index: number; style: React.CSSProperties }) => (
+                      <div style={style} className="flex gap-4">
+                        {Array.from({ length: columns }).map((_, colIdx) => {
+                          const channelIdx = index * columns + colIdx;
+                          if (channelIdx >= channels.length) return <div key={colIdx} style={{ width: gridItemWidth }} />;
+                          const channel = channels[channelIdx];
+                          
+                          return (
+                            <div key={channel.id} style={{ width: gridItemWidth }}>
+                              <ChannelCard
+                                channel={channel}
+                                colIndex={channelIdx}
+                                rowIndex={rowIndex}
+                                activeRow={activeRow}
+                                activeCol={activeCol}
+                                previewChannelId={previewChannelId}
+                                favorites={favorites}
+                                multiSessions={multiSessions}
+                                canliChannels={canliChannels}
+                                filmChannels={filmChannels}
+                                diziChannels={diziChannels}
+                                pressingId={pressingId}
+                                title={title}
+                                themeColor={themeColor}
+                                deviceType={deviceType}
+                                orientation={orientation}
+                                uiMode={uiMode}
+                                playbackProgress={playbackProgress}
+                                epgData={epgData}
+                                now={now}
+                                onFocus={onFocus}
+                                onSelect={onSelect}
+                                onDetail={onDetail}
+                                onDeleteChannel={onDeleteChannel}
+                                onLongPress={onLongPress}
+                                onToggleMini={onToggleMini}
+                                handlePressStart={handlePressStart}
+                                handlePressEnd={handlePressEnd}
+                                customProxyUrl={customProxyUrl}
+                                channels={channels}
+                                top10Style={top10Style}
+                                focusEffect={focusEffect}
+                                channelNumbers={channelNumbers}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </List>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 md:gap-6">
-          {channels.map((channel, idx) => (
-            <ChannelCard
-              key={channel.id}
-              channel={channel}
-              colIndex={idx}
-              rowIndex={rowIndex}
-              activeRow={activeRow}
-              activeCol={activeCol}
-              previewChannelId={previewChannelId}
-              favorites={favorites}
-              multiSessions={multiSessions}
-              canliChannels={canliChannels}
-              filmChannels={filmChannels}
-              diziChannels={diziChannels}
-              pressingId={pressingId}
-              title={title}
-              themeColor={themeColor}
-              deviceType={deviceType}
-              orientation={orientation}
-              uiMode={uiMode}
-              playbackProgress={playbackProgress}
-              epgData={epgData}
-              now={now}
-              onFocus={onFocus}
-              onSelect={onSelect}
-              onDetail={onDetail}
-              onDeleteChannel={onDeleteChannel}
-              onLongPress={onLongPress}
-              onToggleMini={onToggleMini}
-              handlePressStart={handlePressStart}
-              handlePressEnd={handlePressEnd}
-              customProxyUrl={customProxyUrl}
-              channels={channels}
-              top10Style={top10Style}
-              focusEffect={focusEffect}
-              channelNumbers={channelNumbers}
-            />
-          ))}
-        </div>
+
       </div>
     );
+
   }
 
   return (
     <div 
       ref={rowRef} 
       className={cn(
-        "space-y-1 group/row relative transition-all duration-500", 
-        layoutMode === 'fixed-focus' ? "mb-1" : (title === 'Top 10' ? "mb-8" : "mb-2")
+        "group/row relative transition-all duration-500", 
+        layoutMode === 'fixed-focus' ? "mb-0" : (title === 'Top 10' ? "mb-6" : (title === 'İzlemeye Devam Et' ? "mb-4" : "mb-2"))
       )}
     >
-      <div className="flex items-center px-4 md:px-12">
+      <div className="flex items-center px-4 md:px-12 mb-6">
         <div 
           onClick={onToggleCollapse}
           onPointerDown={() => onFocus(rowIndex, -1)}
           onMouseEnter={() => onFocus(rowIndex, -1)}
           style={{ 
-            backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.05)'),
+            backgroundColor: isHeaderFocused ? themeColor : (isActiveRow ? 'rgba(255,255,255,0.05)' : 'transparent'),
             color: 'white',
             borderColor: isHeaderFocused ? 'white' : 'transparent'
           }}
           className={cn(
-            "flex items-center px-6 py-2.5 text-sm font-black uppercase tracking-widest transition-all shadow-xl border cursor-pointer",
-            uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-2xl border-white/20",
-            uiMode === 'classic' && "rounded-none border-l-[6px] border-zinc-700 bg-zinc-900/50",
-            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.4em] font-bold text-zinc-500",
-            isHeaderFocused ? (uiMode === 'modern' ? "scale-110 shadow-2xl ring-4 ring-white/20 z-10" : uiMode === 'classic' ? "scale-105 border-white bg-zinc-800 text-white z-10" : "text-white scale-100 ring-0 border-b-2 border-white") : "opacity-60 hover:opacity-100"
+            "flex items-center px-5 py-2 text-xs font-black uppercase tracking-widest transition-all border cursor-pointer",
+            uiMode === 'modern' && "rounded-full bg-white/10 backdrop-blur-xl border-white/10",
+            uiMode === 'classic' && "rounded-none border-l-4 border-white bg-zinc-900/50",
+            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent tracking-[0.3em] font-bold",
+            isHeaderFocused ? "scale-105 z-10 shadow-2xl bg-white/20" : "opacity-60 group-hover/row:opacity-100"
           )}
         >
           <div className={cn(
-            "w-2 h-2 rounded-full mr-3",
-            isHeaderFocused ? "bg-white animate-pulse" : "bg-white/20",
-            uiMode === 'minimalist' && "hidden"
+            "w-1.5 h-1.5 rounded-full mr-2.5",
+            isHeaderFocused ? "bg-white animate-pulse" : "bg-white/20"
           )} />
-          <span className={cn(
-            "mr-3",
-            uiMode === 'minimalist' && isHeaderFocused && "border-b-2 border-white pb-1"
-          )}>{title}</span>
-          {!isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          <span className={cn(
-            "ml-2 text-[10px] opacity-50",
-            uiMode === 'minimalist' && "hidden"
-          )}>({channels.length})</span>
+          <span className="mr-3">{title}</span>
+          {!isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+          <span className="ml-2 text-[9px] opacity-40">({channels.length})</span>
         </div>
       </div>
-      
+
       <AnimatePresence>
         {!isCollapsed && (
           <motion.div 
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: listHeight + 60, opacity: 1 }}
+            animate={{ height: listHeight + 40, opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="relative"
           >
             <div ref={listContainerRef} className={cn(
-              "px-4 md:px-12 pt-1",
-              layoutMode === 'fixed-focus' ? "pb-2" : "pb-12"
+              "px-4 md:px-12 pt-1 pb-6",
+              layoutMode === 'fixed-focus' ? "pb-4" : "pb-8"
             )}>
               <List
                 ref={listRef}
-                height={listHeight + 40}
+                height={listHeight + 20}
                 itemCount={channels.length}
                 itemSize={itemSize}
                 layout="horizontal"
@@ -271,7 +321,7 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
                     handlePressEnd={handlePressEnd}
                     customProxyUrl={customProxyUrl}
                     layoutMode={layoutMode}
-                    style={{ ...style, top: (style.top as number) + 20 }}
+                    style={{ ...style, top: (style.top as number) + 0 }}
                     channels={channels}
                     top10Style={top10Style}
                     focusEffect={focusEffect}
@@ -283,6 +333,8 @@ export const ChannelRow = React.memo<ChannelRowProps>(({
           </motion.div>
         )}
       </AnimatePresence>
+
+
     </div>
   );
 });

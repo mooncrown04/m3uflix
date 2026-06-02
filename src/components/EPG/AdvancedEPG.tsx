@@ -12,6 +12,7 @@ interface AdvancedEPGProps {
   onClose: () => void;
   onPlay: (channel: M3UChannel) => void;
   themeColor: string;
+  keyMap: any;
 }
 
 // Memoized Channel Row for performance
@@ -52,7 +53,7 @@ const ChannelRow = memo(({ index, style, data }: { index: number, style: React.C
   );
 }, areEqual);
 
-export const AdvancedEPG: React.FC<AdvancedEPGProps> = ({ channels, epgData, onClose, onPlay, themeColor }) => {
+export const AdvancedEPG: React.FC<AdvancedEPGProps> = ({ channels, epgData, onClose, onPlay, themeColor, keyMap }) => {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(channels[0]?.id || null);
   const [searchQuery, setSearchQuery] = useState('');
   const now = new Date();
@@ -111,7 +112,15 @@ export const AdvancedEPG: React.FC<AdvancedEPGProps> = ({ channels, epgData, onC
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
 
-      switch (e.key) {
+      const rawKey = e.key;
+      let key = rawKey;
+
+      if (rawKey === keyMap.up) key = 'ArrowUp';
+      else if (rawKey === keyMap.down) key = 'ArrowDown';
+      else if (rawKey === keyMap.enter || rawKey === 'OK' || rawKey === 'Select') key = 'Enter';
+      else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
+
+      switch (key) {
         case 'ArrowUp':
           e.preventDefault();
           if (selectedChannelIndex > 0) {
@@ -134,7 +143,6 @@ export const AdvancedEPG: React.FC<AdvancedEPGProps> = ({ channels, epgData, onC
             onPlay(selectedChannel);
           }
           break;
-        case 'Escape':
         case 'Backspace':
           e.preventDefault();
           onClose();

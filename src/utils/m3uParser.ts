@@ -31,7 +31,7 @@ export function parseM3U(content: string): M3UParseResult {
   let epgUrl: string | undefined;
 
   // Pre-compile regex for performance
-  const epgRegex = /x-tvg-url="([^"]+)"/;
+  const epgRegex = /(?:x-tvg-url|url-tvg)="([^"]+)"/;
   const nameRegex = /,(.*)$/;
   
   // Attribute regexes
@@ -79,6 +79,8 @@ export function parseM3U(content: string): M3UParseResult {
       } else {
         currentChannelInfo.group = 'General';
       }
+    } else if (line.startsWith('#EXTGRP:')) {
+      currentChannelInfo.group = line.replace('#EXTGRP:', '').trim();
     } else if (line.startsWith('http')) {
       const url = line;
       const name = currentChannelInfo.name || 'Unknown Channel';
@@ -91,8 +93,9 @@ export function parseM3U(content: string): M3UParseResult {
           existingChannel.urls.push(url);
         }
       } else {
-        // Use a simpler ID generation for performance if possible, or keep it consistent
-        const id = Math.random().toString(36).substr(2, 9); // Faster than btoa(encodeURIComponent)
+        // Use a deterministic ID based on the URL, name and group to prevent collisions between similar channels in different groups
+        const idSource = `${url}_${name}_${group}`;
+        const id = btoa(encodeURIComponent(idSource)).substring(0, 24).replace(/[^a-z0-9]/gi, '');
         
         channelMap.set(key, {
           id,

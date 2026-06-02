@@ -76,7 +76,9 @@ const SingleVideo: React.FC<SingleVideoProps> = ({
 
   return (
     <div 
-      onClick={onClick}
+      onPointerDown={() => {
+        onClick();
+      }}
       className={cn(
         "relative bg-black border-2 transition-all duration-300 cursor-pointer overflow-hidden group",
         isActive ? "border-white shadow-2xl scale-[0.98] z-10" : "border-white/10 opacity-60 hover:opacity-100"

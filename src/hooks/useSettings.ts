@@ -1,8 +1,24 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { UIMode, LayoutMode, LogoStyle, FocusEffect, Top10Style } from '../types';
+import { UIMode, LayoutMode, LogoStyle, FocusEffect, Top10Style, KeyMap, DEFAULT_KEY_MAP } from '../types';
 import { PROFILE_PICS } from '../constants';
 
 export function useSettings() {
+  const [keyMap, setKeyMap] = useState<KeyMap>(() => {
+    try {
+      const saved = localStorage.getItem('key_map');
+      if (saved) {
+        return { ...DEFAULT_KEY_MAP, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.error('Failed to parse keyMap:', e);
+    }
+    return DEFAULT_KEY_MAP;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('key_map', JSON.stringify(keyMap));
+  }, [keyMap]);
+
   const [themeColor, setThemeColor] = useState<string>(() => localStorage.getItem('theme_color') || '#dc2626');
   const [uiMode, setUiMode] = useState<UIMode>(() => {
     const saved = localStorage.getItem('ui_mode');
@@ -43,6 +59,9 @@ export function useSettings() {
   );
   const [cinemaModeEnabled, setCinemaModeEnabled] = useState(() => 
     localStorage.getItem('cinema_mode_enabled') !== 'false'
+  );
+  const [sportsTickerEnabled, setSportsTickerEnabled] = useState(() => 
+    localStorage.getItem('sports_ticker_enabled') !== 'false'
   );
   const [tmdbEnabled, setTmdbEnabled] = useState(() => 
     localStorage.getItem('tmdb_enabled') !== 'false'
@@ -151,6 +170,10 @@ export function useSettings() {
   }, [cinemaModeEnabled]);
 
   useEffect(() => {
+    localStorage.setItem('sports_ticker_enabled', String(sportsTickerEnabled));
+  }, [sportsTickerEnabled]);
+
+  useEffect(() => {
     localStorage.setItem('tmdb_enabled', String(tmdbEnabled));
   }, [tmdbEnabled]);
 
@@ -188,6 +211,7 @@ export function useSettings() {
     dynamicThemeEnabled, setDynamicThemeEnabled,
     voiceControlEnabled, setVoiceControlEnabled,
     cinemaModeEnabled, setCinemaModeEnabled,
+    sportsTickerEnabled, setSportsTickerEnabled,
     tmdbEnabled, setTmdbEnabled,
     tmdbApiKey, setTmdbApiKey,
     geminiApiKey, setGeminiApiKey,
@@ -197,6 +221,7 @@ export function useSettings() {
     mixColor1, setMixColor1,
     mixColor2, setMixColor2,
     mixedColor,
+    keyMap, setKeyMap,
     PROFILE_PICS
   };
 }

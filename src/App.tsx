@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { GoogleGenAI } from "@google/genai";
-import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu, Hash, Volume2, VolumeX, Key, Globe, Mail, ExternalLink, CircleDashed, Activity, Sparkles, Copy, Database, Pipette } from 'lucide-react';
+import { Play, Search, Upload, Link as LinkIcon, Link2, Tv, List as ListIcon, Grid, X, Info, ChevronRight, ChevronLeft, ChevronDown, ChevronUp, Plus, Check, Settings, Clock, Cloud, Sun, RefreshCw, Trash2, Heart, Monitor, Smartphone, Tablet, User, Equal, Bell, FastForward, Mic, MicOff, ArrowUpDown, Calendar, Cpu, Hash, Volume2, VolumeX, Key, Globe, Mail, ExternalLink, CircleDashed, Activity, Sparkles, Copy, Database, Pipette, TrendingUp } from 'lucide-react';
 import { parseM3U, M3UChannel, M3UParseResult } from './utils/m3uParser';
 import { performAISearch } from './services/aiSearchService';
 import { getProxiedUrl } from './utils/fetchUtils';
@@ -12,7 +12,7 @@ import { ChannelDetail } from './components/ChannelDetail';
 import { MultiPlayer } from './components/MultiPlayer';
 import { motion, AnimatePresence } from 'motion/react';
 import { getDominantColor } from './utils/colorExtractor';
-import { FixedSizeList as List } from 'react-window';
+import { FixedSizeList as List, VariableSizeList as VList } from 'react-window';
 import { useVoiceControl } from './hooks/useVoiceControl';
 import { useToasts } from './hooks/useToasts';
 import { useRemoteControl } from './hooks/useRemoteControl';
@@ -25,7 +25,7 @@ import MobileRemote from './components/MobileRemote';
 import { VoiceSearchOverlay } from './components/VoiceSearchOverlay';
 import { AdvancedEPG } from './components/EPG/AdvancedEPG';
 import { BentoDashboard } from './components/Layout/BentoDashboard';
-import { Playlist, UIMode, LayoutMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast, NavContext, WatcherRule, WatcherNotification, LiveMatch, LiveSubtitle, ProgramSummary as ProgramSummaryType } from './types';
+import { Playlist, UIMode, LayoutMode, LogoStyle, Top10Style, FocusEffect, SortBy, Toast, NavContext, WatcherRule, WatcherNotification, LiveMatch, NewsItem, LiveSubtitle, ProgramSummary as ProgramSummaryType } from './types';
 import { cn, useContainerWidth } from './lib/utils';
 import { ChannelRow } from './components/Channel/ChannelRow';
 import { Logo } from './components/Layout/Logo';
@@ -40,25 +40,60 @@ import { LiveSubtitleOverlay } from './components/Player/LiveSubtitleOverlay';
 import { ProgramSummary } from './components/ProgramSummary';
 import { useKeyboardNavigation } from './hooks/useKeyboardNavigation';
 import { DEFAULT_M3U_URL, MULTI_CATEGORIES, PROFILE_PICS } from './constants';
+import { AmbientBackground } from './components/Layout/AmbientBackground';
+import { QuickSettingsOverlay } from './components/Overlay/QuickSettingsOverlay';
+import { RowSkeleton } from './components/Skeleton/ChannelSkeleton';
+import { HeroSection } from './components/Layout/HeroSection';
+import { CommandPalette } from './components/Overlay/CommandPalette';
+import { MiniPlayer } from './components/Overlay/MiniPlayer';
+
+import { cleanChannelName } from './utils/stringUtils';
+
+import { useDebounce } from './hooks/useDebounce';
+import { useChannelStore } from './store/useChannelStore';
+import { useSettingsStore } from './store/useSettingsStore';
+import { usePlayerStore } from './store/usePlayerStore';
+import { useNavigationStore } from './store/useNavigationStore';
+import { PWAManager } from './components/PWAManager';
+
+import { useWatcher } from './hooks/useWatcher';
 
 export default function App() {
   const { toasts, showToast } = useToasts();
+  
+  // Zustand Stores
   const {
-    remoteRoomId,
-    isRemoteConnected,
-    setIsRemoteConnected,
-    isTvSocketConnected,
-    setIsTvSocketConnected,
-    remoteControlEnabled,
-    setRemoteControlEnabled,
-    appUrl,
-    setAppUrl,
-    socketRef
-  } = useRemoteControl();
+    channels, setChannels,
+    playlists, setPlaylists,
+    recentlyWatched, setRecentlyWatched,
+    favorites, setFavorites,
+    toggleFavorite, addToRecentlyWatched,
+    markAsBroken, brokenChannelIds,
+    searchQuery, setSearchQuery,
+    sortBy, setSortBy,
+    visibleCategories, setVisibleCategories,
+    epgData, setEpgData,
+    isLoading, setIsLoading,
+    watcherRules, setWatcherRules,
+    watcherNotifications, setWatcherNotifications,
+    canliChannels, setCanliChannels,
+    diziChannels, setDiziChannels,
+    filmChannels, setFilmChannels,
+    epgUrl, setEpgUrl,
+    playlistUrl, setPlaylistUrl,
+    extraUrl, setExtraUrl,
+    userCount, setUserCount,
+    customOrders, setCustomOrders,
+    setBrokenChannelIds,
+    currentPlaylistId, setCurrentPlaylistId
+  } = useChannelStore();
 
   const {
-    themeColor, setThemeColor,
     uiMode, setUiMode,
+    themeColor, setThemeColor,
+    keyMap, setKeyMap,
+    ambilightMode, setAmbilightMode,
+    remoteControlEnabled, setRemoteControlEnabled,
     layoutMode, setLayoutMode,
     logoStyle, setLogoStyle,
     focusEffect, setFocusEffect,
@@ -70,82 +105,71 @@ export default function App() {
     dynamicThemeEnabled, setDynamicThemeEnabled,
     voiceControlEnabled, setVoiceControlEnabled,
     cinemaModeEnabled, setCinemaModeEnabled,
+    sportsTickerEnabled, setSportsTickerEnabled,
+    newsTickerEnabled, setNewsTickerEnabled,
     tmdbEnabled, setTmdbEnabled,
     tmdbApiKey, setTmdbApiKey,
     geminiApiKey, setGeminiApiKey,
     customProxyUrl, setCustomProxyUrl,
     playerEngine, setPlayerEngine,
-    ambilightMode, setAmbilightMode,
+    autoPreviewEnabled, setAutoPreviewEnabled,
+    channelSurfEnabled, setChannelSurfEnabled,
+    loadingStyle, setLoadingStyle,
     mixColor1, setMixColor1,
-    mixColor2, setMixColor2,
-    mixedColor
-  } = useSettings();
+    mixColor2, setMixColor2
+  } = useSettingsStore();
 
   const {
-    playlists, setPlaylists,
-    currentPlaylistId, setCurrentPlaylistId,
-    channels, setChannels,
-    epgData, setEpgData,
-    isLoading, setIsLoading,
-    loadPlaylist
-  } = usePlaylists(customProxyUrl);
+    currentChannel, setCurrentChannel,
+    isPlaying, setIsPlaying,
+    volume: globalVolume, setVolume: setGlobalVolume,
+    isMuted, setIsMuted,
+    isMiniPlayer, setIsMiniPlayer,
+    playbackProgress, updateProgress,
+    isGlobalPlaying, setIsGlobalPlaying
+  } = usePlayerStore();
+
+  const {
+    settingsArea, setSettingsArea,
+    settingsSection, setSettingsSection,
+    settingsFocus, setSettingsFocus,
+    activeSettingsTab, setActiveSettingsTab,
+    activeTab, setActiveTab,
+    sidebarFocus, setSidebarFocus,
+    navContext, setNavContext,
+    activeRow, setActiveRow,
+    activeCol, setActiveCol,
+    detailFocus, setDetailFocus,
+    channelMenuFocus, setChannelMenuFocus,
+    quickSettingsFocus, setQuickSettingsFocus,
+    quickSwitchFocus, setQuickSwitchFocus,
+    showSettings, setShowSettings,
+    showQuickSettings, setShowQuickSettings,
+    showEPGTimeline, setShowEPGTimeline,
+    showCommandPalette, setShowCommandPalette,
+    showDeviceInfo, setShowDeviceInfo,
+    showQuickSwitch, setShowQuickSwitch,
+    showSportsDashboard, setShowSportsDashboard,
+    showRemotePairingModal, setShowRemotePairingModal,
+    installPrompt, setInstallPrompt
+  } = useNavigationStore();
+
+  const {
+    remoteRoomId,
+    isRemoteConnected,
+    setIsRemoteConnected,
+    isTvSocketConnected,
+    setIsTvSocketConnected,
+    appUrl,
+    setAppUrl,
+    socketRef
+  } = useRemoteControl();
 
   const [isRemoteMode, setIsRemoteMode] = useState(() => localStorage.getItem('is_remote_mode') === 'true');
-  const [playbackProgress, setPlaybackProgress] = useState<Record<string, { currentTime: number; duration: number }>>(() => {
-    try {
-      const saved = localStorage.getItem('playbackProgress');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse playbackProgress:', e);
-    }
-    return {};
-  });
-
-  const [watcherRules, setWatcherRules] = useState<WatcherRule[]>(() => {
-    const saved = localStorage.getItem('watcher_rules');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [watcherNotifications, setWatcherNotifications] = useState<WatcherNotification[]>([]);
-  const notifiedProgramsRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    localStorage.setItem('watcher_rules', JSON.stringify(watcherRules));
-  }, [watcherRules]);
-
+  
   const urlParams = new URLSearchParams(window.location.search || window.location.hash.replace(/^#/, '?'));
   const remoteRoomIdFromUrl = urlParams.get('remote')?.trim().toUpperCase() || null;
   const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-  useEffect(() => {
-    localStorage.setItem('playbackProgress', JSON.stringify(playbackProgress));
-  }, [playbackProgress]);
-
-  const updateProgress = (channelId: string, currentTime: number, duration: number) => {
-    if (!duration || duration < 10) return; // Don't save for live streams or very short clips
-    setPlaybackProgress(prev => ({
-      ...prev,
-      [channelId]: { currentTime, duration }
-    }));
-  };
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentChannel, setCurrentChannel] = useState<M3UChannel | null>(null);
-  const [playlistUrl, setPlaylistUrl] = useState('');
-  const [epgUrl, setEpgUrl] = useState('');
-  const [extraUrl, setExtraUrl] = useState('');
-  const [newPlaylistName, setNewPlaylistName] = useState('');
-  const [newPlaylistUrl, setNewPlaylistUrl] = useState('');
-  const [globalVolume, setGlobalVolume] = useState(() => {
-    const saved = localStorage.getItem('global_volume');
-    return saved ? parseFloat(saved) : 1;
-  });
-  const [isMuted, setIsMuted] = useState(() => {
-    const saved = localStorage.getItem('is_muted');
-    return saved === 'true';
-  });
 
   const globalVolumeRef = useRef(globalVolume);
   useEffect(() => {
@@ -158,71 +182,27 @@ export default function App() {
     if (socketRef.current) {
       socketRef.current.emit('sync-state', { volume: newVolume, isMuted: false });
     }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('global_volume', globalVolume.toString());
-  }, [globalVolume]);
+  }, [setGlobalVolume, socketRef]);
 
   // AI Gözcü (Watcher) Logic
-  useEffect(() => {
-    if (!epgData || watcherRules.length === 0) return;
+  useWatcher({ epgData, watcherRules, setWatcherNotifications });
 
-    const scanInterval = setInterval(() => {
-      const now = new Date();
-      const newNotifications: WatcherNotification[] = [];
-      const activeRules = watcherRules.filter(r => r.isActive);
-      
-      if (activeRules.length === 0) return;
-
-      Object.entries(epgData.programs).forEach(([channelId, programs]) => {
-        const currentProgram = programs.find(p => now >= p.start && now <= p.stop);
-        if (currentProgram) {
-          const titleLower = currentProgram.title.toLowerCase();
-          const descLower = (currentProgram.description || '').toLowerCase();
-
-          activeRules.forEach(rule => {
-            const keywordLower = rule.keyword.toLowerCase();
-            const matches = titleLower.includes(keywordLower) || descLower.includes(keywordLower);
-
-            if (matches) {
-              const notificationId = `${rule.id}-${channelId}-${currentProgram.start.getTime()}`;
-              if (!notifiedProgramsRef.current.has(notificationId)) {
-                notifiedProgramsRef.current.add(notificationId);
-                const channelName = epgData.channels[channelId] || channelId;
-                newNotifications.push({
-                  id: notificationId,
-                  ruleId: rule.id,
-                  programTitle: currentProgram.title,
-                  channelName,
-                  channelId,
-                  startTime: currentProgram.start,
-                  timestamp: Date.now()
-                });
-              }
-            }
-          });
-        }
-      });
-
-      if (newNotifications.length > 0) {
-        setWatcherNotifications(prev => [...newNotifications, ...prev].slice(0, 10));
-      }
-    }, 60000); // Scan every minute
-
-    return () => clearInterval(scanInterval);
-  }, [epgData, watcherRules]);
-
-  useEffect(() => {
-    localStorage.setItem('is_muted', String(isMuted));
-  }, [isMuted]);
-
-  const [userCount, setUserCount] = useState<number>(1);
   const [scrolled, setScrolled] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showRemotePairingModal, setShowRemotePairingModal] = useState(false);
-  const [showEPGTimeline, setShowEPGTimeline] = useState(false);
   const [previewChannelId, setPreviewChannelId] = useState<string | null>(null);
+
+  const extractChannelNumbersFromM3U = (channels: M3UChannel[]) => {
+    const numbers: Record<string, string> = {};
+    channels.forEach(ch => {
+      // Priority: tvgNumber > channel attribute
+      if (ch.tvgNumber) {
+        numbers[ch.id] = ch.tvgNumber.toString();
+      } else if (ch.channel) {
+        numbers[ch.id] = ch.channel;
+      }
+    });
+    return numbers;
+  };
+
   const [savedUrl, setSavedUrl] = useState<string | null>(() => {
     const saved = localStorage.getItem('m3u_url');
     const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
@@ -245,36 +225,12 @@ export default function App() {
     });
   }, [currentChannel, dynamicThemeEnabled, setThemeColor]);
 
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('favorites');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse favorites:', e);
-    }
-    return [];
-  });
-
-  useEffect(() => {
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites]);
-
   const [multiSessions, setMultiSessions] = useState<Record<string, string[]>>(() => {
     try {
       const saved = localStorage.getItem('multi_sessions');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') return parsed;
-      }
-      
-      // Migration from old multiChannels
-      const oldMulti = localStorage.getItem('multi_channels');
-      if (oldMulti) {
-        const parsed = JSON.parse(oldMulti);
-        if (Array.isArray(parsed)) return { 'Multi Kanal': parsed };
       }
     } catch (e) {
       console.error('Failed to parse multi_sessions:', e);
@@ -289,9 +245,6 @@ export default function App() {
   const toggleMultiChannel = (channelId: string, sessionName: string = 'Multi Kanal') => {
     setMultiSessions(prev => {
       const current = { ...prev };
-      
-      // Check if channel is already in ANY session of this category
-      // If it is, remove it.
       let found = false;
       Object.keys(current).forEach(key => {
         if (key === sessionName || key.startsWith(`${sessionName} `)) {
@@ -304,91 +257,22 @@ export default function App() {
       });
 
       if (!found) {
-        // Find the first session of this category that has space (< 9)
         let targetSession = sessionName;
         let counter = 1;
-        
         while (current[targetSession] && current[targetSession].length >= 9) {
           counter++;
           targetSession = `${sessionName} ${counter}`;
         }
-        
         if (!current[targetSession]) current[targetSession] = [];
         current[targetSession] = [...current[targetSession], channelId];
       }
-      
       return current;
     });
   };
-  const [canliChannels, setCanliChannels] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('canli_channels');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse canli_channels:', e);
-    }
-    return [];
-  });
-  const [diziChannels, setDiziChannels] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('dizi_channels');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse dizi_channels:', e);
-    }
-    return [];
-  });
-  const [filmChannels, setFilmChannels] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('film_channels');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse film_channels:', e);
-    }
-    return [];
-  });
 
   const [isMultiPlayerOpen, setIsMultiPlayerOpen] = useState(false);
   const [multiPlayerChannels, setMultiPlayerChannels] = useState<M3UChannel[]>([]);
-  const [recentlyWatched, setRecentlyWatched] = useState<M3UChannel[]>(() => {
-    try {
-      const saved = localStorage.getItem('recently_watched');
-      if (!saved) return [];
-      const parsed = JSON.parse(saved);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error('Failed to parse recently_watched:', e);
-      return [];
-    }
-  });
-  const [visibleCategories, setVisibleCategories] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('visible_categories');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse visible_categories:', e);
-    }
-    return ['Top 10'];
-  });
-
-  useEffect(() => {
-    localStorage.setItem('visible_categories', JSON.stringify(visibleCategories));
-  }, [visibleCategories]);
-
   const [weatherCity, setWeatherCity] = useState<string>(() => localStorage.getItem('weather_city') || 'İzmir');
-  const [brokenChannelIds, setBrokenChannelIds] = useState<Set<string>>(new Set());
   const [hasCheckedLinks, setHasCheckedLinks] = useState(() => {
     const saved = sessionStorage.getItem('has_checked_links');
     return saved === 'true';
@@ -397,12 +281,47 @@ export default function App() {
   const [checkProgress, setCheckProgress] = useState(0);
   const [now, setNow] = useState(new Date());
 
+  const selectCategory = useCallback((category: string) => {
+    const categoryMap: Record<string, string> = {
+      'top10': 'Top 10',
+      'recent': 'İzlemeye Devam Et',
+      'favorites': 'Favorilerim',
+      'live': 'Canlı',
+      'movies': 'Film',
+      'series': 'Dizi'
+    };
+    const targetTab = categoryMap[category] || category;
+    if (visibleCategories.includes(targetTab) || targetTab === 'Tümü') {
+      setActiveTab(targetTab);
+      setActiveRow(0);
+      setActiveCol(0);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setVisibleCategories(prev => 
+        (Array.isArray(prev) ? prev : []).includes(targetTab) 
+          ? prev.filter(c => c !== targetTab) 
+          : [...prev, targetTab]
+      );
+    }
+  }, [visibleCategories, setActiveTab, setActiveRow, setActiveCol, setVisibleCategories]);
+
   useEffect(() => {
     const timer = setInterval(() => {
       setNow(new Date());
     }, 60000); // Update every minute
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(true);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
+  }, [setShowCommandPalette]);
 
   useEffect(() => {
     const checkReminders = () => {
@@ -420,7 +339,6 @@ export default function App() {
           const startTime = parseInt(startTimeStr);
           const timeDiff = startTime - now;
 
-          // If program is starting in 5 minutes (300,000 ms) and not yet started
           if (timeDiff > 0 && timeDiff <= 5 * 60 * 1000) {
             const channel = channels.find(ch => ch.id === channelId);
             const program = epgData?.programs[channelId]?.find(p => p.start.getTime() === startTime);
@@ -431,7 +349,6 @@ export default function App() {
               changed = true;
             }
           } else if (timeDiff < -30 * 60 * 1000) {
-            // Remove old reminders (30 mins past start)
             updatedReminders = updatedReminders.filter(r => r !== reminderId);
             changed = true;
           }
@@ -449,101 +366,93 @@ export default function App() {
     return () => clearInterval(interval);
   }, [channels, epgData, showToast]);
 
-  const [channelSurfEnabled, setChannelSurfEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('channel_surf_enabled');
-    return saved === null ? true : saved === 'true';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('channel_surf_enabled', channelSurfEnabled.toString());
-  }, [channelSurfEnabled]);
-
-  const [autoPreviewEnabled, setAutoPreviewEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem('auto_preview_enabled');
-    return saved === null ? false : saved === 'true';
-  });
   const [ambientColor, setAmbientColor] = useState<string>('rgba(0, 0, 0, 0)');
-  const [showQuickSettings, setShowQuickSettings] = useState(false);
-  const [transitionKey, setTransitionKey] = useState(0);
+  useEffect(() => {
+    // Initial mock matches
+    const mockMatches: LiveMatch[] = [
+      { id: '1', homeTeam: 'Galatasaray', awayTeam: 'Fenerbahçe', homeScore: 2, awayScore: 1, minute: 78, league: 'Süper Lig', status: 'Canlı' },
+      { id: '2', homeTeam: 'Beşiktaş', awayTeam: 'Trabzonspor', homeScore: 0, awayScore: 0, minute: 15, league: 'Süper Lig', status: 'Canlı' },
+      { id: '3', homeTeam: 'Real Madrid', awayTeam: 'Barcelona', homeScore: 1, awayScore: 2, minute: 62, league: 'La Liga', status: 'Canlı' },
+      { id: '4', homeTeam: 'Manchester City', awayTeam: 'Liverpool', homeScore: 3, awayScore: 2, minute: 88, league: 'Premier League', status: 'Canlı' },
+      { id: '5', homeTeam: 'Bayern Münih', awayTeam: 'Dortmund', homeScore: 4, awayScore: 0, minute: 45, league: 'Bundesliga', status: 'Devre Arası' }
+    ];
+    setLiveMatches(mockMatches);
 
-  const [showDeviceInfo, setShowDeviceInfo] = useState(false);
+    const matchInterval = setInterval(() => {
+      setLiveMatches(prev => prev.map(match => {
+        if (match.status === 'Bitti') return match;
+        
+        const newMinute = match.minute + 1;
+        const shouldScore = Math.random() < 0.05;
+        const isHome = Math.random() < 0.5;
+
+        return {
+          ...match,
+          minute: newMinute > 90 ? 90 : newMinute,
+          homeScore: (shouldScore && isHome) ? match.homeScore + 1 : match.homeScore,
+          awayScore: (shouldScore && !isHome) ? match.awayScore + 1 : match.awayScore,
+          status: newMinute > 90 ? 'Bitti' : match.status
+        };
+      }));
+    }, 30000);
+
+    return () => clearInterval(matchInterval);
+  }, []);
+
+  const [transitionKey, setTransitionKey] = useState(0);
+  const mixedColor = useMemo(() => themeColor, [themeColor]);
+
+  const getDeviceInfo = useCallback((key?: string) => {
+    const info = {
+      device: (navigator as any).platform || 'unknown',
+      browser: navigator.userAgent.split(' ').pop() || 'unknown',
+      screenRes: `${window.screen.width}x${window.screen.height}`,
+      windowSize: `${window.innerWidth}x${window.innerHeight}`,
+      memory: (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'unknown',
+      cores: (navigator as any).hardwareConcurrency || 'unknown',
+      connection: navigator.onLine ? 'Online' : 'Offline',
+      language: navigator.language,
+      raw: navigator.userAgent
+    };
+    if (key) return (info as any)[key];
+    return info;
+  }, []);
+
+  const formatTime = useCallback((date: Date) => {
+    return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  }, []);
+
+  const handleCommandChannelSelect = useCallback((channel: M3UChannel) => {
+    setCurrentChannel(channel);
+    setNavContext('player');
+    setShowCommandPalette(false);
+  }, [setCurrentChannel, setNavContext, setShowCommandPalette]);
+
+  const handleCommandCategorySelect = useCallback((category: string) => {
+    selectCategory(category);
+    setShowCommandPalette(false);
+  }, [selectCategory, setShowCommandPalette]);
+
   const [showGlobalVolumeIndicator, setShowGlobalVolumeIndicator] = useState(false);
   const volumeIndicatorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isFirstVolumeChange = useRef(true);
 
-  const getDeviceInfo = () => {
-    const ua = navigator.userAgent;
-    let browser = "Bilinmiyor";
-    let device = "Bilinmiyor";
-
-    if (ua.includes("Firefox")) browser = "Firefox";
-    else if (ua.includes("Edg")) browser = "Edge";
-    else if (ua.includes("Chrome")) browser = "Chrome";
-    else if (ua.includes("Safari")) browser = "Safari";
-
-    if (ua.includes("Windows")) device = "Windows";
-    else if (ua.includes("Android")) device = "Android";
-    else if (ua.includes("iPhone")) device = "iPhone";
-    else if (ua.includes("iPad")) device = "iPad";
-    else if (ua.includes("Macintosh")) device = "Mac";
-    else if (ua.includes("Linux")) device = "Linux";
-
-    // Technical details for debugging/optimization
-    const screenRes = `${window.screen.width}x${window.screen.height}`;
-    const windowSize = `${window.innerWidth}x${window.innerHeight}`;
-    const pixelRatio = window.devicePixelRatio;
-    const memory = (navigator as any).deviceMemory ? `${(navigator as any).deviceMemory} GB` : 'Bilinmiyor';
-    const connection = (navigator as any).connection ? (navigator as any).connection.effectiveType : 'Bilinmiyor';
-    const language = navigator.language;
-    const cores = navigator.hardwareConcurrency || 'Bilinmiyor';
-
-    return { 
-      browser, 
-      device, 
-      raw: ua,
-      screenRes,
-      windowSize,
-      pixelRatio,
-      memory,
-      connection,
-      language,
-      cores
-    };
-  };
-
-  const [loadingStyle, setLoadingStyle] = useState<'classic' | 'minimal' | 'pulse' | 'bars' | 'orbit' | 'glitch'>(() => 
-    (localStorage.getItem('player_loading_style') as any) || 'classic'
-  );
-
-  useEffect(() => {
-    localStorage.setItem('player_loading_style', loadingStyle);
-  }, [loadingStyle]);
-  const [customOrders, setCustomOrders] = useState<Record<string, string[]>>(() => {
-    try {
-      const saved = localStorage.getItem('custom_orders');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return parsed;
-      }
-    } catch (e) {
-      console.error('Failed to parse custom_orders:', e);
-    }
-    return {};
-  });
-
-  useEffect(() => {
-    localStorage.setItem('custom_orders', JSON.stringify(customOrders));
-  }, [customOrders]);
-
   const getCurrentProgram = useCallback((channelId: string) => {
-    if (!epgData || !epgData.programs[channelId]) return null;
-    const now = new Date();
-    return epgData.programs[channelId].find(p => p.start <= now && p.stop >= now);
-  }, [epgData]);
+    if (!epgData) return null;
+    let programs = epgData.programs[channelId];
+    
+    if (!programs) {
+      const targetClean = cleanChannelName(channelId);
+      const matchedId = Object.keys(epgData.programs).find(id => cleanChannelName(id) === targetClean);
+      if (matchedId) {
+        programs = epgData.programs[matchedId];
+      }
+    }
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  };
+    if (!programs) return null;
+    const now = new Date();
+    return programs.find(p => p.start <= now && p.stop >= now);
+  }, [epgData]);
 
   const [collapsedRows, setCollapsedRows] = useState<Set<string>>(new Set());
   const [lockedCategories, setLockedCategories] = useState<string[]>(() => {
@@ -561,8 +470,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('parental_pin', parentalPin);
   }, [parentalPin]);
+
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
-  const [sleepTimer, setSleepTimer] = useState<number | null>(null); // minutes
+  const [sleepTimer, setSleepTimer] = useState<number | null>(null);
   const [sleepTimerActive, setSleepTimerActive] = useState(false);
   const sleepTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -575,7 +485,6 @@ export default function App() {
           if (prev === null || prev <= 1) {
             clearInterval(sleepTimerRef.current!);
             setSleepTimerActive(false);
-            // Logic to "turn off" or stop playback
             setCurrentChannel(null);
             setIsMiniPlayer(false);
             setNavContext('browse');
@@ -583,15 +492,14 @@ export default function App() {
           }
           return prev - 1;
         });
-      }, 60000); // Update every minute
+      }, 60000);
     }
     return () => {
       if (sleepTimerRef.current) clearInterval(sleepTimerRef.current);
     };
-  }, [sleepTimerActive, sleepTimer]);
+  }, [sleepTimerActive, sleepTimer, setCurrentChannel, setIsMiniPlayer, setNavContext]);
 
   const [channelForDetail, setChannelForDetail] = useState<M3UChannel | null>(null);
-  const [detailFocus, setDetailFocus] = useState(0); // 0: Play, 1: Multi, 2: Close
 
   const handleActorFilter = useCallback((actorName: string) => {
     setSearchQuery(actorName);
@@ -602,118 +510,46 @@ export default function App() {
     setActiveCol(0);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     showToast(`${actorName} için sonuçlar filtrelendi`, "info");
-  }, [showToast]);
+  }, [showToast, setSearchQuery, setActiveTab, setNavContext, setActiveRow, setActiveCol]);
 
-  const [isMiniPlayer, setIsMiniPlayer] = useState(false);
-  const [isGlobalPlaying, setIsGlobalPlaying] = useState(true);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [exitFocus, setExitFocus] = useState(0); // 0: Evet, 1: Hayır
+  const [exitFocus, setExitFocus] = useState(0);
   const [channelNumbers, setChannelNumbers] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('channel_numbers');
+    const saved = localStorage.getItem('moon_channel_numbers');
     return saved ? JSON.parse(saved) : {};
   });
+
+  useEffect(() => {
+    localStorage.setItem('moon_channel_numbers', JSON.stringify(channelNumbers));
+  }, [channelNumbers]);
   const [typedNumber, setTypedNumber] = useState<string>('');
   const [showNumberInput, setShowNumberInput] = useState(false);
   const [numberInputChannelId, setNumberInputChannelId] = useState<string | null>(null);
   const typedNumberTimeout = useRef<NodeJS.Timeout | null>(null);
   const [featuredChannel, setFeaturedChannel] = useState<M3UChannel | null>(null);
-  const [activeTab, setActiveTab] = useState('Tümü');
-  const [sortBy, setSortBy] = useState<SortBy>('default');
+
   const categoryScrollRef = useRef<HTMLDivElement>(null);
-
-  const checkScroll = useCallback(() => {
-    const el = categoryScrollRef.current;
-    if (el) {
-      // Scroll indicator logic can be added here if needed
-    }
-  }, []);
-
-  const [navContext, setNavContext] = useState<NavContext>('browse');
-  const [activeRow, setActiveRow] = useState(0);
-  const [activeCol, setActiveCol] = useState(0);
-  const [settingsArea, setSettingsArea] = useState<'tabs' | 'sections' | 'content'>('tabs');
-  const [settingsSection, setSettingsSection] = useState(0);
-  const [settingsFocus, setSettingsFocus] = useState(0);
-  const [sidebarFocus, setSidebarFocus] = useState(0);
-  const [channelMenuFocus, setChannelMenuFocus] = useState(0);
-  const [quickSettingsFocus, setQuickSettingsFocus] = useState(0);
-  const [quickSwitchFocus, setQuickSwitchFocus] = useState(0);
-  const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [isAISearching, setIsAISearching] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
-  const [showSportsDashboard, setShowSportsDashboard] = useState(false);
-
-  useEffect(() => {
-    if (showSportsDashboard) {
-      setNavContext('sports-dashboard');
-    } else if (navContext === 'sports-dashboard') {
-      setNavContext('browse');
-    }
-  }, [showSportsDashboard]);
 
   const [liveMatches, setLiveMatches] = useState<LiveMatch[]>([]);
+  const prevMatchesRef = useRef<LiveMatch[]>([]);
+  const [liveNews, setLiveNews] = useState<NewsItem[]>([]);
   const [isLiveTranslationEnabled, setIsLiveTranslationEnabled] = useState(false);
   const [currentSubtitle, setCurrentSubtitle] = useState<LiveSubtitle | null>(null);
   const [isTranslationProcessing, setIsTranslationProcessing] = useState(false);
   const [currentSummary, setCurrentSummary] = useState<ProgramSummaryType | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
-  const [activeSettingsTab, setActiveSettingsTab] = useState(0);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   const [multiSessionMenuOpen, setMultiSessionMenuOpen] = useState(false);
   const [channelMenuId, setChannelMenuId] = useState<string | null>(null);
   const [channelMenuCategory, setChannelMenuCategory] = useState<string | null>(null);
 
-  const selectCategory = useCallback((category: string) => {
-    const categoryMap: Record<string, string> = {
-      'top10': 'Top 10',
-      'recent': 'İzlemeye Devam Et',
-      'favorites': 'Favorilerim',
-      'live': 'Canlı',
-      'movies': 'Film',
-      'series': 'Dizi'
-    };
-    
-    const targetTab = categoryMap[category] || category;
-    
-    if (visibleCategories.includes(targetTab) || targetTab === 'Tümü') {
-      setActiveTab(targetTab);
-      setActiveRow(0);
-      setActiveCol(0);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      setVisibleCategories(prev => 
-        prev.includes(targetTab) 
-          ? prev.filter(c => c !== targetTab) 
-          : [...prev, targetTab]
-      );
-    }
-  }, [visibleCategories, setActiveRow, setActiveCol]);
-
-  const settingsContentRef = useRef<HTMLDivElement>(null);
-  const settingsSidebarRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll settings content
-  useEffect(() => {
-    if (showSettings && settingsArea === 'content') {
-      const focused = document.querySelector('.settings-focused');
-      if (focused && settingsContentRef.current) {
-        focused.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    } else if (showSettings && settingsArea === 'sections') {
-      const activeSection = document.querySelector('[data-section-active="true"]');
-      if (activeSection && settingsContentRef.current) {
-        activeSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }
-  }, [settingsFocus, settingsSection, settingsArea, showSettings, activeSettingsTab]);
-
-  // Screen size detection for responsive focus and layout
   useEffect(() => {
     const handleResize = () => {
       const width = window.innerWidth;
-      // Only auto-update if not manually set in localStorage
       if (!localStorage.getItem('device_type')) {
         if (width < 640) setDeviceType('phone');
         else if (width < 1024) setDeviceType('tablet');
@@ -724,53 +560,7 @@ export default function App() {
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Scroll settings content to top when tab changes
-  useEffect(() => {
-    if (settingsContentRef.current) {
-      settingsContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, [activeSettingsTab]);
-
-  useEffect(() => {
-    if (showSettings) {
-      setExpandedSections({});
-    }
-  }, [showSettings]);
-
-  useEffect(() => {
-    if (showSettings && settingsSidebarRef.current) {
-      const focusedElement = settingsSidebarRef.current.querySelector(`[data-sidebar-focus="${sidebarFocus}"]`);
-      if (focusedElement) {
-        focusedElement.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-          inline: 'center'
-        });
-      }
-    }
-  }, [sidebarFocus, showSettings]);
-
-  const scrollSidebar = (direction: 'left' | 'right') => {
-    if (settingsSidebarRef.current) {
-      const scrollAmount = 200;
-      settingsSidebarRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
-
-  const scrollSettingsContent = (direction: 'up' | 'down') => {
-    if (settingsContentRef.current) {
-      const scrollAmount = 300;
-      settingsContentRef.current.scrollBy({
-        top: direction === 'up' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
+  }, [setDeviceType]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -845,62 +635,11 @@ export default function App() {
   }, [recentlyWatched]);
 
   useEffect(() => {
-    localStorage.setItem('favorites', JSON.stringify(favorites));
-  }, [favorites]);
-
-  useEffect(() => {
-    localStorage.setItem('canli_channels', JSON.stringify(canliChannels));
-  }, [canliChannels]);
-
-  useEffect(() => {
-    localStorage.setItem('dizi_channels', JSON.stringify(diziChannels));
-  }, [diziChannels]);
-
-  useEffect(() => {
-    localStorage.setItem('film_channels', JSON.stringify(filmChannels));
-  }, [filmChannels]);
-
-  useEffect(() => {
-    localStorage.setItem('auto_preview_enabled', String(autoPreviewEnabled));
-  }, [autoPreviewEnabled]);
-
-  useEffect(() => {
-    localStorage.setItem('poster_orientation', posterOrientation);
-  }, [posterOrientation]);
-
-  const toggleFavorite = useCallback((channelId: string) => {
-    const channel = channels.find(ch => ch.id === channelId);
-    if (!channel) return;
-
-    setFavorites(prev => {
-      const current = Array.isArray(prev) ? prev : [];
-      const isAlreadyFavorite = current.includes(channelId);
-      
-      if (isAlreadyFavorite) {
-        showToast(`${channel.name} favorilerden çıkarıldı`, "info");
-        return current.filter(id => id !== channelId);
-      } else {
-        const hasSameUrl = current.some(favId => {
-          const favChannel = channels.find(ch => ch.id === favId);
-          return favChannel && favChannel.urls.some(url => channel.urls.includes(url));
-        });
-        
-        if (hasSameUrl) {
-          showToast("Bu kanal zaten favorilerinizde", "info");
-          return current;
-        }
-        showToast(`${channel.name} favorilere eklendi`, "success");
-        return [...current, channelId];
-      }
-    });
-  }, [channels, showToast]);
-
-  useEffect(() => {
     if (channels.length === 0) {
       setActiveRow(0);
       setActiveCol(0);
     }
-  }, [channels.length]);
+  }, [channels.length, setActiveRow, setActiveCol]);
 
   const handleDeleteChannel = (channelId: string) => {
     if (channelId.startsWith('multi-view-session-')) {
@@ -943,30 +682,30 @@ export default function App() {
         hasTop10 = true;
         cats.add('Top 10');
       }
-      if (ch.group) {
-        cats.add(ch.group);
-      }
+      if (ch.group) cats.add(ch.group);
     }
 
     if (brokenChannelIds.size > 0) cats.add('Çalışmayanlar');
-
     return Array.from(cats);
-  }, [channels, multiSessions, favorites.length, canliChannels.length, diziChannels.length, filmChannels.length, recentlyWatched.length, brokenChannelIds]);
+  }, [channels, multiSessions, favorites, canliChannels, diziChannels, filmChannels, recentlyWatched, brokenChannelIds]);
 
   useEffect(() => {
     const el = categoryScrollRef.current;
     if (el) {
-      el.addEventListener('scroll', checkScroll);
-      checkScroll();
-      return () => el.removeEventListener('scroll', checkScroll);
+      const handler = () => {
+        const x = el.scrollLeft;
+        // Scroll check logic
+      };
+      el.addEventListener('scroll', handler);
+      return () => el.removeEventListener('scroll', handler);
     }
   }, [availableCategories]);
 
-  const deferredSearchQuery = React.useDeferredValue(searchQuery);
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
 
   // Group channels by category
   const groupedChannels = useMemo<[string, M3UChannel[]][]>(() => {
-    const query = deferredSearchQuery.toLowerCase();
+    const query = debouncedSearchQuery.toLowerCase();
     const filtered = query 
       ? channels.filter(channel => 
           channel.name.toLowerCase().includes(query) ||
@@ -979,35 +718,36 @@ export default function App() {
     }
 
     const groups: Record<string, M3UChannel[]> = {};
-    const broken: M3UChannel[] = [];
-    
-    // Pre-calculate sets for faster lookups
     const favoriteSet = new Set(favorites);
     const canliSet = new Set(canliChannels);
     const diziSet = new Set(diziChannels);
     const filmSet = new Set(filmChannels);
-    const recentlyWatchedIds = new Set(recentlyWatched.map(ch => ch.id));
 
-    // Helper to add a group if it matches activeTab
     const addGroup = (title: string, matched: M3UChannel[]) => {
       if (matched.length === 0) return;
-      if (activeTab === 'Tümü' || activeTab === title) {
+      // Multi Kanal sessions should be visible in "Tümü" OR if they match the tab name
+      // Also, if a multi-channel session is categorized as "Dizi (Multi)", it should show up in "Dizi" tab
+      if (
+        activeTab === 'Tümü' || 
+        activeTab === title || 
+        (title.endsWith(' (Multi)') && title.startsWith(activeTab)) ||
+        (activeTab === 'Multi Kanal' && title.endsWith(' (Multi)'))
+      ) {
         groups[title] = matched;
       }
     };
     
-    // Add Multi Kanal sessions by category
+    // Add Multi Kanal sessions
     Object.entries(multiSessions).forEach(([sessionName, sessionChannelIds]) => {
       const ids = sessionChannelIds as string[];
       if (ids.length > 0) {
         const matched = channels
-          .filter(ch => ids.includes(ch.id) && !brokenChannelIds.has(ch.id))
+          .filter(ch => ids.includes(ch.id))
           .sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
         
         if (matched.length > 0) {
           const baseCategory = MULTI_CATEGORIES.find(cat => sessionName.startsWith(cat)) || 'Multi Kanal';
           const groupTitle = `${baseCategory} (Multi)`;
-          
           const multiViewChannel: M3UChannel = {
             id: `multi-view-session-${sessionName}`,
             name: sessionName,
@@ -1019,75 +759,43 @@ export default function App() {
             sessionName: sessionName,
             sessionChannels: ids
           };
-          
           addGroup(groupTitle, [multiViewChannel]);
         }
       }
     });
 
-    // Add Trending (Popüler)
-    const trendingChannels = channels
-      .filter(ch => !brokenChannelIds.has(ch.id))
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 15);
-    addGroup('Popüler', trendingChannels);
-
-    // Add Favorites
+    addGroup('Popüler', channels.sort(() => Math.random() - 0.5).slice(0, 15));
+    
     if (favoriteSet.size > 0) {
-      const favoriteChannels = channels
-        .filter(ch => favoriteSet.has(ch.id) && !brokenChannelIds.has(ch.id))
-        .sort((a, b) => favorites.indexOf(a.id) - favorites.indexOf(b.id));
-      addGroup('Favorilerim', favoriteChannels);
+      addGroup('Favorilerim', channels.filter(ch => favoriteSet.has(ch.id)).sort((a, b) => favorites.indexOf(a.id) - favorites.indexOf(b.id)));
     }
 
-    // Add Top 10
-    const top10Channels = channels
-      .filter(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10 && !brokenChannelIds.has(ch.id))
-      .sort((a, b) => (a.tvgNumber || 0) - (b.tvgNumber || 0));
-    addGroup('Top 10', top10Channels);
+    const top10 = channels.filter(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10).sort((a, b) => (a.tvgNumber || 0) - (b.tvgNumber || 0));
+    addGroup('Top 10', top10);
 
-    // Add Canlı
     if (canliSet.size > 0) {
-      const matched = channels
-        .filter(ch => canliSet.has(ch.id) && !brokenChannelIds.has(ch.id))
-        .sort((a, b) => canliChannels.indexOf(a.id) - canliChannels.indexOf(b.id));
-      addGroup('Canlı', matched);
+      addGroup('Canlı', channels.filter(ch => canliSet.has(ch.id)).sort((a, b) => canliChannels.indexOf(a.id) - canliChannels.indexOf(b.id)));
     }
-
-    // Add Dizi
     if (diziSet.size > 0) {
-      const matched = channels
-        .filter(ch => diziSet.has(ch.id) && !brokenChannelIds.has(ch.id))
-        .sort((a, b) => diziChannels.indexOf(a.id) - diziChannels.indexOf(b.id));
-      addGroup('Dizi', matched);
+      addGroup('Dizi', channels.filter(ch => diziSet.has(ch.id)).sort((a, b) => diziChannels.indexOf(a.id) - diziChannels.indexOf(b.id)));
     }
-
-    // Add Film
     if (filmSet.size > 0) {
-      const matched = channels
-        .filter(ch => filmSet.has(ch.id) && !brokenChannelIds.has(ch.id))
-        .sort((a, b) => filmChannels.indexOf(a.id) - filmChannels.indexOf(b.id));
-      addGroup('Film', matched);
+      addGroup('Film', channels.filter(ch => filmSet.has(ch.id)).sort((a, b) => filmChannels.indexOf(a.id) - filmChannels.indexOf(b.id)));
     }
 
-    // Add Recently Watched
     if (recentlyWatched.length > 0) {
-      addGroup('İzlemeye Devam Et', recentlyWatched.filter(ch => !brokenChannelIds.has(ch.id)));
+      addGroup('İzlemeye Devam Et', recentlyWatched);
     }
 
-    // Add Yayın Akışı
-    const epgChannels = epgData ? channels.filter(ch => epgData.programs[ch.tvgId || ch.name] && epgData.programs[ch.tvgId || ch.name].length > 0 && !brokenChannelIds.has(ch.id)) : [];
+    const epgChannels = epgData ? channels.filter(ch => epgData.programs[ch.tvgId || ch.name] && epgData.programs[ch.tvgId || ch.name].length > 0) : [];
     if (epgChannels.length > 0) {
       addGroup('Yayın Akışı', epgChannels.slice(0, 50));
     }
 
-    // Main grouping loop - single pass
-    for (let i = 0; i < channels.length; i++) {
-      const channel = channels[i];
-      if (brokenChannelIds.has(channel.id)) {
-        broken.push(channel);
-        continue;
-      }
+    for (const channel of channels) {
+      // If a channel is broken, it will be marked but still visible in its original group
+      // unless we explicitly want to filter it out. For now, let's keep them visible.
+      // if (brokenChannelIds.has(channel.id)) continue;
       const groupName = channel.group || 'General';
       if (activeTab === 'Tümü' || activeTab === groupName) {
         if (!groups[groupName]) groups[groupName] = [];
@@ -1095,50 +803,26 @@ export default function App() {
       }
     }
 
-    // Apply custom order and deduplicate
     Object.keys(groups).forEach(groupName => {
-      // Apply Smart Sorting
-      if (sortBy === 'name') {
-        groups[groupName].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-      } else if (sortBy === 'number') {
-        groups[groupName].sort((a, b) => (a.tvgNumber || 999999) - (b.tvgNumber || 999999));
-      }
+      if (sortBy === 'name') groups[groupName].sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+      else if (sortBy === 'number') groups[groupName].sort((a, b) => (a.tvgNumber || 999999) - (b.tvgNumber || 999999));
 
-      const order = customOrders[groupName];
-      if (order && order.length > 0) {
-        groups[groupName].sort((a, b) => {
-          const aIdx = order.indexOf(a.id);
-          const bIdx = order.indexOf(b.id);
-          if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-          if (aIdx !== -1) return -1;
-          if (bIdx !== -1) return 1;
-          return 0;
-        });
-      }
-
-      // Deduplicate URLs
+      // Duplicates removal
       if (!groupName.endsWith(' (Multi)')) {
         const seenUrls = new Set<string>();
         groups[groupName] = groups[groupName].filter(channel => {
-          const hasSeen = channel.urls.some(url => seenUrls.has(url));
+          const hasSeen = (channel.urls || []).some(url => seenUrls.has(url));
           if (hasSeen) return false;
-          channel.urls.forEach(url => seenUrls.add(url));
+          (channel.urls || []).forEach(url => seenUrls.add(url));
           return true;
         });
       }
     });
 
-    if (broken.length > 0) {
-      addGroup('Çalışmayanlar', broken);
-    }
-
     return Object.entries(groups)
       .filter(([group]) => {
-        if (visibleCategories.length > 0) {
-          return visibleCategories.includes(group) || group === 'Çalışmayanlar' || (visibleCategories.includes('Multi Kanal') && group.endsWith(' (Multi)'));
-        }
-        const specialGroups = ['Multi Kanal', 'Favorilerim', 'Canlı', 'Dizi', 'Film', 'İzlemeye Devam Et', 'Çalışmayanlar', 'Yayın Akışı'];
-        return !specialGroups.includes(group) && !group.endsWith(' (Multi)');
+        const specialGroups = ['Çalışmayanlar'];
+        return !specialGroups.includes(group);
       })
       .sort((a, b) => {
         const order = ['İzlemeye Devam Et', 'Popüler', 'Top 10', 'Multi Kanal', 'Favorilerim', 'Canlı', 'Film', 'Dizi', 'Yayın Akışı'];
@@ -1151,11 +835,9 @@ export default function App() {
         const aIdx = getOrderIndex(a[0]);
         const bIdx = getOrderIndex(b[0]);
         if (aIdx !== 100 || bIdx !== 100) return aIdx - bIdx;
-        if (a[0] === 'Çalışmayanlar') return 1;
-        if (b[0] === 'Çalışmayanlar') return -1;
         return b[1].length - a[1].length;
       });
-  }, [channels, deferredSearchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds, multiSessions, activeTab, epgData, customOrders]);
+  }, [channels, debouncedSearchQuery, recentlyWatched, visibleCategories, favorites, canliChannels, diziChannels, filmChannels, brokenChannelIds, multiSessions, activeTab, epgData, sortBy]);
   
   const allFlattenedChannels = useMemo(() => {
     return groupedChannels.flatMap(([_, groupChannels]) => groupChannels);
@@ -1219,9 +901,9 @@ export default function App() {
       if (isAlreadyIn) {
         return current.filter(id => id !== channelId);
       } else {
-        const hasSameUrl = current.some(existingId => {
+        const hasSameUrl = (current || []).some(existingId => {
           const existingChannel = channels.find(ch => ch.id === existingId);
-          return existingChannel && existingChannel.urls.some(url => channel.urls.includes(url));
+          return existingChannel && (existingChannel.urls || []).some(url => (channel.urls || []).includes(url));
         });
         
         if (hasSameUrl) return current;
@@ -1257,11 +939,17 @@ export default function App() {
       epg: 'Yayın Akışı'
     };
     const target = labels[category] || category;
-    setVisibleCategories(prev => 
-      prev.includes(target) 
-        ? prev.filter(c => c !== target) 
-        : [...prev, target]
-    );
+    
+    setCollapsedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(target)) next.delete(target);
+      else next.add(target);
+      return next;
+    });
+
+    if (mainListRef.current) {
+      mainListRef.current.resetAfterIndex(0);
+    }
   }, []);
 
   const isCategoryActive = useCallback((category: string) => {
@@ -1275,8 +963,8 @@ export default function App() {
       series: 'Dizi'
     };
     const target = labels[category] || category;
-    return visibleCategories.includes(target);
-  }, [visibleCategories]);
+    return collapsedRows.has(target);
+  }, [collapsedRows]);
 
   const moveChannel = useCallback((channelId: string, direction: 'left' | 'right', category: string) => {
     if (category === 'Favorilerim') {
@@ -1413,9 +1101,9 @@ export default function App() {
     }
     
     setRecentlyWatched(prev => {
-      const filtered = prev.filter(ch => 
+      const filtered = (prev || []).filter(ch => 
         ch.id !== channel.id && 
-        !ch.urls.some(url => channel.urls.includes(url))
+        !(ch.urls || []).some(url => (channel.urls || []).includes(url))
       );
       return [channel, ...filtered].slice(0, 20);
     });
@@ -1425,64 +1113,70 @@ export default function App() {
   }, [isMiniPlayer, channels, setRecentlyWatched, setCurrentChannel, setNavContext, setIsMiniPlayer]);
 
   useEffect(() => {
-    if (!showSportsDashboard) return;
+    if (!showSportsDashboard && !sportsTickerEnabled && !newsTickerEnabled) return;
 
-    const fetchScores = () => {
-      // Mock data for live matches
-      // In a real app, you would fetch this from an API
-      const mockMatches: LiveMatch[] = [
-        {
-          id: '1',
-          homeTeam: 'Galatasaray',
-          awayTeam: 'Fenerbahçe',
-          homeScore: 2,
-          awayScore: 1,
-          status: '2. Yarı',
-          minute: 78,
-          league: 'Trendyol Süper Lig',
-          channelId: channels.find(c => c.name.toLowerCase().includes('bein sports 1'))?.id
-        },
-        {
-          id: '2',
-          homeTeam: 'Real Madrid',
-          awayTeam: 'Barcelona',
-          homeScore: 0,
-          awayScore: 0,
-          status: '1. Yarı',
-          minute: 24,
-          league: 'La Liga',
-          channelId: channels.find(c => c.name.toLowerCase().includes('s sport'))?.id
-        },
-        {
-          id: '3',
-          homeTeam: 'Manchester City',
-          awayTeam: 'Liverpool',
-          homeScore: 1,
-          awayScore: 1,
-          status: 'İY',
-          minute: 45,
-          league: 'Premier League',
-          channelId: channels.find(c => c.name.toLowerCase().includes('beIN Sports 3'))?.id
-        },
-        {
-          id: '4',
-          homeTeam: 'Anadolu Efes',
-          awayTeam: 'Real Madrid',
-          homeScore: 84,
-          awayScore: 82,
-          status: '4. Çeyrek',
-          minute: 38,
-          league: 'EuroLeague',
-          channelId: channels.find(c => c.name.toLowerCase().includes('s sport 2'))?.id
+    const fetchScores = async () => {
+      try {
+        const response = await fetch(`${appUrl}/api/scores`);
+        if (!response.ok) throw new Error('API error');
+        const data: LiveMatch[] = await response.json();
+        
+        // Goal Alert Logic
+        if (prevMatchesRef.current.length > 0) {
+          data.forEach(match => {
+            const prev = prevMatchesRef.current.find(m => m.id === match.id);
+            if (prev) {
+              if (match.homeScore > prev.homeScore) {
+                showToast(`GOOOL! ${match.homeTeam} skorunu ${match.homeScore}-${match.awayScore} yaptı!`, 'success');
+              } else if (match.awayScore > prev.awayScore) {
+                showToast(`GOOOL! ${match.awayTeam} skorunu ${match.homeScore}-${match.awayScore} yaptı!`, 'success');
+              }
+            }
+          });
         }
-      ];
-      setLiveMatches(mockMatches);
+        prevMatchesRef.current = data;
+
+        // Try to match matches with current channel list for easy navigation
+        const scoresWithChannels = data.map(match => {
+          const homeLower = match.homeTeam.toLowerCase();
+          const awayLower = match.awayTeam.toLowerCase();
+          
+          const matchedChannel = channels.find(c => {
+            const name = c.name.toLowerCase();
+            return name.includes(homeLower) || name.includes(awayLower);
+          });
+
+          return {
+            ...match,
+            channelId: matchedChannel?.id
+          };
+        });
+        
+        setLiveMatches(scoresWithChannels);
+      } catch (error) {
+        console.error('Failed to fetch real-time scores:', error);
+      }
+    };
+
+    const fetchNews = async () => {
+      try {
+        const response = await fetch(`${appUrl}/api/news`);
+        if (!response.ok) throw new Error('API error');
+        const data: NewsItem[] = await response.json();
+        setLiveNews(data);
+      } catch (error) {
+        console.error('Failed to fetch live news:', error);
+      }
     };
 
     fetchScores();
-    const interval = setInterval(fetchScores, 30000);
+    fetchNews();
+    const interval = setInterval(() => {
+      fetchScores();
+      fetchNews();
+    }, 60000); // Update every minute
     return () => clearInterval(interval);
-  }, [showSportsDashboard, channels]);
+  }, [showSportsDashboard, sportsTickerEnabled, newsTickerEnabled, appUrl, channels]);
 
   useEffect(() => {
     if (!isLiveTranslationEnabled || !currentChannel) {
@@ -1765,6 +1459,53 @@ export default function App() {
   const navContextRef = useRef(navContext);
   const channelForDetailRef = useRef(channelForDetail);
   const currentChannelRef = useRef(currentChannel);
+  const mainListRef = useRef<VList>(null);
+
+  const rowHeightHelper = useCallback((index: number) => {
+    const groupArr = groupedChannels as [string, M3UChannel[]][];
+    if (!groupArr[index]) return 0;
+    const [group] = groupArr[index];
+    if (collapsedRows.has(group)) return 80;
+    
+    const isMd = typeof window !== 'undefined' && window.innerWidth >= 768;
+    let itemWidth = 0;
+    if (deviceType === 'tv') {
+      itemWidth = posterOrientation === 'landscape' ? (isMd ? 288 : 192) : (isMd ? 224 : 160);
+    } else if (deviceType === 'phone') {
+      itemWidth = posterOrientation === 'landscape' ? 128 : 96;
+    } else {
+      itemWidth = posterOrientation === 'landscape' ? (isMd ? 224 : 160) : (isMd ? 176 : 128);
+    }
+    
+    const extraHeight = group === 'Top 10' 
+      ? (layoutMode === 'fixed-focus' ? 100 : 160) 
+      : group === 'İzlemeye Devam Et'
+      ? (layoutMode === 'fixed-focus' ? 70 : 100)
+      : (layoutMode === 'fixed-focus' ? 60 : 90);
+
+    const listHeight = posterOrientation === 'landscape' 
+      ? (itemWidth * 9/16 + extraHeight) 
+      : (itemWidth * 3/2 + extraHeight);
+      
+    // Total height calculation
+    const headerHeight = 60;
+    const marginBuffer = layoutMode === 'fixed-focus' ? 0 : (group === 'Top 10' ? 30 : 8);
+    const contentPadding = 20;
+    
+    return listHeight + headerHeight + contentPadding + marginBuffer;
+  }, [groupedChannels, collapsedRows, deviceType, posterOrientation, layoutMode]);
+
+  useEffect(() => {
+    if (navContext === 'browse' && activeRow >= 0 && mainListRef.current) {
+      mainListRef.current.scrollToItem(activeRow, 'center');
+    }
+  }, [activeRow, navContext]);
+
+  useEffect(() => {
+    if (mainListRef.current) {
+      mainListRef.current.resetAfterIndex(0);
+    }
+  }, [collapsedRows, deviceType, posterOrientation, layoutMode, groupedChannels]);
 
   useEffect(() => { activeRowRef.current = activeRow; }, [activeRow]);
   useEffect(() => { activeColRef.current = activeCol; }, [activeCol]);
@@ -1830,9 +1571,43 @@ export default function App() {
 
   const resolveUrl = (rawUrl: string) => {
     if (!rawUrl) return [];
-    const trimmed = rawUrl.trim();
+    let trimmed = rawUrl.trim();
+    
+    // Normalize Dropbox URLs
+    if (trimmed.includes('dropbox.com')) {
+      trimmed = trimmed
+        .replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+        .replace('dl.dropbox.com', 'dl.dropboxusercontent.com');
+      
+      // Handle dl=0 or dl=1
+      if (trimmed.includes('dl=0')) {
+        trimmed = trimmed.replace('dl=0', 'dl=1');
+      } else if (!trimmed.includes('dl=1')) {
+        trimmed = trimmed + (trimmed.includes('?') ? '&dl=1' : '?dl=1');
+      }
+    }
+    
+    // If it already starts with http, use it as is
     if (trimmed.startsWith('http')) return [trimmed];
-    // If it's a code, try cutt.ly first, then the raw string
+    
+    // If it contains a slash and looks like a shortener (e.g. cutt.ly/abc, t.ly/xyz)
+    if (trimmed.includes('/')) {
+      const parts = trimmed.split('/');
+      const domain = parts[0].toLowerCase();
+      const shorteners = ['cutt.ly', 't.ly', 'bit.ly', 'tinyurl.com', 'rebrand.ly', 'is.gd', 'buff.ly'];
+      
+      if (shorteners.includes(domain)) {
+        return [`https://${trimmed}`, `http://${trimmed}`];
+      }
+      
+      // If it has a dot in the first part, it might be a custom domain shortener or a direct server
+      if (domain.includes('.')) {
+        return [`https://${trimmed}`, `http://${trimmed}`];
+      }
+    }
+
+    // If it doesn't look like a URL or a domain with path, treat as a cutt.ly code
+    // This maintains backward compatibility with the existing logic
     return [`https://cutt.ly/${trimmed}`, trimmed];
   };
 
@@ -1925,6 +1700,43 @@ export default function App() {
       const result = parseM3U(content);
       setChannels(result.channels);
       
+      // Auto extraction of EPG if present in M3U
+      if (result.epgUrl) {
+        handleLoadEPG(result.epgUrl);
+      }
+      
+      // Update channel count in playlists array
+      if (currentPlaylistId) {
+        setPlaylists(prev => prev.map(p => 
+          p.id === currentPlaylistId ? { ...p, channelCount: result.channels.length } : p
+        ));
+      }
+      
+      // Auto extraction of channel numbers
+      const extractedNumbers = extractChannelNumbersFromM3U(result.channels);
+      if (Object.keys(extractedNumbers).length > 0) {
+        setChannelNumbers(prev => ({ ...prev, ...extractedNumbers }));
+      }
+
+      setVisibleCategories([]); // Reset categories to show all by default on new load
+      setActiveTab('Tümü'); // Reset to All tab
+      
+      // Auto categorization based on group names
+      const canliIds: string[] = [];
+      const filmIds: string[] = [];
+      const diziIds: string[] = [];
+      
+      result.channels.forEach(ch => {
+        const group = (ch.group || '').toUpperCase();
+        if (group.includes('CANLI') || group.includes('LIVE')) canliIds.push(ch.id);
+        else if (group.includes('FILM') || group.includes('FİLM') || group.includes('MOVIE') || group.includes('SINEMA') || group.includes('SİNEMA')) filmIds.push(ch.id);
+        else if (group.includes('DIZI') || group.includes('DİZİ') || group.includes('SERIE')) diziIds.push(ch.id);
+      });
+      
+      if (canliIds.length > 0) setCanliChannels(canliIds);
+      if (filmIds.length > 0) setFilmChannels(filmIds);
+      if (diziIds.length > 0) setDiziChannels(diziIds);
+
       // Extract and load EPG if present in M3U header and not already set
       if (result.epgUrl && !epgUrl) {
         handleLoadEPG(result.epgUrl);
@@ -1945,47 +1757,19 @@ export default function App() {
     }
   };
 
-  const addPlaylist = (name: string, url: string) => {
-    const newPlaylist: Playlist = {
-      id: crypto.randomUUID(),
-      name,
-      url
-    };
-    const updatedPlaylists = [...playlists, newPlaylist];
-    setPlaylists(updatedPlaylists);
-    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
-    return newPlaylist;
-  };
-
-  const removePlaylist = (id: string) => {
-    const updatedPlaylists = playlists.filter(p => p.id !== id);
-    setPlaylists(updatedPlaylists);
-    localStorage.setItem('playlists', JSON.stringify(updatedPlaylists));
-    if (currentPlaylistId === id) {
-      setCurrentPlaylistId(null);
-      localStorage.removeItem('current_playlist_id');
-    }
-  };
-
-  const switchPlaylist = async (playlist: Playlist) => {
-    setCurrentPlaylistId(playlist.id);
-    localStorage.setItem('current_playlist_id', playlist.id);
-    setPlaylistUrl(playlist.url);
-    if (playlist.epgUrl) setEpgUrl(playlist.epgUrl);
-    await handleUrlSubmit(playlist.url);
-  };
-
   const primaryHeroButtons = useMemo(() => {
     if (!featuredChannel) return [];
+    const isFav = favorites.includes(featuredChannel.id);
     return [
       { id: 'play', label: 'Oynat', icon: Play, action: () => handleChannelSelect(featuredChannel) },
+      { id: 'favorite', label: isFav ? 'Çıkar' : 'Ekle', icon: Heart, active: isFav, action: () => toggleFavorite(featuredChannel.id) },
       { id: 'guide', label: 'Rehber', icon: Calendar, action: () => setShowEPGTimeline(true) },
       { id: 'details', label: 'Detaylar', icon: Info, action: () => {
         setChannelForDetail(featuredChannel);
         setNavContext('channel-detail');
       } }
     ];
-  }, [featuredChannel]);
+  }, [featuredChannel, favorites, toggleFavorite, setShowEPGTimeline, setChannelForDetail, setNavContext, handleChannelSelect]);
 
   const filterHeroButtons = useMemo(() => {
     if (!featuredChannel) return [];
@@ -1994,8 +1778,8 @@ export default function App() {
     
     const isCategoryActive = (type: string) => {
       const groups = getCategoryGroups(type);
-      if (groups.length === 0) return false;
-      return groups.some(g => visibleCategories.includes(g));
+      if (!groups || groups.length === 0) return false;
+      return (groups || []).some(g => (visibleCategories || []).includes(g));
     };
 
     const getCategoryChannelsCount = (type: string) => {
@@ -2013,7 +1797,7 @@ export default function App() {
     const hasLive = getCategoryChannelsCount('live') > 0;
     const hasMovies = getCategoryChannelsCount('movies') > 0;
     const hasSeries = getCategoryChannelsCount('series') > 0;
-    const hasTop10 = channels.some(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10);
+    const hasTop10 = (channels || []).some(ch => ch.tvgNumber !== undefined && ch.tvgNumber >= 1 && ch.tvgNumber <= 10);
     const hasEPG = epgData && Object.keys(epgData).length > 0;
 
     return [
@@ -2072,52 +1856,52 @@ export default function App() {
         label: 'İzlemeye Devam Et', 
         icon: Clock, 
         action: () => toggleCategory('recent'),
-        isActive: visibleCategories.includes('İzlemeye Devam Et')
+        isActive: collapsedRows.has('İzlemeye Devam Et')
       },
       hasTop10 && {
         id: 'top10',
         label: 'Top 10',
         icon: Tv,
         action: () => toggleCategory('top10'),
-        isActive: visibleCategories.includes('Top 10')
+        isActive: collapsedRows.has('Top 10')
       },
       Object.keys(multiSessions).length > 0 && {
         id: 'multi',
         label: 'Multi Kanal',
         icon: Grid,
         action: () => toggleCategory('multi'),
-        isActive: visibleCategories.includes('Multi Kanal')
+        isActive: collapsedRows.has('Multi Kanal')
       },
       favorites.length > 0 && { 
         id: 'favorites', 
         label: 'Favorilerim', 
         icon: Heart, 
         action: () => toggleCategory('favorites'),
-        isActive: visibleCategories.includes('Favorilerim')
+        isActive: collapsedRows.has('Favorilerim')
       },
       hasLive && {
         id: 'live',
         label: 'Canlı',
         icon: Tv,
         action: () => toggleCategory('live'),
-        isActive: visibleCategories.includes('Canlı')
+        isActive: collapsedRows.has('Canlı')
       },
       hasMovies && {
         id: 'movies',
         label: 'Film',
         icon: Play,
         action: () => toggleCategory('movies'),
-        isActive: visibleCategories.includes('Film')
+        isActive: collapsedRows.has('Film')
       },
       hasSeries && {
         id: 'series',
         label: 'Dizi',
         icon: ListIcon,
         action: () => toggleCategory('series'),
-        isActive: visibleCategories.includes('Dizi')
+        isActive: collapsedRows.has('Dizi')
       }
     ].filter((b): b is { id: string, label: string, icon: any, action: () => void, isActive: boolean } => !!b);
-  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, visibleCategories, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy, remoteControlEnabled, isRemoteConnected, isListening, voiceControlEnabled]);
+  }, [featuredChannel, recentlyWatched.length, favorites.length, Object.keys(multiSessions).length, themeColor, collapsedRows, channels, canliChannels.length, filmChannels.length, diziChannels.length, activeTab, epgData, sortBy, remoteControlEnabled, isRemoteConnected, isListening, voiceControlEnabled, isAISearching, aiExplanation, searchQuery]);
 
   // EPG Reminders check
   useEffect(() => {
@@ -2190,6 +1974,7 @@ export default function App() {
     showDeviceInfo,
     themeColor,
     setThemeColor,
+    uiMode,
     setUiMode,
     setPlayerEngine,
     setAmbilightMode,
@@ -2257,7 +2042,8 @@ export default function App() {
     expandedSections,
     setExpandedSections,
     showSportsDashboard,
-    setShowSportsDashboard
+    setShowSportsDashboard,
+    keyMap
   });
 
   const handleKeyDownRef = useRef(handleKeyDown);
@@ -2362,9 +2148,22 @@ export default function App() {
         }
         
         if (channelToFav) {
-          toggleFavorite(channelToFav.id);
-          const catName = category === 'live' ? 'Canlı TV' : category === 'movie' ? 'Film' : category === 'series' ? 'Dizi' : 'Multimedya';
-          showToast(`${channelToFav.name} ${catName} favorilerine eklendi`, "success");
+          if (category === 'live') {
+            toggleManualCategory(channelToFav.id, 'canli');
+            showToast(`${channelToFav.name} Canlı TV listesine eklendi`, "success");
+          } else if (category === 'movie') {
+            toggleManualCategory(channelToFav.id, 'film');
+            showToast(`${channelToFav.name} Film listesine eklendi`, "success");
+          } else if (category === 'series') {
+            toggleManualCategory(channelToFav.id, 'dizi');
+            showToast(`${channelToFav.name} Dizi listesine eklendi`, "success");
+          } else if (category === 'multi') {
+            toggleManualCategory(channelToFav.id, 'multi');
+            showToast(`${channelToFav.name} Multi Kanal listesine eklendi`, "success");
+          } else {
+            toggleFavorite(channelToFav.id);
+            showToast(`${channelToFav.name} favorilere eklendi`, "success");
+          }
         }
         break;
       case 'mute':
@@ -2622,6 +2421,21 @@ export default function App() {
     }
   };
 
+  const lastLoadedPlaylistIdRef = useRef<string | null>(null);
+  const lastLoadedTimestampRef = useRef<number | null>(null);
+
+  // Response to playlist switching from store (e.g. from SettingsModal)
+  useEffect(() => {
+    if (currentPlaylistId) {
+      const pl = playlists.find(p => p.id === currentPlaylistId);
+      if (pl && (currentPlaylistId !== lastLoadedPlaylistIdRef.current || pl.lastUpdated !== lastLoadedTimestampRef.current)) {
+        lastLoadedPlaylistIdRef.current = currentPlaylistId;
+        lastLoadedTimestampRef.current = pl.lastUpdated || null;
+        handleUrlSubmit(pl.url);
+      }
+    }
+  }, [currentPlaylistId, playlists]);
+
   // Auto-load saved URL on startup
   useEffect(() => {
     const autoLoad = async () => {
@@ -2653,6 +2467,51 @@ export default function App() {
       const content = event.target?.result as string;
       const { channels: parsedChannels, epgUrl: extractedEpgUrl } = parseM3U(content);
       setChannels(parsedChannels);
+
+      // Auto extraction of EPG if present in M3U
+      if (extractedEpgUrl) {
+        handleLoadEPG(extractedEpgUrl);
+      }
+
+      // Auto extraction of channel numbers
+      const extractedNumbers = extractChannelNumbersFromM3U(parsedChannels);
+      if (Object.keys(extractedNumbers).length > 0) {
+        setChannelNumbers(prev => ({ ...prev, ...extractedNumbers }));
+      }
+
+      setVisibleCategories([]); // Reset categories to show all by default on new load
+      setActiveTab('Tümü'); // Reset to All tab
+      
+      // Add to playlists collection
+      const newPlaylist: Playlist = {
+        id: 'file-' + Date.now(),
+        name: file.name.replace('.m3u', '').replace('.m3u8', ''),
+        url: 'local-file', // Marker for local files
+        channels: parsedChannels,
+        channelCount: parsedChannels.length
+      };
+      setPlaylists(prev => {
+        const filtered = prev.filter(p => p.url !== 'local-file');
+        return [...filtered, newPlaylist];
+      });
+      setCurrentPlaylistId(newPlaylist.id);
+
+      // Auto categorization based on group names
+      const canliIds: string[] = [];
+      const filmIds: string[] = [];
+      const diziIds: string[] = [];
+      
+      parsedChannels.forEach(ch => {
+        const group = (ch.group || '').toUpperCase();
+        if (group.includes('CANLI') || group.includes('LIVE')) canliIds.push(ch.id);
+        else if (group.includes('FILM') || group.includes('FİLM') || group.includes('MOVIE') || group.includes('SINEMA') || group.includes('SİNEMA')) filmIds.push(ch.id);
+        else if (group.includes('DIZI') || group.includes('DİZİ') || group.includes('SERIE')) diziIds.push(ch.id);
+      });
+      
+      if (canliIds.length > 0) setCanliChannels(canliIds);
+      if (filmIds.length > 0) setFilmChannels(filmIds);
+      if (diziIds.length > 0) setDiziChannels(diziIds);
+
       setHasCheckedLinks(false);
       setBrokenChannelIds(new Set());
 
@@ -2673,8 +2532,128 @@ export default function App() {
     reader.readAsText(file);
   };
 
+  const [tickerType, setTickerType] = useState<'scores' | 'news'>('scores');
+
   // If mobile and no remote ID, or explicitly in remote mode
   // If we have a remote ID in URL, we are an ACTIVE remote
+  const renderTickers = () => {
+    const isVisible = (tickerType === 'scores' && sportsTickerEnabled) || (tickerType === 'news' && newsTickerEnabled);
+    if (!isVisible || showSportsDashboard) return null;
+
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-[60] h-10 bg-black/40 backdrop-blur-3xl border-t border-white/5 flex items-center group/ticker">
+        {/* Toggle Button / Label */}
+        <button 
+          onClick={() => setTickerType(prev => prev === 'scores' ? 'news' : 'scores')}
+          className={cn(
+            "h-full px-4 flex items-center gap-2 shrink-0 z-10 transition-all duration-500",
+            tickerType === 'scores' 
+              ? "bg-gradient-to-r from-red-600 to-red-500 shadow-[4px_0_15px_rgba(220,38,38,0.3)]" 
+              : "bg-gradient-to-r from-blue-600 to-blue-500 shadow-[4px_0_15px_rgba(37,99,235,0.3)]"
+          )}
+        >
+          {tickerType === 'scores' ? (
+            <>
+              <Activity className="w-3.5 h-3.5 text-white animate-pulse" />
+              <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Canlı Skor</span>
+            </>
+          ) : (
+            <>
+              <Globe className="w-3.5 h-3.5 text-white animate-spin-slow" />
+              <span className="text-[10px] font-black text-white uppercase tracking-widest leading-none">Son Dakika</span>
+            </>
+          )}
+          <TrendingUp className={cn("w-3 h-3 text-white transition-transform duration-500", tickerType === 'news' && "rotate-180")} />
+        </button>
+
+        {/* Dynamic Content */}
+        <div className="flex-1 overflow-hidden relative">
+          {/* Gradient Edge Masks */}
+          <div className="absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-black/40 to-transparent z-10" />
+          <div className="absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-black/40 to-transparent z-10" />
+          
+          <div className={cn(
+            "flex whitespace-nowrap",
+            tickerType === 'scores' ? "animate-ticker-fast" : "animate-ticker"
+          )}>
+            {tickerType === 'scores' ? (
+              [...liveMatches, ...liveMatches].map((match, idx) => (
+                <div 
+                  key={`${match.id}-${idx}`} 
+                  className="inline-flex items-center gap-4 px-10 border-r border-white/5 hover:bg-white/5 transition-colors cursor-pointer group/item"
+                  onClick={() => setShowSportsDashboard(true)}
+                >
+                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-[0.2em]">{match.league}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-black text-white/90 group-hover/item:text-white transition-colors">{match.homeTeam}</span>
+                    <div className="bg-white/5 px-2 py-0.5 rounded border border-white/10 group-hover/item:border-white/30 transition-all">
+                      <span className="text-xs font-mono font-black text-red-500">{match.homeScore} - {match.awayScore}</span>
+                    </div>
+                    <span className="text-xs font-black text-white/90 group-hover/item:text-white transition-colors">{match.awayTeam}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    <span className="text-[10px] font-bold text-zinc-400 group-hover/item:text-red-400">{match.minute}'</span>
+                  </div>
+                </div>
+              ))
+            ) : (
+              [...liveNews, ...liveNews].map((news, idx) => (
+                <div 
+                  key={`${news.id}-${idx}`} 
+                  className="inline-flex items-center gap-4 px-10 border-r border-white/5 hover:bg-white/5 transition-colors group/item cursor-pointer"
+                  onClick={() => {
+                    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+                    const fetchSummary = async () => {
+                      if (!geminiApiKey) {
+                        showToast(`Haber: ${news.title}`, 'info');
+                        return;
+                      }
+                      showToast("AI Haberi özetliyor...", "info");
+                      try {
+                        const prompt = `Şu haberi 2-3 cümlede özetle ve varsa ilgili bir tavsiye ver: "${news.title}" (Kaynak: ${news.source})`;
+                        const result = await ai.models.generateContent({ 
+                          model: "gemini-3-flash-preview",
+                          contents: prompt,
+                          config: { maxOutputTokens: 200 }
+                        });
+                        const summary = result.text || `Haber: ${news.title}`;
+                        showToast(summary, "info");
+                      } catch (e) {
+                         showToast(`Haber: ${news.title}`, "info");
+                      }
+                    };
+                    fetchSummary();
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">{news.source}</span>
+                    <div className="w-1 h-1 rounded-full bg-white/20" />
+                    <span className="text-[9px] font-bold text-zinc-500 uppercase">{news.category}</span>
+                  </div>
+                  <span className="text-xs font-bold text-zinc-100 group-hover/item:text-white transition-colors">{news.title}</span>
+                  <span className="text-[10px] font-black text-zinc-600 group-hover/item:text-zinc-400 uppercase italic shrink-0">{news.time}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Close Button */}
+        <button 
+          onClick={() => {
+            if (tickerType === 'scores') setSportsTickerEnabled(false);
+            else setNewsTickerEnabled(false);
+          }}
+          className="h-full px-4 flex items-center justify-center bg-black/20 hover:bg-red-500/20 text-white/40 hover:text-red-500 transition-all border-l border-white/5 group/close"
+          title="Kapat"
+        >
+          <X className="w-4 h-4 group-hover/close:rotate-90 transition-transform duration-300" />
+        </button>
+      </div>
+    );
+  };
+
   if (remoteRoomIdFromUrl) {
     console.log('Mobile remote mode detected, roomId:', remoteRoomIdFromUrl);
     return <MobileRemote roomId={remoteRoomIdFromUrl} appUrl={appUrl} />;
@@ -2733,6 +2712,26 @@ export default function App() {
 
   return (
     <div className={uiClasses.container}>
+      {/* Ambient Background Light */}
+      <AnimatePresence>
+        {currentChannel && navContext === 'player' && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.4 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 pointer-events-none z-0 overflow-hidden"
+          >
+            <div 
+              className="absolute -inset-[30%] blur-[150px] opacity-60 mix-blend-screen"
+              style={{ 
+                background: `radial-gradient(circle at 50% 50%, ${themeColor} 0%, transparent 60%)`,
+                transition: 'background 2s ease-in-out'
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <PWAManager installPrompt={installPrompt} setInstallPrompt={setInstallPrompt} />
       {/* Dynamic Background Glow for Modern Mode */}
       {uiMode === 'modern' && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
@@ -2817,50 +2816,56 @@ export default function App() {
             <DigitalClock themeColor={themeColor} style={clockStyle} />
           </div>
           {isCheckingLinks && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
+            <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md ml-4">
               <div className="w-3 h-3 border-2 border-white/10 border-t-white rounded-full animate-spin" style={{ borderTopColor: themeColor }} />
               <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Kontrol: %{checkProgress}</span>
             </div>
           )}
-          {channels.length > 0 && (
-            <div className="flex items-center gap-3 sm:gap-4">
-              <button 
-                onClick={() => {
-                  setShowSettings(true);
-                  setNavContext('settings');
-                  setSettingsArea('content');
-                  setSidebarFocus(0);
-                  setActiveSettingsTab(0);
-                  setSettingsSection(0);
-                  setSettingsFocus(0);
-                }}
-                onPointerDown={() => {
-                  setNavContext('browse');
-                  setActiveRow(-4);
-                }}
-                onMouseEnter={() => {
-                  setNavContext('browse');
-                  setActiveRow(-4);
-                }}
-                className={cn(
-                  "w-10 h-10 sm:w-12 sm:h-12 rounded-sm overflow-hidden transition-all flex items-center justify-center",
-                  activeRow === -4 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
-                )}
-                style={{ backgroundColor: themeColor }}
-              >
-                {profilePic === 'THEME_COLOR' ? (
-                  <User className="w-5 h-5 text-white" />
-                ) : (
-                  <img 
-                    src={profilePic} 
-                    alt="Profil" 
-                    referrerPolicy="no-referrer" 
-                    className="w-full h-full object-cover"
-                  />
-                )}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-3 sm:gap-4 ml-4">
+            <button 
+              onClick={() => {
+                setShowSettings(true);
+                setNavContext('settings');
+                setSettingsArea('content');
+                setSidebarFocus(0);
+                setActiveSettingsTab(0);
+                setSettingsSection(0);
+                setSettingsFocus(0);
+              }}
+              onPointerDown={() => {
+                setNavContext('browse');
+                setActiveRow(-4);
+                setActiveCol(0);
+              }}
+              onMouseEnter={() => {
+                setNavContext('browse');
+                setActiveRow(-4);
+                setActiveCol(0);
+              }}
+              className={cn(
+                "w-10 h-10 sm:w-12 sm:h-12 rounded-sm overflow-hidden transition-all flex items-center justify-center",
+                activeRow === -4 ? "ring-4 ring-white scale-125 shadow-2xl" : "hover:ring-2 ring-white"
+              )}
+              style={{ backgroundColor: themeColor }}
+            >
+              {profilePic === 'THEME_COLOR' ? (
+                <User className="w-5 h-5 text-white" />
+              ) : profilePic.startsWith('LOGO:') ? (
+                <div className="scale-[0.25] sm:scale-[0.3] whitespace-nowrap">
+                  <Logo uiMode={uiMode} logoStyle={profilePic.split(':')[1] as LogoStyle} />
+                </div>
+              ) : profilePic.startsWith('COLOR:') ? (
+                <div className="w-full h-full" style={{ backgroundColor: profilePic.split(':')[1] }} />
+              ) : (
+                <img 
+                  src={profilePic} 
+                  alt="Profil" 
+                  referrerPolicy="no-referrer" 
+                  className="w-full h-full object-cover"
+                />
+              )}
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -2872,9 +2877,14 @@ export default function App() {
       >
         <div className="animate-in fade-in duration-1000">
           {isLoading ? (
-            <div className="h-[80vh] flex flex-col items-center justify-center space-y-4">
-              <div className="w-12 h-12 border-4 border-white/10 border-t-white rounded-full animate-spin" style={{ borderTopColor: themeColor }} />
-              <p className="text-zinc-500 font-medium animate-pulse">Kanallar Yükleniyor...</p>
+            <div className="pt-[20vh] space-y-12">
+              <div className="px-4 md:px-12 space-y-4">
+                <div className="h-12 w-64 bg-white/10 rounded-2xl animate-pulse" />
+                <div className="h-6 w-96 bg-white/5 rounded-full animate-pulse" />
+              </div>
+              <RowSkeleton uiMode={uiMode} />
+              <RowSkeleton uiMode={uiMode} />
+              <RowSkeleton uiMode={uiMode} />
             </div>
           ) : uiMode === 'bento' && !searchQuery && channels.length > 0 ? (
             <BentoDashboard 
@@ -2885,6 +2895,10 @@ export default function App() {
               now={now}
               channels={channels}
               favorites={favorites}
+              liveMatches={liveMatches}
+              liveNews={liveNews}
+              onShowSports={() => setShowSportsDashboard(true)}
+              isActive={navContext === 'browse'}
             />
           ) : channels.length === 0 ? (
             <div className="relative h-screen flex flex-col items-center justify-center space-y-4 text-center px-4 pt-20 pb-8 overflow-hidden">
@@ -2946,7 +2960,7 @@ export default function App() {
                       <input
                         id="empty-url-input"
                         type="url"
-                        placeholder="URL girin..."
+                        placeholder="URL girin... (Örn: eyuptv.m3u)"
                         className={cn(
                           "flex-1 bg-black/40 border rounded-xl px-3 py-2 outline-none transition-all text-[10px] font-bold",
                           activeRow === 1 && activeCol === 0 ? "border-white ring-4 ring-white/10" : "border-white/10"
@@ -3071,155 +3085,69 @@ export default function App() {
             </div>
           ) : (
             <>
-              {/* Dynamic Ambient Background */}
-              <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-                <motion.div 
-                  animate={{ backgroundColor: ambientColor }}
-                  transition={{ duration: 2, ease: "easeInOut" }}
-                  className="absolute inset-0 opacity-30 blur-[150px]"
-                />
-                <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/60 to-black" />
-              </div>
-
-              {/* Quick Settings Overlay */}
+              {/* Modern Mesh Gradient Background */}
               <AnimatePresence>
-                {showQuickSettings && (
-                  <motion.div
-                    initial={{ opacity: 0, x: 100, scale: 0.9 }}
-                    animate={{ opacity: 1, x: 0, scale: 1 }}
-                    exit={{ opacity: 0, x: 100, scale: 0.9 }}
-                    className="fixed right-8 top-1/2 -translate-y-1/2 w-80 z-[200] bg-black/80 backdrop-blur-3xl rounded-[40px] border border-white/10 p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)]"
-                  >
-                    <div className="flex items-center justify-between mb-8">
-                      <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: themeColor }} />
-                        <h3 className="text-xl font-black uppercase tracking-tighter italic">Hızlı Ayarlar</h3>
-                      </div>
-                      <button onClick={() => { setShowQuickSettings(false); setNavContext(currentChannel ? 'player' : 'browse'); }} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-                        <X className="w-5 h-5" />
-                      </button>
-                    </div>
-                    
-                    <div className="space-y-8">
-                      <div className="space-y-4">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Play className="w-3 h-3" /> Oynatıcı Motoru
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {['hls', 'shaka'].map((engine, idx) => (
-                            <button
-                              key={engine}
-                              onClick={() => {
-                                setPlayerEngine(engine as any);
-                                setQuickSettingsFocus(idx);
-                              }}
-                              onPointerDown={() => setQuickSettingsFocus(idx)}
-                              onMouseEnter={() => setQuickSettingsFocus(idx)}
-                              className={cn(
-                                "py-3 rounded-2xl border-2 transition-all text-xs font-black uppercase tracking-widest relative overflow-hidden",
-                                playerEngine === engine ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
-                                quickSettingsFocus === idx && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
-                              )}
-                            >
-                              {playerEngine === engine && (
-                                <motion.div 
-                                  layoutId="qs-engine-active"
-                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
-                                  style={{ backgroundColor: themeColor }}
-                                />
-                              )}
-                              {engine}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Sun className="w-3 h-3" /> Ambilight Modu
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {['none', 'soft', 'vibrant', 'cinema'].map((mode, idx) => (
-                            <button
-                              key={mode}
-                              onClick={() => {
-                                setAmbilightMode(mode as any);
-                                setQuickSettingsFocus(idx + 2);
-                              }}
-                              onPointerDown={() => setQuickSettingsFocus(idx + 2)}
-                              onMouseEnter={() => setQuickSettingsFocus(idx + 2)}
-                              className={cn(
-                                "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
-                                ambilightMode === mode ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
-                                quickSettingsFocus === (idx + 2) && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
-                              )}
-                            >
-                              {ambilightMode === mode && (
-                                <motion.div 
-                                  layoutId="qs-ambi-active"
-                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
-                                  style={{ backgroundColor: themeColor }}
-                                />
-                              )}
-                              {mode}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-4">
-                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                          <Clock className="w-3 h-3" /> Uyku Zamanlayıcısı
-                        </label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[15, 30, 60].map((mins, idx) => (
-                            <button
-                              key={mins}
-                              onClick={() => {
-                                setSleepTimer(mins);
-                                setSleepTimerActive(true);
-                                setQuickSettingsFocus(idx + 6);
-                              }}
-                              onPointerDown={() => setQuickSettingsFocus(idx + 6)}
-                              onMouseEnter={() => setQuickSettingsFocus(idx + 6)}
-                              className={cn(
-                                "py-3 rounded-2xl border-2 transition-all text-[10px] font-black uppercase tracking-widest relative overflow-hidden",
-                                sleepTimer === mins && sleepTimerActive ? "border-white bg-white/10 text-white" : "border-white/5 bg-white/5 text-zinc-500",
-                                quickSettingsFocus === (idx + 6) && "ring-4 ring-white ring-offset-4 ring-offset-black scale-105 z-10"
-                              )}
-                            >
-                              {sleepTimer === mins && sleepTimerActive && (
-                                <motion.div 
-                                  layoutId="qs-sleep-active"
-                                  className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full animate-pulse"
-                                  style={{ backgroundColor: themeColor }}
-                                />
-                              )}
-                              {mins} DK
-                            </button>
-                          ))}
-                        </div>
-                        {sleepTimerActive && sleepTimer !== null && (
-                          <div className="flex items-center justify-between px-4 py-2 bg-white/5 rounded-xl">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Kalan Süre</span>
-                            <span className="text-xs font-black text-white">{sleepTimer} Dakika</span>
-                            <button 
-                              onClick={() => setSleepTimerActive(false)}
-                              className="p-1 hover:bg-white/10 rounded-lg text-red-500 transition-colors"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-8 pt-6 border-t border-white/5 flex items-center gap-3 text-[10px] font-bold text-zinc-500">
-                      <div className="px-1.5 py-0.5 bg-white/10 rounded border border-white/10 text-white">S</div>
-                      <span>Kapatmak için tekrar bas</span>
-                    </div>
-                  </motion.div>
+                {showCommandPalette && (
+                  <CommandPalette 
+                    isOpen={showCommandPalette}
+                    onClose={() => setShowCommandPalette(false)}
+                    channels={channels}
+                    categories={visibleCategories}
+                    onSelectChannel={handleCommandChannelSelect}
+                    onSelectCategory={handleCommandCategorySelect}
+                    themeColor={themeColor}
+                    keyMap={keyMap}
+                  />
                 )}
               </AnimatePresence>
+              <AmbientBackground ambientColor={ambientColor} />
+              
+              {/* Dynamic Theme Overlay */}
+              <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-br from-black via-zinc-950 to-black opacity-80" />
+                {uiMode === 'modern' && (
+                  <motion.div 
+                    animate={{ 
+                      scale: [1, 1.1, 1],
+                      opacity: [0.1, 0.15, 0.1]
+                    }}
+                    transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+                    className="absolute top-[-10%] right-[-10%] w-[60%] h-[60%] rounded-full blur-[120px]" 
+                    style={{ backgroundColor: themeColor }} 
+                  />
+                )}
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-[0.03] mix-blend-overlay" />
+              </div>
+
+              <AnimatePresence>
+                {currentChannel && navContext !== 'player' && (
+                  <MiniPlayer 
+                    channel={currentChannel}
+                    onMaximize={() => setNavContext('player')}
+                    onClose={() => setCurrentChannel(null)}
+                    isMuted={isMuted}
+                    onToggleMute={() => setIsMuted(prev => !prev)}
+                    themeColor={themeColor}
+                  />
+                )}
+              </AnimatePresence>
+
+              {/* Quick Settings Dynamic Overlay */}
+              <QuickSettingsOverlay
+                show={showQuickSettings}
+                onClose={() => { setShowQuickSettings(false); setNavContext(currentChannel ? 'player' : 'browse'); }}
+                themeColor={themeColor}
+                playerEngine={playerEngine}
+                setPlayerEngine={setPlayerEngine}
+                ambilightMode={ambilightMode}
+                setAmbilightMode={setAmbilightMode}
+                sleepTimer={sleepTimer || 0}
+                setSleepTimer={setSleepTimer}
+                sleepTimerActive={sleepTimerActive}
+                setSleepTimerActive={setSleepTimerActive}
+                quickSettingsFocus={quickSettingsFocus}
+                setQuickSettingsFocus={setQuickSettingsFocus}
+              />
 
               <motion.div
                 key={transitionKey}
@@ -3228,371 +3156,56 @@ export default function App() {
                 transition={{ duration: 0.5, ease: "easeOut" }}
                 className="relative z-10"
               >
-                {featuredChannel && (
-                <div 
-                  className="relative w-full overflow-hidden transition-all duration-700"
-                  style={{ 
-                    height: layoutMode === 'fixed-focus'
-                      ? (activeRow >= 0 ? '60vh' : '80vh')
-                      : (searchQuery ? '40vh' : '80vh') 
-                  }}
-                >
-                <div className="absolute inset-0">
-                  <motion.img 
-                    key={featuredChannel.id}
-                    initial={{ opacity: 0, scale: 1.1 }}
-                    animate={{ opacity: 0.4, scale: 1 }}
-                    transition={{ duration: 0.8 }}
-                    src={featuredChannel.logo || "https://picsum.photos/seed/cinema/1920/1080?blur=10"} 
-                    alt="Hero" 
-                    className="w-full h-full object-cover blur-sm"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-transparent" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent" />
-                  {uiMode === 'modern' && (
-                    <div 
-                      className="absolute -top-24 -right-24 w-96 h-96 rounded-full blur-[120px] opacity-20 animate-pulse"
-                      style={{ backgroundColor: themeColor }}
-                    />
-                  )}
-                </div>
-
-                <div className={cn(
-                  "absolute left-0 right-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none z-0"
-                )} />
-
-                <div className={cn(
-                  "absolute left-4 md:left-12 max-w-4xl space-y-2 sm:space-y-3 transition-all duration-500 z-10", 
-                  searchQuery ? "bottom-8" : (layoutMode === 'fixed-focus' ? "bottom-[4%] sm:bottom-[6%]" : "bottom-[8%] sm:bottom-[12%]"),
-                  "max-h-[95%] flex flex-col justify-end pt-20"
-                )}>
-                  {!searchQuery && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      key={`info-${featuredChannel.id}`}
-                      className="space-y-2"
-                    >
-                      <div className="flex items-center gap-2 text-red-600 font-bold tracking-widest text-xs sm:text-sm">
-                        <Tv className="w-4 h-4 sm:w-5 sm:h-5 fill-current" />
-                        <span>{featuredChannel.group?.toUpperCase() || 'CANLI TV'}</span>
-                      </div>
-                      
-                      <h1 className={cn(
-                        "font-black tracking-tighter uppercase italic line-clamp-2 leading-tight py-0.5",
-                        deviceType === 'tv' ? "text-6xl sm:text-8xl md:text-9xl" : "text-3xl sm:text-5xl md:text-7xl"
-                      )}
-                      style={{ 
-                        textShadow: '0 10px 30px rgba(0,0,0,0.5)',
-                        WebkitTextStroke: uiMode === 'minimalist' ? `1px ${themeColor}` : 'none'
-                      }}
-                      >{featuredChannel.name}</h1>
-
-                      <div className="flex flex-wrap items-center gap-3 text-sm font-medium text-white/80">
-                        {featuredChannel.year && (
-                          <span className="px-2 py-0.5 bg-white/10 rounded backdrop-blur-sm border border-white/10">
-                            {featuredChannel.year}
-                          </span>
-                        )}
-                        {featuredChannel.genre && (
-                          <span className="px-2 py-0.5 bg-white/10 rounded backdrop-blur-sm border border-white/10">
-                            {featuredChannel.genre}
-                          </span>
-                        )}
-                        {featuredChannel.language && (
-                          <span className="px-2 py-0.5 bg-white/10 rounded backdrop-blur-sm border border-white/10">
-                            {featuredChannel.language}
-                          </span>
-                        )}
-                        <span className="flex items-center gap-1 text-green-500">
-                          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                          HD Kalite
-                        </span>
-                      </div>
-
-                      {featuredChannel.actor && (
-                        <p className="text-sm sm:text-base text-white/60 line-clamp-1 italic max-w-xl">
-                          <span className="text-white/80 font-semibold not-italic mr-1">Oyuncular:</span>
-                          {featuredChannel.actor}
-                        </p>
-                      )}
-
-                      {featuredChannel.description ? (
-                        <p className="text-sm sm:text-lg text-white/70 line-clamp-2 sm:line-clamp-3 max-w-2xl leading-relaxed">
-                          {featuredChannel.description}
-                        </p>
-                      ) : (
-                        <p className="text-sm sm:text-lg text-zinc-300 line-clamp-2 sm:line-clamp-3 font-medium">
-                          {featuredChannel.group || 'Genel'} kategorisinden canlı yayın. M3UFLIX'te yüksek kaliteli yayın şu an yayında.
-                        </p>
-                      )}
-
-                      {/* EPG Info */}
-                      {getCurrentProgram(featuredChannel.tvgId || featuredChannel.name) && (
-                        <div className="mt-1 p-2.5 bg-white/5 rounded-xl border border-white/10 backdrop-blur-md max-w-md group hover:bg-white/10 transition-colors">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-red-500 uppercase tracking-wider flex items-center gap-1">
-                              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                              Şu An Yayında
-                            </span>
-                            <span className="text-xs text-white/40 font-mono">
-                              {formatTime(getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.start)} - {formatTime(getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.stop)}
-                            </span>
-                          </div>
-                          <h3 className="text-lg font-bold text-white mb-1">
-                            {getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.title}
-                          </h3>
-                          {getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.description && (
-                            <p className="text-xs sm:text-sm text-white/60 line-clamp-2">
-                              {getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.description}
-                            </p>
-                          )}
-                          <div className="mt-3 w-full h-1 bg-white/10 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-red-600 transition-all duration-1000"
-                              style={{ 
-                                width: `${Math.max(0, Math.min(100, 
-                                  ((new Date().getTime() - getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.start.getTime()) / 
-                                  (getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.stop.getTime() - getCurrentProgram(featuredChannel.tvgId || featuredChannel.name)!.start.getTime())) * 100
-                                ))}%` 
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                  <div className="flex flex-col gap-2 pt-1">
-                    {/* Primary Buttons Row */}
-                    {!searchQuery && (
-                      <div className="flex flex-wrap items-center gap-3">
-                        {/* Navigation Buttons */}
-                        <div className="flex items-center gap-2 mr-2">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handlePrevFeatured(); }}
-                            className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all border border-white/10 backdrop-blur-md"
-                            title="Önceki Kanal"
-                          >
-                            <ChevronUp className="w-5 h-5" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleNextFeatured(); }}
-                            className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all border border-white/10 backdrop-blur-md"
-                            title="Sonraki Kanal"
-                          >
-                            <ChevronDown className="w-5 h-5" />
-                          </button>
-                        </div>
-                        {primaryHeroButtons.map((btn, idx) => {
-                          const isFocused = activeRow === -3 && activeCol === idx;
-                          const isPlay = btn.id === 'play';
-                          
-                          return (
-                            <button 
-                              key={btn.id}
-                              onClick={btn.action}
-                              onPointerDown={() => {
-                                setActiveRow(-3);
-                                setActiveCol(idx);
-                              }}
-                              onMouseEnter={() => {
-                                setActiveRow(-3);
-                                setActiveCol(idx);
-                              }}
-                              style={{ 
-                                backgroundColor: isFocused ? 'white' : (isPlay ? themeColor : 'rgba(255,255,255,0.1)'),
-                                color: isFocused ? 'black' : 'white'
-                              }}
-                              className={cn(
-                                "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg",
-                                isPlay ? "px-6 sm:px-8 py-2 sm:py-3 rounded-md text-base sm:text-lg" : "px-6 py-2 rounded-md text-base bg-zinc-500/50 backdrop-blur-md",
-                                isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
-                              )}
-                            >
-                              <btn.icon className={cn("w-5 h-5 sm:w-6 sm:h-6", isPlay && "fill-current")} />
-                              {btn.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Search Row */}
-                    <div className="flex items-center gap-2">
-                      {filterHeroButtons.filter(b => b.id === 'search' || b.id === 'voice' || b.id === 'remote-toggle' || b.id === 'device-info').map((btn, idx) => {
-                        const isFocused = activeRow === -2 && activeCol === idx;
-                        
-                        return (
-                          <div key={btn.id} className="relative">
-                            <div className={cn(
-                              "flex items-center transition-all",
-                              isFocused ? "scale-110" : ""
-                            )}>
-                              <button 
-                                onClick={btn.action}
-                                onPointerDown={() => {
-                                  setActiveRow(-2);
-                                  setActiveCol(idx);
-                                }}
-                                onMouseEnter={() => {
-                                  setActiveRow(-2);
-                                  setActiveCol(idx);
-                                }}
-                                style={{ 
-                                  backgroundColor: isFocused ? 'white' : 'rgba(255,255,255,0.05)',
-                                  color: isFocused ? 'black' : 'white',
-                                  borderColor: isFocused ? 'transparent' : 'rgba(255,255,255,0.1)'
-                                }}
-                                className={cn(
-                                  "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs",
-                                  isFocused && "shadow-2xl ring-4 ring-white/20",
-                                  btn.id === 'voice' && isListening && "animate-pulse",
-                                  btn.id === 'remote-toggle' && remoteControlEnabled && "border-green-500/50",
-                                  btn.id === 'device-info' && showDeviceInfo && "border-blue-500/50"
-                                )}
-                              >
-                                <div className="relative">
-                                  <btn.icon className={cn("w-3 h-3", btn.id === 'voice' && isListening && "text-red-500")} />
-                                  {btn.id === 'remote-toggle' && isRemoteConnected && (
-                                    <motion.div 
-                                      animate={{ scale: [1, 1.5, 1], opacity: [1, 0.5, 1] }}
-                                      transition={{ duration: 2, repeat: Infinity }}
-                                      className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full"
-                                      style={{ backgroundColor: themeColor }}
-                                    />
-                                  )}
-                                </div>
-                                {btn.label}
-                              </button>
-                              {btn.id === 'search' && (
-                                <div className="relative flex items-center ml-2">
-                                  <input
-                                    id="hero-search-input"
-                                    type="text"
-                                    placeholder="Ara..."
-                                    className={cn(
-                                      "bg-black/80 border rounded-full py-1.5 pl-4 pr-10 transition-all outline-none text-xs",
-                                      isFocused || searchQuery 
-                                        ? "w-48 opacity-100 border-white/40 ring-2 ring-white/10" 
-                                        : "w-0 opacity-0 border-transparent"
-                                    )}
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                    onFocus={() => {
-                                      setActiveRow(-2);
-                                      setActiveCol(idx);
-                                    }}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter' && searchQuery.length > 10) {
-                                        handleAISearch(searchQuery);
-                                      }
-                                    }}
-                                  />
-                                  <div className="absolute right-3 flex items-center gap-2">
-                                    {isAISearching ? (
-                                      <CircleDashed className="w-3 h-3 animate-spin text-blue-400" />
-                                    ) : searchQuery.length > 10 ? (
-                                      <button
-                                        onClick={() => handleAISearch(searchQuery)}
-                                        className="text-blue-400 hover:text-blue-300 transition-colors"
-                                        title="AI ile Ara"
-                                      >
-                                        <Sparkles className="w-3 h-3" />
-                                      </button>
-                                    ) : null}
-                                    {searchQuery && (isFocused || searchQuery) && (
-                                      <button
-                                        onClick={() => setSearchQuery('')}
-                                        className="text-zinc-400 hover:text-white transition-colors"
-                                      >
-                                        <X className="w-3 h-3" />
-                                      </button>
-                                    )}
-                                  </div>
-                                  
-                                  <AnimatePresence>
-                                    {aiExplanation && (
-                                      <motion.div
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        exit={{ opacity: 0, y: 10 }}
-                                        className="absolute top-full left-0 mt-2 bg-blue-600 text-white px-4 py-2 rounded-2xl text-[10px] font-bold shadow-xl z-50 whitespace-nowrap flex items-center gap-2"
-                                      >
-                                        <Sparkles className="w-3 h-3" />
-                                        {aiExplanation}
-                                      </motion.div>
-                                    )}
-                                  </AnimatePresence>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Filter Buttons Row */}
-                    {!searchQuery && (
-                      <div 
-                        ref={categoryScrollRef}
-                        className="flex flex-nowrap items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth pb-2"
-                      >
-                        {filterHeroButtons.filter(b => b.id !== 'search' && b.id !== 'voice' && b.id !== 'remote-toggle' && b.id !== 'device-info').map((btn, idx) => {
-                          const isFocused = activeRow === -1 && activeCol === idx;
-                          
-                          return (
-                            <div key={btn.id} className="relative">
-                              <button 
-                                onClick={btn.action}
-                                onPointerDown={() => {
-                                  setActiveRow(-1);
-                                  setActiveCol(idx);
-                                }}
-                                onMouseEnter={() => {
-                                  setActiveRow(-1);
-                                  setActiveCol(idx);
-                                }}
-                                style={{ 
-                                  backgroundColor: isFocused 
-                                    ? 'white' 
-                                    : (btn.isActive ? themeColor : 'rgba(255,255,255,0.1)'),
-                                  color: isFocused ? 'black' : (btn.isActive ? 'white' : 'white'),
-                                  borderColor: isFocused ? 'transparent' : (btn.isActive ? 'transparent' : 'rgba(255,255,255,0.2)')
-                                }}
-                                className={cn(
-                                  "font-bold flex items-center gap-2 transition-all active:scale-95 shadow-lg border px-4 py-2 rounded-full text-xs backdrop-blur-md",
-                                  isFocused && "scale-110 shadow-2xl ring-4 ring-white/20"
-                                )}
-                              >
-                                <btn.icon className="w-3 h-3" />
-                                {btn.label}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+              <HeroSection
+                featuredChannel={featuredChannel}
+                layoutMode={layoutMode}
+                activeRow={activeRow}
+                activeCol={activeCol}
+                setActiveRow={setActiveRow}
+                setActiveCol={setActiveCol}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                uiMode={uiMode}
+                themeColor={themeColor}
+                deviceType={deviceType}
+                getCurrentProgram={getCurrentProgram}
+                formatTime={formatTime}
+                handlePrevFeatured={handlePrevFeatured}
+                handleNextFeatured={handleNextFeatured}
+                primaryHeroButtons={primaryHeroButtons}
+                filterHeroButtons={filterHeroButtons}
+                isListening={isListening}
+                remoteControlEnabled={remoteControlEnabled}
+                isRemoteConnected={isRemoteConnected}
+                showDeviceInfo={showDeviceInfo}
+                handleAISearch={handleAISearch}
+                isAISearching={isAISearching}
+                aiExplanation={aiExplanation}
+                categoryScrollRef={categoryScrollRef}
+              />
 
             {/* Rows */}
-            <motion.div 
-              animate={{ y: 0 }}
-              className={cn(
-                "relative z-20 space-y-1", 
-                layoutMode === 'fixed-focus' ? "flex-1 flex flex-col justify-center" : "pb-20",
-                searchQuery ? "mt-8" : (layoutMode === 'fixed-focus' ? "mt-0" : "-mt-8 sm:-mt-12")
-              )}
-            >
-              <AnimatePresence mode="wait">
-                {(groupedChannels as [string, M3UChannel[]][]).map(([group, groupChannels], idx) => {
-                  const isVisible = layoutMode !== 'fixed-focus' || (activeRow < 0 ? idx === 0 : idx === activeRow);
-                  if (!isVisible) return null;
+            <div className={cn(
+              "relative z-20", 
+              layoutMode === 'fixed-focus' ? "flex-1 overflow-hidden" : "pb-20",
+              searchQuery ? "mt-8" : (layoutMode === 'fixed-focus' ? "mt-0" : "-mt-8 sm:-mt-12")
+            )}>
+              <VList
+                ref={mainListRef}
+                height={layoutMode === 'fixed-focus' ? (typeof window !== 'undefined' ? window.innerHeight - (activeRow >= 0 ? window.innerHeight * 0.5 : window.innerHeight * 0.3) : 800) : 1200}
+                itemCount={groupedChannels.length}
+                itemSize={rowHeightHelper}
+                width="100%"
+                className="no-scrollbar"
+                style={{ overflowY: layoutMode === 'fixed-focus' ? 'auto' : 'visible' }}
+              >
+                {({ index, style }) => {
+                  const [group, groupChannels] = (groupedChannels as [string, M3UChannel[]][])[index];
+                  const isVisible = layoutMode !== 'fixed-focus' || (activeRow < 0 ? index === 0 : index === activeRow);
+                  if (!isVisible && layoutMode === 'fixed-focus') return null;
 
                   return (
+                    <div style={style}>
                     <motion.div
                       key={group}
                       initial={layoutMode === 'fixed-focus' ? { opacity: 0, y: 20 } : {}}
@@ -3603,7 +3216,7 @@ export default function App() {
                       <ChannelRow 
                         key={group} 
                         title={group} 
-                        rowIndex={idx}
+                        rowIndex={index}
                         channels={groupChannels} 
                         onSelect={handleChannelSelect}
                         onDetail={(ch) => handleChannelDetail(ch, group)}
@@ -3651,6 +3264,9 @@ export default function App() {
                             else next.add(group);
                             return next;
                           });
+                          if (mainListRef.current) {
+                            mainListRef.current.resetAfterIndex(0);
+                          }
                         }}
                         playbackProgress={playbackProgress}
                         epgData={epgData}
@@ -3659,10 +3275,11 @@ export default function App() {
                         channelNumbers={channelNumbers}
                       />
                     </motion.div>
+                    </div>
                   );
-                })}
-              </AnimatePresence>
-            </motion.div>
+                }}
+              </VList>
+            </div>
           </motion.div>
         </>
       )}
@@ -3925,7 +3542,7 @@ export default function App() {
                       { id: 'canli', label: 'Canlı', icon: Tv, active: canliChannels.includes(channelMenuId) },
                       { id: 'film', label: 'Film', icon: Play, active: filmChannels.includes(channelMenuId) },
                       { id: 'dizi', label: 'Dizi', icon: ListIcon, active: diziChannels.includes(channelMenuId) },
-                      { id: 'multi', label: 'Multi Kanal', icon: Monitor, active: Object.values(multiSessions).some((ids: any) => Array.isArray(ids) && ids.includes(channelMenuId)) },
+                      { id: 'multi', label: 'Multi Kanal', icon: Monitor, active: Object.values(multiSessions || {}).some((ids: any) => Array.isArray(ids) && ids.includes(channelMenuId)) },
                       { id: 'move-left', label: 'Sola Taşı', icon: ChevronLeft },
                       { id: 'move-right', label: 'Sağa Taşı', icon: ChevronRight }
                     ].map((opt, idx) => (
@@ -4061,2565 +3678,13 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-      <AnimatePresence>
-        {/* Voice Transcript Overlay */}
-        <AnimatePresence>
-          {isListening && voiceTranscript && (
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 50 }}
-              className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] pointer-events-none"
-            >
-              <div className="bg-black/80 backdrop-blur-xl border border-white/20 px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <p className="text-white font-medium italic">"{voiceTranscript}"</p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {showSettings && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-md flex items-center justify-center p-0 sm:p-4"
-          >
-            <motion.div
-              initial={{ y: 50, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 50, opacity: 0 }}
-              className={cn(
-                "w-full h-full sm:h-[600px] sm:max-h-[90vh] sm:max-w-4xl shadow-2xl flex flex-col md:flex-row overflow-hidden",
-                uiMode === 'modern' && "bg-white/5 backdrop-blur-3xl border border-white/20 sm:rounded-[40px] shadow-[0_0_50px_rgba(0,0,0,0.5)]",
-                uiMode === 'classic' && "bg-zinc-950 border-0 sm:border-4 border-zinc-800 sm:rounded-none shadow-[30px_30px_0_rgba(0,0,0,0.3)]",
-                uiMode === 'minimalist' && "bg-black border-0 sm:border border-white/10 sm:rounded-none"
-              )}
-            >
-              {uiMode === 'modern' && (
-                <div 
-                  className="absolute -top-48 -left-48 w-96 h-96 rounded-full blur-[120px] opacity-20 animate-pulse"
-                  style={{ backgroundColor: themeColor }}
-                />
-              )}
-              {uiMode === 'classic' && (
-                <div className="absolute top-0 left-0 w-full h-2" style={{ backgroundColor: themeColor }} />
-              )}
-              {/* Sidebar Tabs */}
-              <div className="relative flex flex-col md:w-56 bg-black/40 border-b md:border-b-0 md:border-r border-white/10 overflow-hidden">
-                <div className="md:hidden absolute left-0 top-0 bottom-0 z-10 flex items-center bg-gradient-to-r from-black/80 to-transparent pointer-events-none px-1">
-                  <button 
-                    onClick={() => scrollSidebar('left')}
-                    className="p-1 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-                <div className="md:hidden absolute right-0 top-0 bottom-0 z-10 flex items-center bg-gradient-to-l from-black/80 to-transparent pointer-events-none px-1">
-                  <button 
-                    onClick={() => scrollSidebar('right')}
-                    className="p-1 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-                <div 
-                  ref={settingsSidebarRef}
-                  className="w-full h-full px-8 py-3 md:p-5 flex flex-row md:flex-col gap-1.5 overflow-x-auto md:overflow-y-auto custom-scrollbar scroll-smooth"
-                >
-                  <div className="hidden md:block mb-6">
-                    <h2 className="text-xl font-black italic tracking-tighter uppercase text-white opacity-50">Ayarlar</h2>
-                  </div>
-                {[
-                  { id: 0, label: 'Görünüm', icon: Sun },
-                  { id: 1, label: 'Liste', icon: ListIcon },
-                  { id: 2, label: 'Genel', icon: Settings },
-                  { id: 3, label: 'Kumanda', icon: Smartphone },
-                  { id: 4, label: 'AI Gözcü', icon: Sparkles }
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    data-tab-id={tab.id}
-                    data-sidebar-focus={tab.id}
-                    onClick={() => {
-                      setActiveSettingsTab(tab.id);
-                      setSidebarFocus(tab.id);
-                      setSettingsArea('content');
-                      setSettingsSection(0);
-                      setSettingsFocus(0);
-                      setExpandedSections({});
-                    }}
-                    onPointerDown={() => {
-                      setActiveSettingsTab(tab.id);
-                      setSidebarFocus(tab.id);
-                      if (settingsArea === 'tabs') {
-                        setSettingsArea('tabs');
-                      }
-                    }}
-                    onMouseEnter={() => {
-                      if (settingsArea === 'tabs') {
-                        setActiveSettingsTab(tab.id);
-                        setSidebarFocus(tab.id);
-                        setSettingsArea('tabs');
-                      }
-                    }}
-                    className={cn(
-                      "relative flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 font-bold transition-all whitespace-nowrap overflow-hidden",
-                      uiMode === 'modern' && "rounded-lg",
-                      uiMode === 'classic' && "rounded-none border-l-2 border-transparent",
-                      uiMode === 'minimalist' && "rounded-none border-0",
-                      activeSettingsTab === tab.id 
-                        ? (uiMode === 'modern' 
-                            ? "bg-white/20 text-white scale-105 shadow-lg backdrop-blur-md border border-white/20" 
-                            : uiMode === 'classic'
-                            ? "bg-zinc-800 text-white border-l-4 border-white"
-                            : "text-white border-b-2 border-white")
-                        : "text-zinc-500 hover:bg-white/5 hover:text-zinc-300",
-                      settingsArea === 'tabs' && sidebarFocus === tab.id && "ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused"
-                    )}
-                  >
-                    {activeSettingsTab === tab.id && (
-                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-600" style={{ backgroundColor: themeColor }} />
-                    )}
-                    <tab.icon className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="text-xs md:text-sm">{tab.label}</span>
-                    {settingsArea === 'tabs' && sidebarFocus === tab.id && (
-                      <motion.span 
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="ml-auto text-[8px] font-black uppercase tracking-widest text-black/40"
-                      >
-                        [ENTER]
-                      </motion.span>
-                    )}
-                  </button>
-                ))}
-                
-                <div className="hidden md:block mt-auto pt-4 space-y-4">
-                  {settingsArea === 'tabs' && (
-                    <div className="px-4 py-2 bg-white/5 rounded-xl border border-white/10 animate-pulse">
-                      <div className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Navigasyon</div>
-                      <div className="flex items-center gap-2 text-xs font-bold text-white">
-                        <div className="px-1.5 py-0.5 bg-white text-black rounded text-[10px]">ENTER</div>
-                        <span>Düzenle</span>
-                      </div>
-                    </div>
-                  )}
-                  <button
-                    data-sidebar-focus="4"
-                    onClick={() => {
-                      setShowSettings(false);
-                      setNavContext('browse');
-                      setActiveRow(0);
-                      setActiveCol(0);
-                    }}
-                    onPointerDown={() => {
-                      setSidebarFocus(4);
-                      setSettingsArea('tabs');
-                    }}
-                    onMouseEnter={() => {
-                      setSidebarFocus(4);
-                      setSettingsArea('tabs');
-                    }}
-                    className={cn(
-                      "w-full flex items-center gap-3 px-4 py-3 font-bold transition-all",
-                      uiMode === 'modern' && "rounded-xl",
-                      uiMode === 'classic' && "rounded-none border border-zinc-800",
-                      uiMode === 'minimalist' && "rounded-none border-0",
-                      settingsArea === 'tabs' && sidebarFocus === 4 
-                        ? (uiMode === 'modern' ? "bg-white text-black ring-4 ring-white ring-offset-2 ring-offset-black z-10 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b-2 border-white settings-focused") 
-                        : "text-zinc-500 hover:bg-white/5 hover:text-white"
-                    )}
-                  >
-                    <X className="w-5 h-5" />
-                    <span>Kapat</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-              {/* Content Area */}
-              <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-                {/* Scroll Buttons for Content Area */}
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2 pointer-events-none">
-                  <button 
-                    onClick={() => scrollSettingsContent('up')}
-                    className="p-2 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors backdrop-blur-md border border-white/10"
-                  >
-                    <ChevronDown className="w-5 h-5 text-white rotate-180" />
-                  </button>
-                  <button 
-                    onClick={() => scrollSettingsContent('down')}
-                    className="p-2 bg-white/10 rounded-full pointer-events-auto hover:bg-white/20 transition-colors backdrop-blur-md border border-white/10"
-                  >
-                    <ChevronDown className="w-5 h-5 text-white" />
-                  </button>
-                </div>
-
-                <div className="md:hidden p-4 border-b border-white/5 flex justify-between items-center">
-                  <h2 className="text-xl font-black italic uppercase text-white">
-                    {activeSettingsTab === 0 ? 'Görünüm' : activeSettingsTab === 1 ? 'Liste' : activeSettingsTab === 2 ? 'Genel' : 'Kumanda'}
-                  </h2>
-                  <button onClick={() => {
-                    setShowSettings(false);
-                    setNavContext('browse');
-                    setActiveRow(0);
-                    setActiveCol(0);
-                  }} className="p-2 bg-white/5 rounded-full"><X className="w-5 h-5" /></button>
-                </div>
-
-                <div className={cn(
-                  "flex-1 overflow-y-auto p-6 md:p-10 pb-[50vh] space-y-10 custom-scrollbar scroll-smooth transition-all duration-500",
-                  settingsArea === 'tabs' ? "opacity-30 grayscale-[0.5] scale-[0.98]" : "opacity-100 grayscale-0 scale-100"
-                )} ref={settingsContentRef}>
-                  <AnimatePresence mode="wait">
-                    {activeSettingsTab === 0 && (
-                      <motion.div 
-                        key="tab-0"
-                        initial={{ opacity: 0, y: 10 }} 
-                        animate={{ opacity: 1, y: 0 }} 
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="space-y-10"
-                      >
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 0 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 0)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Tema Rengi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-0'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-0'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="flex flex-wrap gap-x-6 gap-y-8 p-2">
-                                {[
-                                  { name: 'Kırmızı', color: '#dc2626' },
-                                  { name: 'Mavi', color: '#2563eb' },
-                                  { name: 'Yeşil', color: '#16a34a' },
-                                  { name: 'Mor', color: '#9333ea' },
-                                  { name: 'Turuncu', color: '#ea580c' },
-                                  { name: 'Sarı', color: '#eab308' },
-                                  { name: 'Pembe', color: '#db2777' },
-                                  { name: 'Turkuaz', color: '#0891b2' },
-                                  { name: 'İndigo', color: '#4f46e5' },
-                                  { name: 'Gül', color: '#e11d48' },
-                                  { name: 'Kehribar', color: '#d97706' },
-                                  { name: 'Kireç', color: '#65a30d' }
-                                ].map((c, i) => (
-                                  <div key={c.color} className="flex flex-col items-center gap-2">
-                                    <button
-                                      onClick={() => setThemeColor(c.color)}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(i); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(i); } }}
-                                      style={{ backgroundColor: c.color }}
-                                      className={cn(
-                                        "w-10 h-10 md:w-12 md:h-12 transition-all border-4",
-                                        uiMode === 'modern' && "rounded-full",
-                                        uiMode === 'classic' && "rounded-none",
-                                        uiMode === 'minimalist' && "rounded-none border-0",
-                                        themeColor === c.color ? "border-white scale-110 shadow-xl" : "border-transparent opacity-40 hover:opacity-100",
-                                        settingsArea === 'content' && settingsFocus === i && "ring-4 ring-white scale-125 z-10 opacity-100 settings-focused"
-                                      )}
-                                      title={c.name}
-                                    >
-                                      {themeColor === c.color && (
-                                        <div className="w-full h-full flex items-center justify-center">
-                                          <div className="w-2 h-2 bg-white rounded-full animate-ping" />
-                                        </div>
-                                      )}
-                                    </button>
-                                    <span className={cn(
-                                      "text-[10px] font-black uppercase tracking-widest transition-all",
-                                      themeColor === c.color ? "text-white" : "text-zinc-500",
-                                      settingsArea === 'content' && settingsFocus === i && "scale-110 text-white"
-                                    )}>
-                                      {c.name}
-                                    </span>
-                                  </div>
-                                ))}
-
-                                {/* Mixed Color Item */}
-                                <div className="flex flex-col items-center gap-2">
-                                  <button
-                                    onClick={() => setThemeColor(mixedColor)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(12); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(12); } }}
-                                    style={{ backgroundColor: mixedColor }}
-                                    className={cn(
-                                      "w-10 h-10 md:w-12 md:h-12 rounded-lg transition-all border-4 flex items-center justify-center",
-                                      themeColor === mixedColor ? "border-white scale-110 shadow-xl" : "border-transparent opacity-40 hover:opacity-100",
-                                      settingsArea === 'content' && settingsFocus === 12 && "ring-4 ring-white scale-125 z-10 opacity-100 settings-focused"
-                                    )}
-                                    title="Karışım Rengi"
-                                  >
-                                    {themeColor === mixedColor && <Check className="w-6 h-6 text-white drop-shadow-md" />}
-                                  </button>
-                                  <span className={cn(
-                                    "text-[10px] font-black uppercase tracking-widest transition-all",
-                                    themeColor === mixedColor ? "text-white" : "text-zinc-500",
-                                    settingsArea === 'content' && settingsFocus === 12 && "scale-110 text-white"
-                                  )}>
-                                    Karışım
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Merged Color Mixer UI */}
-                              <div className="mt-8 pt-8 border-t border-white/10 space-y-4 px-2">
-                                <div className="flex items-center gap-2 text-zinc-400 text-[10px] font-black uppercase tracking-widest">
-                                  <Pipette className="w-3 h-3" />
-                                  Renk Karıştırıcı
-                                </div>
-                                <div className="bg-white/5 p-6 rounded-2xl space-y-6">
-                                  <div className="flex items-center justify-center gap-8">
-                                    <div className="flex flex-col items-center gap-2">
-                                      <input 
-                                        type="color" 
-                                        value={mixColor1} 
-                                        onChange={(e) => setMixColor1(e.target.value)}
-                                        className={cn(
-                                          "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
-                                          settingsArea === 'content' && settingsFocus === 13 ? "border-white scale-110 settings-focused" : "border-white/10"
-                                        )}
-                                        onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(13); } }}
-                                        onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(13); } }}
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 1</span>
-                                    </div>
-                                    <Plus className="w-4 h-4 text-zinc-500" />
-                                    <div className="flex flex-col items-center gap-2">
-                                      <input 
-                                        type="color" 
-                                        value={mixColor2} 
-                                        onChange={(e) => setMixColor2(e.target.value)}
-                                        className={cn(
-                                          "w-12 h-12 rounded-lg cursor-pointer bg-transparent border-2 transition-all",
-                                          settingsArea === 'content' && settingsFocus === 14 ? "border-white scale-110 settings-focused" : "border-white/10"
-                                        )}
-                                        onPointerDown={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(14); } }}
-                                        onMouseEnter={() => { if (settingsArea === 'content') { setSettingsSection(0); setSettingsFocus(14); } }}
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Renk 2</span>
-                                    </div>
-                                    <Equal className="w-4 h-4 text-zinc-500" />
-                                    <div className="flex flex-col items-center gap-2">
-                                      <div 
-                                        className="w-12 h-12 rounded-lg border-2 border-white/10"
-                                        style={{ backgroundColor: mixedColor }}
-                                      />
-                                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Sonuç</span>
-                                    </div>
-                                  </div>
-                                  <p className="text-[10px] text-center text-zinc-500 font-medium italic">İki rengi karıştırarak kendi özel temanızı oluşturun. Sonuç rengi yukarıdaki palete kare olarak eklenir.</p>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 1 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 1)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(1); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(1); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Arayüz Modu
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-1'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-1'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'modern', label: 'Modern', icon: Tv, desc: 'Cam efektli, canlı ve hareketli' },
-                                  { id: 'bento', label: 'Bento Grid', icon: Grid, desc: 'Modern dashboard görünümü' },
-                                  { id: 'classic', label: 'Klasik', icon: ListIcon, desc: 'Geleneksel, sade ve hızlı' },
-                                  { id: 'minimalist', label: 'Minimalist', icon: Equal, desc: 'Sadece içerik odaklı' }
-                                ].map((mode, idx) => (
-                                  <button
-                                    key={mode.id}
-                                    onClick={() => setUiMode(mode.id as UIMode)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(20 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(20 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      uiMode === mode.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (20 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {uiMode === mode.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <mode.icon className="w-6 h-6" style={{ color: uiMode === mode.id ? themeColor : undefined }} />
-                                    <div>
-                                      <div className="font-bold text-sm">{mode.label}</div>
-                                      <div className="text-[10px] opacity-50">{mode.desc}</div>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 2 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 2)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(2); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(2); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Navigasyon Modu
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-2'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-2'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-2">
-                                {[
-                                  { id: 'scroll', label: 'Standart Kaydırma', icon: ListIcon, desc: 'Sayfa aşağı doğru kayar' },
-                                  { id: 'fixed-focus', label: 'Sabit Odak (TV)', icon: Monitor, desc: 'Kategoriler odak noktasına gelir' }
-                                ].map((mode, idx) => (
-                                  <button
-                                    key={mode.id}
-                                    onClick={() => setLayoutMode(mode.id as LayoutMode)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(150 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(150 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      layoutMode === mode.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (150 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {layoutMode === mode.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <mode.icon className="w-6 h-6" style={{ color: layoutMode === mode.id ? themeColor : undefined }} />
-                                    <div>
-                                      <div className="font-bold text-sm">{mode.label}</div>
-                                      <div className="text-[10px] text-zinc-500 font-medium">{mode.desc}</div>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 3 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 3)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(3); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(3); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Poster Görünümü
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-3'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-3'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-2">
-                                <button
-                                  onClick={() => setPosterOrientation('landscape')}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(15); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(15); } }}
-                                  className={cn(
-                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4 relative",
-                                    posterOrientation === 'landscape' 
-                                      ? "border-white bg-white/10" 
-                                      : "border-white/5 hover:border-white/20 bg-white/5",
-                                    settingsArea === 'content' && settingsFocus === 15 && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                  )}
-                                >
-                                  <div className="absolute top-3 right-3">
-                                    {posterOrientation === 'landscape' && (
-                                      <div className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_10px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                    )}
-                                  </div>
-                                  <div className="w-24 h-16 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
-                                  <span className="font-bold text-lg">Yatay</span>
-                                </button>
-                                <button
-                                  onClick={() => setPosterOrientation('portrait')}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(16); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(16); } }}
-                                  className={cn(
-                                    "p-6 rounded-2xl border-2 transition-all flex flex-col items-center gap-4 relative",
-                                    posterOrientation === 'portrait' 
-                                      ? "border-white bg-white/10" 
-                                      : "border-white/5 hover:border-white/20 bg-white/5",
-                                    settingsArea === 'content' && settingsFocus === 16 && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                  )}
-                                >
-                                  <div className="absolute top-3 right-3">
-                                    {posterOrientation === 'portrait' && (
-                                      <div className="w-2 h-2 rounded-full animate-pulse shadow-[0_0_10px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                    )}
-                                  </div>
-                                  <div className="w-16 h-24 bg-zinc-800 rounded-lg border border-white/10 shadow-inner" />
-                                  <span className="font-bold text-lg">Dikey</span>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 4 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 4)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Logo Stili
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-4'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-4'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'default', label: 'Varsayılan', desc: 'Dönüşümlü' },
-                                  { id: 'mooncrown', label: 'Mooncrown', desc: 'Klasik Mooncrown' },
-                                  { id: 'mooncrown-gold', label: 'Mooncrown Gold', desc: 'Altın Sarısı Mooncrown' },
-                                  { id: 'mooncrown-silver', label: 'Mooncrown Silver', desc: 'Gümüş Grisi Mooncrown' },
-                                  { id: 'mooncrown-neon', label: 'Mooncrown Neon', desc: 'Neon Beyaz Mooncrown' },
-                                  { id: 'mooncrown-glass', label: 'Mooncrown Glass', desc: 'Cam Efektli Mooncrown' },
-                                  { id: 'mooncrown-fire', label: 'Mooncrown Fire', desc: 'Ateş Efektli Mooncrown' },
-                                  { id: 'minimal', label: 'Minimal', desc: 'Sade görünüm' },
-                                  { id: 'neon', label: 'Neon', desc: 'Parlak efekt' },
-                                  { id: 'retro', label: 'Retro', desc: 'Klasik TV stili' },
-                                  { id: 'glitch', label: 'Glitch', desc: 'Dijital bozulma' }
-                                ].map((style, idx) => (
-                                  <button
-                                    key={style.id}
-                                    onClick={() => setLogoStyle(style.id as LogoStyle)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(40 + idx); } }}
-                                    className={cn(
-                                      "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      logoStyle === style.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (40 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {logoStyle === style.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <div className="font-bold text-sm">{style.label}</div>
-                                    <div className="text-[10px] opacity-50">{style.desc}</div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 5 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 5 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 5)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(5); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(5); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Saat ve Tarih Stili
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-5'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-5'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'original', label: 'Orijinal' },
-                                  { id: 'horizontal', label: 'Yatay' },
-                                  { id: 'minimal', label: 'Minimal' },
-                                  { id: 'retro', label: 'Retro' },
-                                  { id: 'modern', label: 'Modern' }
-                                ].map((style, idx) => (
-                                  <button
-                                    key={style.id}
-                                    onClick={() => setClockStyle(style.id as any)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(50 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(50 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-4 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      clockStyle === style.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (50 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {clockStyle === style.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <div className="scale-75 origin-center">
-                                      <DigitalClock themeColor={themeColor} style={style.id as any} />
-                                    </div>
-                                    <div className="font-bold text-sm tracking-widest uppercase">{style.label}</div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 6 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 6 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 6)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(6); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(6); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Top 10 Sayı Stili
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-6'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-6'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'original', label: 'Orijinal' },
-                                  { id: 'filled', label: 'Dolu' },
-                                  { id: 'theme', label: 'Dolu (Tema)' },
-                                  { id: 'outline-theme', label: 'İçi Boş (Tema)' },
-                                  { id: 'neon', label: 'Neon (Tema)' }
-                                ].map((style, idx) => (
-                                  <button
-                                    key={style.id}
-                                    onClick={() => setTop10Style(style.id as Top10Style)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(60 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(60 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      top10Style === style.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (60 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {top10Style === style.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <div className="text-4xl font-black italic" style={{ 
-                                      color: (style.id === 'theme' || style.id === 'outline-theme' || style.id === 'neon') ? (style.id === 'theme' ? themeColor : 'transparent') : (style.id === 'original' ? 'transparent' : 'white'),
-                                      WebkitTextStroke: (style.id === 'original' || style.id === 'outline-theme' || style.id === 'neon') ? `1px ${style.id === 'original' ? 'rgba(255,255,255,0.5)' : themeColor}` : 'none',
-                                      textShadow: style.id === 'neon' ? `0 0 10px ${themeColor}, 0 0 20px ${themeColor}` : 'none'
-                                    }}>
-                                      1
-                                    </div>
-                                    <div className="font-bold text-xs tracking-widest uppercase">{style.label}</div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 7 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 7 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 7)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(7); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(7); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Görsel Odak Efektleri
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-7'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-7'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'default', label: 'Varsayılan', desc: 'Sade odak' },
-                                  { id: 'glow', label: 'Parlama', desc: 'Yumuşak ışık' },
-                                  { id: 'pulse', label: 'Nabız', desc: 'Yavaşça büyüme' },
-                                  { id: 'border', label: 'Kenarlık', desc: 'Renkli çerçeve' },
-                                  { id: 'scale', label: 'Büyütme', desc: 'Daha belirgin' }
-                                ].map((effect, idx) => (
-                                  <button
-                                    key={effect.id}
-                                    onClick={() => setFocusEffect(effect.id as FocusEffect)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(70 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      focusEffect === effect.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (70 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {focusEffect === effect.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <div className="font-bold text-sm">{effect.label}</div>
-                                    <div className="text-[10px] opacity-50">{effect.desc}</div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 8 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 8 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 8)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(8); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(8); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Dinamik Tema (Magic Color)
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-8'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-8'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-2">
-                                <button
-                                  onClick={() => setDynamicThemeEnabled(!dynamicThemeEnabled)}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(8); setSettingsFocus(80); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(8); setSettingsFocus(80); } }}
-                                  className={cn(
-                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
-                                    dynamicThemeEnabled 
-                                      ? "border-white bg-white/10" 
-                                      : "border-white/5 hover:border-white/20 bg-white/5",
-                                    settingsArea === 'content' && settingsFocus === 80 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
-                                  )}
-                                >
-                                  <div className="flex flex-col items-start gap-1">
-                                    <span className="font-bold text-lg">Dinamik Tema</span>
-                                    <span className="text-xs text-zinc-500">Uygulama renkleri içeriğe göre otomatik değişir</span>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full transition-all relative",
-                                    dynamicThemeEnabled ? "bg-green-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      dynamicThemeEnabled ? "left-7" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 9 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 9 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 9)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(9); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(9); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Sesli Kontrol
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-9'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-9'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-2">
-                                <button
-                                  onClick={() => setVoiceControlEnabled(!voiceControlEnabled)}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(9); setSettingsFocus(90); } }}
-                                  className={cn(
-                                    "w-full p-6 rounded-2xl border-2 transition-all flex items-center justify-between gap-4",
-                                    voiceControlEnabled 
-                                      ? "border-white bg-white/10" 
-                                      : "border-white/5 hover:border-white/20 bg-white/5",
-                                    settingsArea === 'content' && settingsFocus === 90 && "ring-4 ring-white scale-[1.02] z-10 settings-focused"
-                                  )}
-                                >
-                                  <div className="flex flex-col items-start gap-1 text-left">
-                                    <span className="font-bold text-lg">Sesli Kontrol</span>
-                                    <span className="text-[10px] text-zinc-500">Uygulamayı sesli komutlarla yönetin</span>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full transition-all relative flex-shrink-0",
-                                    voiceControlEnabled ? "bg-green-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      voiceControlEnabled ? "left-7" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 10 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 10 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(0, 10)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(10); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(10); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Yükleme Ekranı Stili
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['0-10'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['0-10'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-2">
-                                {[
-                                  { id: 'classic', label: 'Klasik', icon: Tv, desc: 'Geleneksel TV' },
-                                  { id: 'minimal', label: 'Minimal', icon: CircleDashed, desc: 'Sade ve şık' },
-                                  { id: 'pulse', label: 'Nabız', icon: Activity, desc: 'Canlı efekt' },
-                                  { id: 'bars', label: 'Çubuklar', icon: Sparkles, desc: 'Modern animasyon' },
-                                  { id: 'orbit', label: 'Yörünge', icon: RefreshCw, desc: 'Dairesel hareket' },
-                                  { id: 'glitch', label: 'Dijital', icon: Cpu, desc: 'Teknolojik görünüm' }
-                                ].map((style, idx) => (
-                                  <button
-                                    key={style.id}
-                                    onClick={() => setLoadingStyle(style.id as any)}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(110 + idx); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(10); setSettingsFocus(110 + idx); } }}
-                                    className={cn(
-                                      "p-4 border-2 transition-all flex flex-col items-center gap-2 text-center relative",
-                                      uiMode === 'modern' && "rounded-2xl",
-                                      uiMode === 'classic' && "rounded-none",
-                                      uiMode === 'minimalist' && "rounded-none border-0",
-                                      loadingStyle === style.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (110 + idx) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <div className="absolute top-2 right-2">
-                                      {loadingStyle === style.id && (
-                                        <div className="w-1.5 h-1.5 rounded-full animate-pulse shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                      )}
-                                    </div>
-                                    <style.icon className="w-6 h-6" style={{ color: loadingStyle === style.id ? themeColor : undefined }} />
-                                    <div className="font-bold text-sm">{style.label}</div>
-                                    <div className="text-[10px] opacity-50">{style.desc}</div>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-                    </motion.div>
-                  )}
-
-                  {activeSettingsTab === 1 && (
-                    <motion.div 
-                      key="tab-1"
-                      initial={{ opacity: 0, y: 10 }} 
-                      animate={{ opacity: 1, y: 0 }} 
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-6"
-                    >
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 0 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 0)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Oynatma Listesi Yönetimi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-0'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-0'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="space-y-4 p-2">
-                                <div className="bg-white/5 p-6 rounded-2xl space-y-4">
-                                  <label className="text-sm font-bold text-zinc-400">M3U Dosyası Yükle</label>
-                                  <label className="block cursor-pointer group">
-                                    <input type="file" accept=".m3u,.m3u8" className="hidden" id="m3u-upload" onChange={handleFileUpload} />
-                                    <div className={cn(
-                                      "bg-black/40 border-2 border-dashed rounded-xl py-6 transition-all flex flex-col items-center gap-2",
-                                      settingsArea === 'content' && settingsFocus === 0 ? "border-white bg-white/5 settings-focused" : "border-white/10"
-                                    )}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(0); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(0); } }}
-                                    onClick={() => document.getElementById('m3u-upload')?.click()}
-                                    >
-                                      <Upload className="w-6 h-6 text-zinc-500" />
-                                      <span className="text-sm font-bold text-zinc-300">Dosya Seç</span>
-                                    </div>
-                                  </label>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 1 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 1)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(1); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(1); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            EPG Ayarları
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-1'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-1'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="bg-white/5 p-6 rounded-2xl space-y-4 m-2">
-                                <label className="text-sm font-bold text-zinc-400">EPG Linki Ekle</label>
-                                <div className="flex gap-2">
-                                  <button
-                                    id="epg-input-btn"
-                                    onClick={() => {
-                                      const input = document.getElementById('epg-input') as HTMLInputElement;
-                                      if (input) input.focus();
-                                    }}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); } }}
-                                    className={cn(
-                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm text-left relative",
-                                      settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                    )}
-                                  >
-                                    <span className="truncate block pr-8">{epgUrl || 'EPG URL\'si girin...'}</span>
-                                    <Link2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                                  </button>
-                                  <input
-                                    id="epg-input"
-                                    type="url"
-                                    value={epgUrl}
-                                    onChange={(e) => setEpgUrl(e.target.value)}
-                                    className="sr-only"
-                                  />
-                                  <button
-                                    id="epg-load-btn"
-                                    onClick={() => handleLoadEPG()}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(2); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(2); } }}
-                                    style={{ backgroundColor: themeColor }}
-                                    className={cn(
-                                      "px-6 py-3 rounded-xl font-bold text-white transition-all",
-                                      settingsArea === 'content' && settingsFocus === 2 ? "scale-105 shadow-lg brightness-110 settings-focused" : "opacity-90 hover:opacity-100"
-                                    )}
-                                  >
-                                    Yükle
-                                  </button>
-                                </div>
-                                {epgData && (
-                                  <button
-                                    onClick={() => {
-                                      setEpgUrl('');
-                                      setEpgData(null);
-                                      localStorage.removeItem('epg_url');
-                                    }}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(3); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(3); } }}
-                                    className={cn(
-                                      "w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2",
-                                      settingsArea === 'content' && settingsFocus === 3 ? "bg-red-600 text-white settings-focused" : "bg-red-500/10 text-red-500"
-                                    )}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                    Mevcut EPG'yi Sil
-                                  </button>
-                                )}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 2 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 2)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(2); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(2); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            URL Linki Ekle
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-2'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-2'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="bg-white/5 p-6 rounded-2xl space-y-4 m-2">
-                                <div className="flex gap-2">
-                                  <button
-                                    id="extra-url-input-btn"
-                                    onClick={() => {
-                                      const input = document.getElementById('extra-url-input') as HTMLInputElement;
-                                      if (input) input.focus();
-                                    }}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4); } }}
-                                    className={cn(
-                                      "flex-1 bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm text-left relative",
-                                      settingsArea === 'content' && settingsFocus === 4 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                    )}
-                                  >
-                                    <span className="truncate block pr-8">{extraUrl || 'URL veya Cutt.ly kodu girin...'}</span>
-                                    <Link2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                                  </button>
-                                  <input
-                                    id="extra-url-input"
-                                    type="url"
-                                    value={extraUrl}
-                                    onChange={(e) => setExtraUrl(e.target.value)}
-                                    className="sr-only"
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      if (!extraUrl) return;
-                                      setPlaylistUrl(extraUrl);
-                                      handleUrlSubmit(extraUrl);
-                                    }}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(5); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(5); } }}
-                                    style={{ backgroundColor: themeColor }}
-                                    className={cn(
-                                      "px-6 py-3 rounded-xl font-bold text-white transition-all",
-                                      settingsArea === 'content' && settingsFocus === 5 ? "scale-105 shadow-lg brightness-110 settings-focused" : "opacity-90 hover:opacity-100"
-                                    )}
-                                  >
-                                    Yükle
-                                  </button>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 3 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 3)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(3); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(3); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Liste İşlemleri
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-3'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-3'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-2">
-                                <button
-                                  onClick={() => {
-                                    localStorage.removeItem('m3u_deleted');
-                                    localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
-                                    setSavedUrl(DEFAULT_M3U_URL);
-                                    setPlaylistUrl(DEFAULT_M3U_URL);
-                                    handleUrlSubmit(DEFAULT_M3U_URL);
-                                  }}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(6); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(6); } }}
-                                  className={cn(
-                                    "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 6 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
-                                      <RefreshCw className={cn("w-6 h-6", settingsArea === 'content' && settingsFocus === 6 && "animate-spin")} />
-                                    </div>
-                                    <div>
-                                      <div className="text-lg">Ana Linki Yükle</div>
-                                      <div className="text-xs opacity-50 font-medium">Varsayılan listeyi açar</div>
-                                    </div>
-                                  </div>
-                                </button>
-                                
-                                <button
-                                  onClick={() => {
-                                    localStorage.removeItem('m3u_url');
-                                    localStorage.removeItem('epg_url');
-                                    localStorage.setItem('m3u_deleted', 'true');
-                                    setSavedUrl(null);
-                                    setEpgUrl('');
-                                    setEpgData(null);
-                                    setChannels([]);
-                                    setPlaylistUrl('');
-                                    setNavContext('browse');
-                                    setActiveRow(0);
-                                    setActiveCol(0);
-                                  }}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(7); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(7); } }}
-                                  className={cn(
-                                    "text-left px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 7 ? "bg-red-600 text-white scale-105 shadow-xl settings-focused" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-red-500/20 rounded-xl group-hover:scale-110 transition-transform">
-                                      <Trash2 className="w-6 h-6" />
-                                    </div>
-                                    <div>
-                                      <div className="text-lg">Listeyi Sil</div>
-                                      <div className="text-xs opacity-50 font-medium">Tüm verileri temizler</div>
-                                    </div>
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 4 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 4)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(4); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Kategori Görünürlüğü
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-4'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-4'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-2">
-                                {[
-                                  { id: 'top10', label: 'Top 10', icon: Tv },
-                                  { id: 'favorites', label: 'Favorilerim', icon: Heart },
-                                  { id: 'live', label: 'Canlı', icon: Tv },
-                                  { id: 'movies', label: 'Film', icon: Play },
-                                  { id: 'series', label: 'Dizi', icon: ListIcon },
-                                  { id: 'recent', label: 'İzlemeye Devam Et', icon: Clock }
-                                ].map((cat, idx) => {
-                                  const isVisible = visibleCategories.includes(cat.label);
-                                  const focusIdx = 8 + idx;
-                                  return (
-                                    <button
-                                      key={cat.id}
-                                      onClick={() => selectCategory(cat.id as any)}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(focusIdx); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(focusIdx); } }}
-                                      className={cn(
-                                        "flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm",
-                                        settingsArea === 'content' && settingsFocus === focusIdx 
-                                          ? "bg-white text-black scale-105 shadow-xl settings-focused" 
-                                          : isVisible ? "bg-white/10 text-white" : "bg-white/5 text-zinc-500"
-                                      )}
-                                    >
-                                      <cat.icon className={cn("w-4 h-4", isVisible && ! (settingsArea === 'content' && settingsFocus === focusIdx) && "text-red-500")} style={{ color: isVisible && ! (settingsArea === 'content' && settingsFocus === focusIdx) ? themeColor : undefined }} />
-                                      <span>{cat.label}</span>
-                                      {isVisible && <Check className="w-3 h-3 ml-auto" />}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 5 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 5 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(1, 5)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(5); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(5); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Çoklu Oynatma Listesi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['1-5'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['1-5'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="bg-white/5 p-6 rounded-2xl space-y-6 m-2">
-                                <div className="space-y-4">
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                    <input
-                                      type="text"
-                                      placeholder="Liste Adı (örn: Spor, Sinema)"
-                                      className={cn(
-                                        "bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                        settingsArea === 'content' && settingsFocus === 20 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                      )}
-                                      value={newPlaylistName}
-                                      onChange={(e) => setNewPlaylistName(e.target.value)}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(20); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(20); } }}
-                                    />
-                                    <input
-                                      type="url"
-                                      placeholder="M3U URL'si"
-                                      className={cn(
-                                        "bg-black/40 border rounded-xl px-4 py-3 outline-none transition-all text-sm",
-                                        settingsArea === 'content' && settingsFocus === 21 ? "border-white ring-2 ring-white/20 settings-focused" : "border-white/10"
-                                      )}
-                                      value={newPlaylistUrl}
-                                      onChange={(e) => setNewPlaylistUrl(e.target.value)}
-                                      onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(21); } }}
-                                      onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(21); } }}
-                                    />
-                                  </div>
-                                  <button
-                                    onClick={() => {
-                                      if (!newPlaylistName || !newPlaylistUrl) return;
-                                      addPlaylist(newPlaylistName, newPlaylistUrl);
-                                      setNewPlaylistName('');
-                                      setNewPlaylistUrl('');
-                                      showToast('Oynatma listesi başarıyla eklendi!', 'success');
-                                    }}
-                                    onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(22); } }}
-                                    onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(22); } }}
-                                    style={{ backgroundColor: themeColor }}
-                                    className={cn(
-                                      "w-full py-3 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2",
-                                      settingsArea === 'content' && settingsFocus === 22 ? "scale-105 shadow-lg brightness-110 settings-focused" : "opacity-90 hover:opacity-100"
-                                    )}
-                                  >
-                                    <Plus className="w-5 h-5" />
-                                    Yeni Liste Ekle
-                                  </button>
-                                </div>
-
-                                {playlists.length > 0 && (
-                                  <div className="space-y-3 pt-4 border-t border-white/5">
-                                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Kayıtlı Listeler</label>
-                                    <div className="space-y-2">
-                                      {playlists.map((p, idx) => (
-                                        <div 
-                                          key={p.id}
-                                          className={cn(
-                                            "flex items-center justify-between p-3 rounded-xl transition-all",
-                                            currentPlaylistId === p.id ? "bg-white/10 border border-white/20" : "bg-white/5"
-                                          )}
-                                        >
-                                          <div className="flex-1 min-w-0 mr-4">
-                                            <div className="text-sm font-bold text-white truncate">{p.name}</div>
-                                            <div className="text-[10px] text-zinc-500 truncate opacity-50">{p.url}</div>
-                                          </div>
-                                          <div className="flex gap-2">
-                                            <button
-                                              onClick={() => switchPlaylist(p)}
-                                              onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(30 + idx * 2); } }}
-                                              onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(30 + idx * 2); } }}
-                                              className={cn(
-                                                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                                currentPlaylistId === p.id 
-                                                  ? "bg-green-500/20 text-green-500" 
-                                                  : settingsArea === 'content' && settingsFocus === 30 + idx * 2
-                                                    ? "bg-white text-black settings-focused"
-                                                    : "bg-white/10 text-white hover:bg-white/20"
-                                              )}
-                                            >
-                                              {currentPlaylistId === p.id ? 'Aktif' : 'Seç'}
-                                            </button>
-                                            <button
-                                              onClick={() => removePlaylist(p.id)}
-                                              onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(31 + idx * 2); } }}
-                                              onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(31 + idx * 2); } }}
-                                              className={cn(
-                                                "p-1.5 rounded-lg transition-all",
-                                                settingsArea === 'content' && settingsFocus === 31 + idx * 2
-                                                  ? "bg-red-600 text-white settings-focused"
-                                                  : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                                              )}
-                                            >
-                                              <Trash2 className="w-4 h-4" />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-                    </motion.div>
-                  )}
-
-                  {activeSettingsTab === 2 && (
-                    <motion.div 
-                      key="tab-2"
-                      initial={{ opacity: 0, y: 10 }} 
-                      animate={{ opacity: 1, y: 0 }} 
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-10"
-                    >
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 0 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 0 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 0)}
-                          onPointerDown={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                          onMouseEnter={() => { if (settingsArea === 'sections') setSettingsSection(0); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Hava Durumu Ayarları
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-0'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-0'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="relative p-2">
-                                <input
-                                  id="city-input"
-                                  type="text"
-                                  value={weatherCity}
-                                  onChange={(e) => setWeatherCity(e.target.value)}
-                                  onPointerDown={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(0); } }}
-                                  onMouseEnter={() => { if (settingsArea === 'content') { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(0); } }}
-                                  className={cn(
-                                    "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold",
-                                    settingsArea === 'content' && settingsFocus === 0 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                  )}
-                                  placeholder="Şehir adı girin..."
-                                />
-                                <Cloud className="absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 1 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 1 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 1)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(1); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(1); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Özel Proxy Ayarları
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-1'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-1'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="relative p-2">
-                                  <button
-                                    id="proxy-input-btn"
-                                    onClick={() => {
-                                      const input = document.getElementById('proxy-input') as HTMLInputElement;
-                                      if (input) input.focus();
-                                    }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(1); setSettingsFocus(1); }}
-                                    className={cn(
-                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-lg font-bold text-left relative",
-                                      settingsArea === 'content' && settingsFocus === 1 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                    )}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span className="text-[10px] text-zinc-500 uppercase font-bold">Proxy URL</span>
-                                      <span className="truncate">{customProxyUrl || 'Varsayılan Proxy'}</span>
-                                    </div>
-                                    <Link2 className="absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 text-zinc-500" />
-                                  </button>
-                                  <input
-                                    id="proxy-input"
-                                    type="text"
-                                    value={customProxyUrl}
-                                    onChange={(e) => {
-                                      setCustomProxyUrl(e.target.value);
-                                      localStorage.setItem('custom_proxy_url', e.target.value);
-                                    }}
-                                    className="sr-only"
-                                  />
-                                  <p className="text-xs text-zinc-500 px-2 mt-2 italic">Boş bırakılırsa sistemin kendi proxy'si kullanılır.</p>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 2 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 2 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 2)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(2); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(2); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Oynatma Ayarları
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-2'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-2'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-2">
-                                <button 
-                                  onClick={() => setAutoPreviewEnabled(prev => !prev)}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(2); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(2); }}
-                                  className={cn(
-                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 2 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className={cn(
-                                      "p-3 rounded-xl transition-transform",
-                                      settingsArea === 'content' && settingsFocus === 2 ? "bg-black/10" : "bg-white/10"
-                                    )}>
-                                      <Play className="w-6 h-6" />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="text-lg">Otomatik Önizleme</div>
-                                      <div className="text-xs opacity-50 font-medium">Poster üzerinde bekleyince oynatır</div>
-                                    </div>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full relative transition-colors",
-                                    autoPreviewEnabled ? "bg-emerald-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      autoPreviewEnabled ? "right-1" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-
-                                <button 
-                                  onClick={() => setChannelSurfEnabled(prev => !prev)}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(3); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(3); }}
-                                  className={cn(
-                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group mt-2",
-                                    settingsArea === 'content' && settingsFocus === 3 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className={cn(
-                                      "p-3 rounded-xl transition-transform",
-                                      settingsArea === 'content' && settingsFocus === 3 ? "bg-black/10" : "bg-white/10"
-                                    )}>
-                                      <Tv className="w-6 h-6" />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="text-lg">Kanal Sörfü</div>
-                                      <div className="text-xs opacity-50 font-medium">Yukarı/Aşağı tuşlarıyla kanal değiştirme</div>
-                                    </div>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full relative transition-colors",
-                                    channelSurfEnabled ? "bg-emerald-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      channelSurfEnabled ? "right-1" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-
-                                <div className="mt-4 space-y-2 px-2">
-                                  <div className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">
-                                    <Cpu className="w-3 h-3" />
-                                    Oynatıcı Motoru
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    {[
-                                      { id: 'hls', name: 'Standart', desc: 'HLS.js' },
-                                      { id: 'shaka', name: 'ExoPlayer', desc: 'Shaka Web' }
-                                    ].map((engine, idx) => (
-                                      <button
-                                        key={engine.id}
-                                        onClick={() => setPlayerEngine(engine.id as any)}
-                                        onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4 + idx); }}
-                                        onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(4 + idx); }}
-                                        className={cn(
-                                          "flex flex-col items-start p-3 rounded-xl border transition-all duration-300 text-left",
-                                          playerEngine === engine.id
-                                            ? "bg-white/10 border-white/20 ring-1 ring-white/20"
-                                            : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10",
-                                          settingsArea === 'content' && settingsFocus === (4 + idx) ? "border-white ring-2 ring-white/20 scale-105 bg-white/20 settings-focused" : ""
-                                        )}
-                                      >
-                                        <div className="flex items-center justify-between w-full mb-0.5">
-                                          <span className={cn(
-                                            "font-bold text-sm",
-                                            playerEngine === engine.id ? "text-white" : "text-white/60"
-                                          )}>
-                                            {engine.name}
-                                          </span>
-                                          {playerEngine === engine.id && (
-                                            <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                          )}
-                                        </div>
-                                        <span className="text-[10px] text-white/40 font-medium">{engine.desc}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-
-                                <div className="mt-4 space-y-2 px-2">
-                                  <div className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest mb-2">
-                                    <Monitor className="w-3 h-3" />
-                                    Ambilight (Sinematik Işık)
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    {[
-                                      { id: 'none', name: 'Kapalı', desc: 'Standart' },
-                                      { id: 'soft', name: 'Yumuşak', desc: 'Göz Dostu' },
-                                      { id: 'vibrant', name: 'Canlı', desc: 'Dinamik' },
-                                      { id: 'cinema', name: 'Sinema', desc: 'Geniş' }
-                                    ].map((mode, idx) => (
-                                      <button
-                                        key={mode.id}
-                                        onClick={() => setAmbilightMode(mode.id as any)}
-                                        onPointerDown={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(6 + idx); }}
-                                        onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(2); setSettingsFocus(6 + idx); }}
-                                        className={cn(
-                                          "flex flex-col items-start p-3 rounded-xl border transition-all duration-300 text-left",
-                                          ambilightMode === mode.id
-                                            ? "bg-white/10 border-white/20 ring-1 ring-white/20"
-                                            : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-white/10",
-                                          settingsArea === 'content' && settingsFocus === (6 + idx) ? "border-white ring-2 ring-white/20 scale-105 bg-white/20 settings-focused" : ""
-                                        )}
-                                      >
-                                        <div className="flex items-center justify-between w-full mb-0.5">
-                                          <span className={cn(
-                                            "font-bold text-sm",
-                                            ambilightMode === mode.id ? "text-white" : "text-white/60"
-                                          )}>
-                                            {mode.name}
-                                          </span>
-                                          {ambilightMode === mode.id && (
-                                            <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor]" style={{ backgroundColor: themeColor, color: themeColor }} />
-                                          )}
-                                        </div>
-                                        <span className="text-[10px] text-white/40 font-medium">{mode.desc}</span>
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 3 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3",
-                            uiMode === 'modern' && "rounded-xl",
-                            uiMode === 'classic' && "rounded-none border-l-4 border-zinc-700 bg-zinc-900/50",
-                            uiMode === 'minimalist' && "rounded-none border-0 bg-transparent px-0",
-                            settingsArea === 'sections' && settingsSection === 3 
-                              ? (uiMode === 'modern' ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : uiMode === 'classic' ? "bg-zinc-800 text-white border-white settings-focused" : "text-white border-b border-white settings-focused") 
-                              : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 3)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(3); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(3); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Profil Resmi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-3'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-3'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-4 gap-4 p-2">
-                                {PROFILE_PICS.map((pic, i) => (
-                                  <button
-                                    key={i}
-                                    onClick={() => {
-                                      setProfilePic(pic);
-                                      localStorage.setItem('profile_pic', pic);
-                                    }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(4 + i); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(3); setSettingsFocus(4 + i); }}
-                                    className={cn(
-                                      "aspect-square rounded-2xl overflow-hidden border-4 transition-all relative group flex items-center justify-center",
-                                      profilePic === pic ? "border-white" : "border-transparent hover:border-white/20",
-                                      settingsArea === 'content' && settingsFocus === (4 + i) && "ring-4 ring-white scale-110 z-10 shadow-2xl settings-focused"
-                                    )}
-                                    style={{ backgroundColor: themeColor }}
-                                  >
-                                    {pic === 'THEME_COLOR' ? (
-                                      <User className="w-12 h-12 text-white" />
-                                    ) : (
-                                      <img 
-                                        src={pic} 
-                                        alt={`Profil ${i + 1}`} 
-                                        className="w-full h-full object-cover" 
-                                        referrerPolicy="no-referrer" 
-                                      />
-                                    )}
-                                    {profilePic === pic && (
-                                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                        <Check className="w-8 h-8 text-white" />
-                                      </div>
-                                    )}
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 4 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3 rounded-xl",
-                            settingsArea === 'sections' && settingsSection === 4 ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 4)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(4); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(4); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Ekran Seçimi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-4'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-4'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-2">
-                                {[
-                                  { id: 'pc', label: 'PC', icon: Monitor },
-                                  { id: 'tv', label: 'TV', icon: Tv },
-                                  { id: 'tablet', label: 'Tablet', icon: Tablet },
-                                  { id: 'phone', label: 'Telefon', icon: Smartphone }
-                                ].map((device, i) => (
-                                  <button
-                                    key={device.id}
-                                    onClick={() => {
-                                      setDeviceType(device.id as any);
-                                      localStorage.setItem('device_type', device.id);
-                                    }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(11 + i); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(4); setSettingsFocus(11 + i); }}
-                                    className={cn(
-                                      "p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-3",
-                                      deviceType === device.id 
-                                        ? "border-white bg-white/10" 
-                                        : "border-white/5 hover:border-white/20 bg-white/5",
-                                      settingsArea === 'content' && settingsFocus === (11 + i) && "ring-4 ring-white scale-105 z-10 settings-focused"
-                                    )}
-                                  >
-                                    <device.icon className="w-6 h-6" />
-                                    <span className="font-bold text-sm">{device.label}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 5 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3 rounded-xl",
-                            settingsArea === 'sections' && settingsSection === 5 ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 5)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(5); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(5); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Sistem
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-5'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-5'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-2">
-                                <button
-                                  onClick={() => {
-                                    localStorage.clear();
-                                    window.location.reload();
-                                  }}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(15); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(5); setSettingsFocus(15); }}
-                                  className={cn(
-                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 15 ? "bg-red-600 text-white scale-105 shadow-xl settings-focused" : "bg-red-500/10 text-red-500 hover:bg-red-500/20"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="p-3 bg-red-500/20 rounded-xl group-hover:scale-110 transition-transform">
-                                      <RefreshCw className="w-6 h-6" />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="text-lg">Tüm Verileri Sıfırla</div>
-                                      <div className="text-xs opacity-50 font-medium">Uygulamayı fabrika ayarlarına döndürür</div>
-                                    </div>
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 6 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3 rounded-xl",
-                            settingsArea === 'sections' && settingsSection === 6 ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 6)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(6); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(6); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            API Anahtarları
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-6'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-6'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="space-y-4 p-2">
-                                <div className="space-y-2 p-2">
-                                  <label className="text-[10px] text-zinc-500 uppercase font-bold px-2">TMDb API Key</label>
-                                  <button
-                                    id="tmdb-api-input-btn"
-                                    onClick={() => {
-                                      const input = document.getElementById('tmdb-api-input') as HTMLInputElement;
-                                      if (input) input.focus();
-                                    }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(16); }}
-                                    className={cn(
-                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono text-left relative",
-                                      settingsArea === 'content' && settingsFocus === 16 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                    )}
-                                  >
-                                    <span className="truncate block pr-8">{tmdbApiKey || 'TMDb API Key girin...'}</span>
-                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                                  </button>
-                                  <input
-                                    id="tmdb-api-input"
-                                    type="text"
-                                    value={tmdbApiKey}
-                                    onChange={(e) => setTmdbApiKey(e.target.value)}
-                                    className="sr-only"
-                                  />
-                                </div>
-                                <div className="space-y-2 p-2">
-                                  <label className="text-[10px] text-zinc-500 uppercase font-bold px-2">Gemini API Key</label>
-                                  <button
-                                    id="gemini-api-input-btn"
-                                    onClick={() => {
-                                      const input = document.getElementById('gemini-api-input') as HTMLInputElement;
-                                      if (input) input.focus();
-                                    }}
-                                    onPointerDown={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
-                                    onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(6); setSettingsFocus(17); }}
-                                    className={cn(
-                                      "w-full bg-white/5 border-2 rounded-2xl px-6 py-4 outline-none transition-all text-sm font-mono text-left relative",
-                                      settingsArea === 'content' && settingsFocus === 17 ? "border-white ring-4 ring-white/20 settings-focused" : "border-white/5"
-                                    )}
-                                  >
-                                    <span className="truncate block pr-8">{geminiApiKey || 'Gemini API Key girin...'}</span>
-                                    <Key className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-                                  </button>
-                                  <input
-                                    id="gemini-api-input"
-                                    type="text"
-                                    value={geminiApiKey}
-                                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                                    className="sr-only"
-                                  />
-                                </div>
-                                <p className="text-[10px] text-zinc-500 px-2 mt-2 italic">Film ve dizi afişleri, özetleri ve puanları için gereklidir.</p>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-
-                      <section className="space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === 7 ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center justify-between transition-all p-3 rounded-xl",
-                            settingsArea === 'sections' && settingsSection === 7 ? "bg-white/10 text-white ring-2 ring-white/20 settings-focused" : "hover:bg-white/5"
-                          )}
-                          onClick={() => toggleSection(2, 7)}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(7); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(7); }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <div className="w-1.5 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-                            Sinema Deneyimi
-                          </div>
-                          <ChevronDown className={cn("w-4 h-4 transition-transform duration-300", expandedSections['2-7'] ? "rotate-180" : "rotate-0")} />
-                        </button>
-                        <AnimatePresence>
-                          {expandedSections['2-7'] && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.3, ease: "easeInOut" }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-2 space-y-2">
-                                <button 
-                                  onClick={() => setCinemaModeEnabled(prev => !prev)}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(30); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(30); }}
-                                  className={cn(
-                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 30 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className={cn(
-                                      "p-3 rounded-xl transition-transform",
-                                      settingsArea === 'content' && settingsFocus === 30 ? "bg-black/10" : "bg-white/10"
-                                    )}>
-                                      <Tv className="w-6 h-6" />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="text-lg">Akıllı Sinema Modu</div>
-                                      <div className="text-xs opacity-50 font-medium">VOD içeriklerde sinematik arayüz</div>
-                                    </div>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full relative transition-colors",
-                                    cinemaModeEnabled ? "bg-emerald-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      cinemaModeEnabled ? "right-1" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-
-                                <button 
-                                  onClick={() => setTmdbEnabled(prev => !prev)}
-                                  onPointerDown={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(31); }}
-                                  onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(7); setSettingsFocus(31); }}
-                                  className={cn(
-                                    "w-full px-6 py-5 rounded-2xl transition-all font-bold flex items-center justify-between group",
-                                    settingsArea === 'content' && settingsFocus === 31 ? "bg-white text-black scale-105 shadow-xl settings-focused" : "bg-white/5 text-white hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className={cn(
-                                      "p-3 rounded-xl transition-transform",
-                                      settingsArea === 'content' && settingsFocus === 31 ? "bg-black/10" : "bg-white/10"
-                                    )}>
-                                      <Database className="w-6 h-6" />
-                                    </div>
-                                    <div className="text-left">
-                                      <div className="text-lg">TMDB Entegrasyonu</div>
-                                      <div className="text-xs opacity-50 font-medium">Otomatik film/dizi bilgileri</div>
-                                    </div>
-                                  </div>
-                                  <div className={cn(
-                                    "w-12 h-6 rounded-full relative transition-colors",
-                                    tmdbEnabled ? "bg-emerald-500" : "bg-zinc-700"
-                                  )}>
-                                    <div className={cn(
-                                      "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                      tmdbEnabled ? "right-1" : "left-1"
-                                    )} />
-                                  </div>
-                                </button>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </section>
-                    </motion.div>
-                  )}
-
-                  {activeSettingsTab === 3 && (
-                    <motion.div 
-                      key="tab-3"
-                      initial={{ opacity: 0, y: 10 }} 
-                      animate={{ opacity: 1, y: 0 }} 
-                      exit={{ opacity: 0, y: -10 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-4"
-                    >
-                      {/* Remote Control Section */}
-                      <section className="space-y-4">
-                        <div className="flex items-center gap-3 mb-2">
-                          <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
-                            <Smartphone className="w-5 h-5 text-white" />
-                          </div>
-                          <div>
-                            <h2 className="text-xl font-black text-white">Uzaktan Kumanda</h2>
-                            <p className="text-zinc-500 text-[10px]">Telefonunuzu kumanda olarak kullanın</p>
-                          </div>
-                        </div>
-
-                        <div className="grid gap-4">
-                          {/* Remote Control Toggle */}
-                          <button
-                            onClick={() => setRemoteControlEnabled(!remoteControlEnabled)}
-                            onPointerDown={() => { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(100); }}
-                            onMouseEnter={() => { setSettingsArea('content'); setSettingsSection(0); setSettingsFocus(100); }}
-                            className={cn(
-                              "w-full p-4 rounded-xl border-2 transition-all flex items-center justify-between gap-4",
-                              remoteControlEnabled ? "border-white bg-white/10" : "border-white/5 bg-white/5",
-                              settingsArea === 'content' && settingsFocus === 100 && "ring-4 ring-white scale-[1.01] z-10 settings-focused"
-                            )}
-                          >
-                            <div className="flex flex-col items-start gap-0.5">
-                              <span className="font-bold text-base text-white">Kumanda Modu</span>
-                              <span className="text-[10px] text-zinc-500">Dışarıdan kontrolü aktif eder</span>
-                            </div>
-                            <div className={cn(
-                              "w-12 h-6 rounded-full transition-all relative",
-                              remoteControlEnabled ? "bg-green-500" : "bg-zinc-700"
-                            )}>
-                              <div className={cn(
-                                "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
-                                remoteControlEnabled ? "left-7" : "left-1"
-                              )} />
-                            </div>
-                          </button>
-
-                          {/* Compact Pairing Info */}
-                          <div className="bg-zinc-900/50 border border-white/10 p-6 rounded-[32px] text-center space-y-6 relative overflow-hidden">
-                            <div 
-                              className="absolute -top-24 -left-24 w-64 h-64 rounded-full blur-[100px] opacity-10"
-                              style={{ backgroundColor: themeColor }}
-                            />
-                            
-                            <div className="relative z-10 space-y-6">
-                              <div className="space-y-1">
-                                <h2 className="text-xl font-black text-white uppercase tracking-tighter italic">BAĞLANTI KUR</h2>
-                                <p className="text-zinc-500 font-medium text-[10px]">QR kodu tarayın veya kodu girin.</p>
-                              </div>
-
-                              <div className="flex flex-col md:flex-row items-center justify-center gap-8">
-                                <div className="space-y-2">
-                                  <div className="p-4 bg-white rounded-[24px] shadow-2xl transform hover:scale-105 transition-transform duration-500">
-                                    <QRCodeCanvas 
-                                      value={`${appUrl.replace(/\/$/, '')}/?remote=${remoteRoomId}`}
-                                      size={130}
-                                      level="H"
-                                      includeMargin={false}
-                                    />
-                                  </div>
-                                  <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">TARATIN</div>
-                                </div>
-
-                                <div className="w-full max-w-[220px] space-y-4">
-                                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4">
-                                    <div className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">EŞLEŞME KODU</div>
-                                    <div className="text-2xl font-black text-white tracking-[0.2em]">{remoteRoomId}</div>
-                                  </div>
-                                  
-                                  <div className={cn(
-                                    "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-3",
-                                    isRemoteConnected ? "bg-green-500/20 text-green-500 border border-green-500/20" : "bg-orange-500/20 text-orange-500 border border-orange-500/20"
-                                  )}>
-                                    <div className={cn("w-1.5 h-1.5 rounded-full", isRemoteConnected ? "bg-green-500 animate-pulse" : "bg-orange-500")} />
-                                    {isRemoteConnected ? 'KUMANDA BAĞLANDI' : 'BAĞLANTI BEKLENİYOR...'}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="pt-4 border-t border-white/5">
-                                <p className="text-[9px] text-zinc-600 font-medium max-w-xs mx-auto">
-                                  Not: Aynı ağda olmalıdır. QR çalışmazsa manuel URL girin.
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </section>
-                    </motion.div>
-                  )}
-
-                  {activeSettingsTab === 4 && (
-                    <motion.div 
-                      key="tab-4"
-                      initial={{ opacity: 0, y: 10 }} 
-                      animate={{ opacity: 1, y: 0 }} 
-                      exit={{ opacity: 0, y: -10 }}
-                      className="space-y-8"
-                    >
-                      <div className="flex items-center gap-4 mb-6">
-                        <div className="p-4 bg-blue-500/20 rounded-3xl">
-                          <Sparkles className="w-8 h-8 text-blue-400" />
-                        </div>
-                        <div>
-                          <h2 className="text-2xl font-black text-white tracking-tighter uppercase italic">AI Gözcü</h2>
-                          <p className="text-zinc-500 text-xs font-medium">Yapay zeka senin için yayınları takip eder</p>
-                        </div>
-                      </div>
-
-                      <div className="grid gap-6">
-                        <div className="bg-white/5 border border-white/10 rounded-[32px] p-8 space-y-6">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-black text-white uppercase tracking-tight">Takip Listesi</h3>
-                            <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-[10px] font-black rounded-full uppercase">
-                              {watcherRules.length} AKTİF GÖREV
-                            </span>
-                          </div>
-
-                          {watcherRules.length === 0 ? (
-                            <div className="py-12 text-center space-y-4">
-                              <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto">
-                                <Bell className="w-8 h-8 text-zinc-700" />
-                              </div>
-                              <p className="text-zinc-500 text-sm font-medium max-w-[200px] mx-auto">
-                                Henüz bir takip görevi yok. AI asistanına "Maç başlayınca haber ver" diyerek başlayabilirsin.
-                              </p>
-                            </div>
-                          ) : (
-                            <div className="space-y-3">
-                              {watcherRules.map((rule) => (
-                                <div 
-                                  key={rule.id}
-                                  className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5 group hover:border-blue-500/30 transition-all"
-                                >
-                                  <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center">
-                                      <Search className="w-5 h-5 text-blue-400" />
-                                    </div>
-                                    <div>
-                                      <p className="text-white font-bold text-sm">{rule.keyword}</p>
-                                      <p className="text-zinc-500 text-[10px] uppercase font-black tracking-widest">
-                                        {rule.type === 'title' ? 'Başlık Takibi' : rule.type === 'category' ? 'Kategori Takibi' : 'Genel Takip'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button 
-                                      onClick={() => {
-                                        setWatcherRules(prev => prev.map(r => r.id === rule.id ? { ...r, isActive: !r.isActive } : r));
-                                      }}
-                                      className={cn(
-                                        "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all",
-                                        rule.isActive ? "bg-green-500/20 text-green-500" : "bg-zinc-800 text-zinc-500"
-                                      )}
-                                    >
-                                      {rule.isActive ? 'Aktif' : 'Pasif'}
-                                    </button>
-                                    <button 
-                                      onClick={() => {
-                                        setWatcherRules(prev => prev.filter(r => r.id !== rule.id));
-                                      }}
-                                      className="p-2 text-zinc-500 hover:text-red-500 transition-colors"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="bg-gradient-to-br from-blue-600/20 to-purple-600/20 border border-blue-500/20 rounded-[32px] p-8 flex items-center gap-6">
-                          <div className="flex-1 space-y-2">
-                            <h4 className="text-white font-black uppercase italic tracking-tight">Nasıl Kullanılır?</h4>
-                            <p className="text-zinc-400 text-xs leading-relaxed">
-                              AI Gözcü'ye yeni görevler vermek için arama çubuğuna doğal dilde isteklerini yazabilirsin. 
-                              Örneğin: <span className="text-blue-400 font-bold">"Bana aksiyon filmleri başlayınca haber ver"</span>
-                            </p>
-                          </div>
-                          <div className="w-24 h-24 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
-                            <Mic className="w-10 h-10 text-white/20" />
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                  </AnimatePresence>
-                      {/* Universal Back Button for Mobile/Touch/Remote */}
-                      <div className="pt-10 space-y-4">
-                        <button 
-                          data-section-active={settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) ? "true" : "false"}
-                          className={cn(
-                            "w-full text-left text-zinc-400 text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all p-2 rounded-lg",
-                            settingsArea === 'sections' && settingsSection === (activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0) && "bg-white/10 text-white settings-focused"
-                          )}
-                          onPointerDown={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
-                          onMouseEnter={() => { setSettingsArea('sections'); setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0); }}
-                          onClick={() => {
-                            if (settingsArea === 'content') setSettingsArea('sections');
-                            else setSettingsArea('tabs');
-                          }}
-                        >
-                          Ayarlardan Çık
-                        </button>
-                        <button 
-                          onClick={() => {
-                            if (settingsArea === 'content') setSettingsArea('sections');
-                            else setSettingsArea('tabs');
-                          }}
-                          onPointerDown={() => {
-                            setSettingsArea('content');
-                            setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0);
-                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0);
-                          }}
-                          onMouseEnter={() => { 
-                            setSettingsArea('content'); 
-                            setSettingsSection(activeSettingsTab === 0 ? 11 : activeSettingsTab === 1 ? 6 : activeSettingsTab === 2 ? 7 : 0);
-                            setSettingsFocus(activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0); 
-                          }}
-                          style={{ backgroundColor: (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0)) ? themeColor : undefined }}
-                          className={cn(
-                            "w-full py-5 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3",
-                            (settingsArea === 'content' && settingsFocus === (activeSettingsTab === 0 ? 17 : activeSettingsTab === 1 ? 14 : activeSettingsTab === 2 ? 16 : 0)) ? "text-white scale-105 shadow-2xl settings-focused" : "bg-white/5 text-zinc-400 hover:bg-white/10"
-                          )}
-                        >
-                          <ChevronLeft className="w-6 h-6" />
-                          Geri Dön
-                        </button>
-                      </div>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <SettingsModal 
+        isOpen={showSettings} 
+        onClose={() => {
+          setShowSettings(false);
+          setNavContext('browse');
+        }} 
+      />
 
       {/* Channel Detail View */}
       <AnimatePresence>
@@ -6732,6 +3797,7 @@ export default function App() {
 
       {/* Toast Container */}
       <ToastContainer toasts={toasts} />
+      {renderTickers()}
 
       {/* Exit Confirmation Dialog */}
       <AnimatePresence>
@@ -6921,6 +3987,7 @@ export default function App() {
           channels={channels}
           epgData={epgData}
           themeColor={themeColor}
+          keyMap={keyMap}
           onClose={() => setNavContext(currentChannel ? 'player' : 'browse')}
           onPlay={(channel) => {
             setCurrentChannel(channel);

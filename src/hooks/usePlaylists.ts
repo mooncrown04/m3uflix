@@ -3,8 +3,7 @@ import { Playlist, M3UChannel, EPGData } from '../types';
 import { parseM3U } from '../utils/m3uParser';
 import { fetchAndParseEPG } from '../utils/epgParser';
 import { getProxiedUrl } from '../utils/fetchUtils';
-
-const DEFAULT_M3U_URL = 'https://cutt.ly/GtYU85cD';
+import { DEFAULT_M3U_URL } from '../constants';
 
 export function usePlaylists(customProxyUrl?: string) {
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {

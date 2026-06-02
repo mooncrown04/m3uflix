@@ -11,14 +11,14 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-import { EPGData, EPGProgram } from '../utils/epgParser';
+import { EPGData, EPGProgram, UIMode } from '../types';
 
 interface ChannelDetailProps {
   channel: M3UChannel;
   onClose: () => void;
   onPlay: (channel: M3UChannel) => void;
   themeColor: string;
-  uiMode: 'modern' | 'classic' | 'minimalist' | 'bento';
+  uiMode: UIMode;
   multiSessions?: Record<string, string[]>;
   onToggleMultiChannel?: (channelId: string) => void;
   activeFocus?: number;
@@ -69,7 +69,7 @@ export const ChannelDetail: React.FC<ChannelDetailProps> = ({
     return saved ? JSON.parse(saved) : [];
   });
 
-  const isMulti = Object.values(multiSessions).some((ids: string[]) => ids.includes(channel.id));
+  const isMulti = Object.values(multiSessions || {}).some((ids: string[]) => Array.isArray(ids) && ids.includes(channel.id));
   const hasReminder = reminders.includes(channel.id);
   const isCinemaMode = cinemaModeEnabled && channel.type === 'video' && metadata?.tmdbId;
 

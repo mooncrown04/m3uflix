@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
 import shaka from 'shaka-player';
@@ -12,7 +12,7 @@ import { EPGData, EPGProgram } from '../utils/epgParser';
 import { fetchMediaMetadata, MediaMetadata } from '../services/metadataService';
 import { findRepairAlternatives } from '../utils/channelRepair';
 import { suggestRepairExplanation } from '../services/aiSearchService';
-import { ProgramSummary as ProgramSummaryType } from '../types';
+import { ProgramSummary as ProgramSummaryType, AmbilightMode, LoadingStyle, UIMode } from '../types';
 import { ProgramSummary } from './ProgramSummary';
 
 interface VideoPlayerProps {
@@ -34,10 +34,10 @@ interface VideoPlayerProps {
   onVolumeChange?: (volume: number) => void;
   onMuteToggle?: (isMuted: boolean) => void;
   playerEngine?: 'hls' | 'shaka';
-  ambilightMode?: 'none' | 'soft' | 'vibrant' | 'cinema';
+  ambilightMode?: AmbilightMode;
   isPlaying?: boolean;
   onPlayPauseToggle?: (isPlaying: boolean) => void;
-  loadingStyle?: 'classic' | 'minimal' | 'pulse' | 'bars' | 'orbit' | 'glitch';
+  loadingStyle?: LoadingStyle;
   geminiApiKey?: string;
   isLiveTranslationEnabled?: boolean;
   onToggleLiveTranslation?: () => void;
@@ -110,6 +110,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [focusIndex, setFocusIndex] = useState(0); // 0: Close, 1: Audio, 2: Subtitle, 3: Channels, 4: Sources, 5: Details, 10: Category Selector, 11+: Menu items
   const [currentTime, setCurrentTime] = useState(new Date());
   const [hasError, setHasError] = useState(false);
+  const [detailedError, setDetailedError] = useState<string | null>(null);
   const [repairSuggestions, setRepairSuggestions] = useState<M3UChannel[]>([]);
   const [repairExplanation, setRepairExplanation] = useState<string | null>(null);
   const [isRepairing, setIsRepairing] = useState(false);
@@ -510,29 +511,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
-  const currentProgram = useMemo(() => {
-    if (!epgData || !channel) return null;
-    
-    // Try matching by ID first (tvgId, tvgName, or channel attribute)
-    let epgId = channel.tvgId || channel.tvgName || channel.channel;
-    let programs = epgId ? epgData.programs[epgId] : null;
-
-    // Fallback: Try matching by channel name if no ID match
-    if (!programs) {
-      const foundId = Object.entries(epgData.channels).find(
-        ([_, name]) => (name as string).toLowerCase() === channel.name.toLowerCase()
-      )?.[0];
-      if (foundId) {
-        programs = epgData.programs[foundId];
-      }
-    }
-
-    if (!programs) return null;
-    return programs.find(p => currentTime >= p.start && currentTime <= p.stop) || null;
-  }, [epgData, channel, currentTime]);
-
-  const nextProgram = useMemo(() => {
-    if (!epgData || !channel) return null;
+  // Combined EPG computation to reduce redundant lookups
+  const { currentProgram, nextProgram, programProgress } = useMemo(() => {
+    if (!epgData || !channel) return { currentProgram: null, nextProgram: null, programProgress: 0 };
     
     // Try matching by ID first
     let epgId = channel.tvgId || channel.tvgName || channel.channel;
@@ -548,23 +529,28 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
 
-    if (!programs) return null;
-    return programs.find(p => p.start > currentTime) || null;
+    if (!programs) return { currentProgram: null, nextProgram: null, programProgress: 0 };
+    
+    const current = programs.find(p => currentTime >= p.start && currentTime <= p.stop) || null;
+    const next = programs.find(p => p.start > currentTime) || null;
+    
+    let progress = 0;
+    if (current) {
+      const total = current.stop.getTime() - current.start.getTime();
+      if (total > 0) {
+        const elapsed = currentTime.getTime() - current.start.getTime();
+        progress = Math.min(100, Math.max(0, (elapsed / total) * 100));
+      }
+    }
+
+    return { currentProgram: current, nextProgram: next, programProgress: progress };
   }, [epgData, channel, currentTime]);
 
-  const programProgress = useMemo(() => {
-    if (!currentProgram) return 0;
-    const total = currentProgram.stop.getTime() - currentProgram.start.getTime();
-    if (total <= 0) return 0;
-    const elapsed = currentTime.getTime() - currentProgram.start.getTime();
-    return Math.min(100, Math.max(0, (elapsed / total) * 100));
-  }, [currentProgram, currentTime]);
-
-  const formatTime = (date: Date) => {
+  const formatTime = useCallback((date: Date) => {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
+  }, []);
 
-  const formatDuration = (ms: number) => {
+  const formatDuration = useCallback((ms: number) => {
     const totalMinutes = Math.floor(Math.max(0, ms) / (1000 * 60));
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
@@ -572,9 +558,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return `${hours}sa ${minutes}dk`;
     }
     return `${minutes}dk`;
-  };
+  }, []);
 
-  const formatPlaybackTime = (seconds: number) => {
+  const formatPlaybackTime = useCallback((seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
@@ -582,7 +568,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
     return `${m}:${s.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
   useEffect(() => {
     if (ambilightMode === 'none' || !videoRef.current || !canvasRef.current) return;
@@ -713,6 +699,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         hls.on(Hls.Events.ERROR, (_, data) => {
           if (data.fatal) {
+            setDetailedError(data.details || 'HLS ağ hatası oluştu');
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 console.log('HLS Network error, trying to recover...');
@@ -836,9 +823,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [currentUrl, playerEngine]);
 
-  const handleVideoError = async () => {
-    console.error('Video error occurred for URL:', currentUrl);
+  const handleVideoError = async (e?: any) => {
+    console.error('Video error occurred for URL:', currentUrl, e);
     const urls = channel?.urls || [url];
+    
+    // Attempt to extract more info if available
+    const techError = e?.target?.error;
+    if (techError) {
+      const code = techError.code;
+      if (code === 1) setDetailedError("İşlem kullanıcı tarafından durduruldu.");
+      else if (code === 2) setDetailedError("Ağ hatası: Bağlantı kesildi.");
+      else if (code === 3) setDetailedError("Kod çözme hatası: Video formatı desteklenmiyor.");
+      else if (code === 4) setDetailedError("Kaynak desteklenmiyor veya sunucuya erişilemiyor.");
+    }
     
     // 1. Try next URL if available
     if (currentUrlIndex < urls.length - 1) {
@@ -1438,9 +1435,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 <X className="w-10 h-10 text-red-500" />
               </div>
               <h3 className="text-white font-black text-2xl mb-2 tracking-tighter uppercase italic">YAYIN HATASI</h3>
-              <p className="text-zinc-400 text-sm max-w-md font-medium leading-relaxed">
+              <p className="text-zinc-400 text-sm max-w-md font-medium leading-relaxed mb-4">
                 Bu kanal şu anda oynatılamıyor. Lütfen başka bir kaynak deneyin veya daha sonra tekrar kontrol edin.
               </p>
+              {detailedError && (
+                <div className="bg-red-500/10 border border-red-500/20 px-4 py-2 rounded-xl mb-6">
+                  <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-1">Hata Detayı</p>
+                  <p className="text-zinc-300 text-[11px] italic leading-tight">{detailedError}</p>
+                </div>
+              )}
 
               {/* AI Repair Section */}
               <AnimatePresence>

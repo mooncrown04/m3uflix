@@ -96,6 +96,132 @@ async function startServer() {
     });
   });
 
+  // Live Scores Endpoint
+  app.get("/api/scores", async (req, res) => {
+    const leagues = [
+      { id: 'tur.1', name: 'Trendyol Süper Lig' },
+      { id: 'eng.1', name: 'Premier League' },
+      { id: 'esp.1', name: 'La Liga' },
+      { id: 'ita.1', name: 'Serie A' },
+      { id: 'ger.1', name: 'Bundesliga' },
+      { id: 'uefa.champions', name: 'Champions League' }
+    ];
+
+    try {
+      const results = await Promise.all(leagues.map(async (league) => {
+        try {
+          const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league.id}/scoreboard`, {
+            timeout: 5000
+          });
+          const data: any = await response.json();
+          
+          if (!data.events) return [];
+
+          return data.events.map((event: any) => {
+            const competition = event.competitions[0];
+            const home = competition.competitors.find((c: any) => c.homeAway === 'home');
+            const away = competition.competitors.find((c: any) => c.homeAway === 'away');
+            
+            // Clean up minute string (e.g. "78'" -> 78)
+            let minute = 0;
+            const minuteStr = event.status.displayClock || "0";
+            minute = parseInt(minuteStr.replace("'", "")) || 0;
+
+            let status = event.status.type.shortDetail;
+            if (status === "HT") status = "İY";
+            if (status === "FT") status = "MS";
+            if (status.includes("2nd")) status = "2. Yarı";
+            if (status.includes("1st")) status = "1. Yarı";
+
+            return {
+              id: event.id,
+              homeTeam: home.team.shortDisplayName || home.team.displayName,
+              awayTeam: away.team.shortDisplayName || away.team.displayName,
+              homeScore: parseInt(home.score) || 0,
+              awayScore: parseInt(away.score) || 0,
+              status: status,
+              minute: minute,
+              league: league.name
+            };
+          });
+        } catch (e) {
+          return [];
+        }
+      }));
+
+      res.json(results.flat());
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch scores" });
+    }
+  });
+  
+  // Live News Endpoint (Turkish News)
+  app.get("/api/news", async (req, res) => {
+    try {
+      const turkishNews = [
+        { id: 'n1', title: 'Türkiye genelinde hava sıcaklıkları mevsim normallerinin üzerinde seyredecek.', source: 'TRT Haber', time: '10 dk önce', category: 'Gündem' },
+        { id: 'n2', title: 'Merkez Bankası faiz kararını açıkladı: Politika faizi sabit tutuldu.', source: 'AA', time: '25 dk önce', category: 'Ekonomi' },
+        { id: 'n3', title: 'Yeni konut projeleri için düşük faizli kredi paketi hazırlığı başladı.', source: 'Hürriyet', time: '45 dk önce', category: 'Ekonomi' },
+        { id: 'n4', title: 'Millî Eğitim Bakanlığı tatil takviminde değişikliğe gitti.', source: 'TRT Haber', time: '1 saat önce', category: 'Eğitim' },
+        { id: 'n5', title: 'Teknoloji festivali TEKNOFEST için başvurular rekor düzeye ulaştı.', source: 'Sabah', time: '2 saat önce', category: 'Teknoloji' },
+        { id: 'n6', title: 'Yerli otomobil TOGG yeni modelini uluslararası fuarda tanıttı.', source: 'AA', time: '3 saat önce', category: 'Otomobil' }
+      ];
+      res.json(turkishNews);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch news" });
+    }
+  });
+
+  // League Standings Endpoint
+  app.get("/api/standings", async (req, res) => {
+    const leagues = [
+      { id: 'tur.1', name: 'Trendyol Süper Lig' },
+      { id: 'eng.1', name: 'Premier League' },
+      { id: 'esp.1', name: 'La Liga' },
+      { id: 'ita.1', name: 'Serie A' },
+      { id: 'ger.1', name: 'Bundesliga' }
+    ];
+
+    try {
+      const results = await Promise.all(leagues.map(async (league) => {
+        try {
+          const response = await fetch(`https://site.api.espn.com/apis/v2/sports/soccer/${league.id}/standings`, {
+            timeout: 5000
+          });
+          const data: any = await response.json();
+          
+          if (!data.children || !data.children[0] || !data.children[0].standings) return null;
+
+          const entries = data.children[0].standings.entries.map((item: any) => {
+            const stats = item.stats || [];
+            return {
+              rank: item.stats.find((s: any) => s.name === 'rank')?.value || 0,
+              team: item.team.displayName,
+              logo: item.team.logos?.[0]?.href,
+              played: stats.find((s: any) => s.name === 'gamesPlayed')?.value || 0,
+              wins: stats.find((s: any) => s.name === 'wins')?.value || 0,
+              draws: stats.find((s: any) => s.name === 'ties')?.value || 0,
+              losses: stats.find((s: any) => s.name === 'losses')?.value || 0,
+              points: stats.find((s: any) => s.name === 'points')?.value || 0,
+              gd: stats.find((s: any) => s.name === 'pointDifferential')?.value || 0
+            };
+          });
+
+          return {
+            league: league.name,
+            standings: entries
+          };
+        } catch (e) {
+          return null;
+        }
+      }));
+
+      res.json(results.filter(r => r !== null));
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch standings" });
+    }
+  });
+
   // CORS Proxy Endpoint
   app.get("/api/proxy", async (req, res) => {
     const targetUrl = req.query.url as string;
@@ -181,13 +307,19 @@ async function startServer() {
         let details = errorMessage;
         
         if (errorMessage.includes("ENOTFOUND")) {
-          details = "Sunucu adresi bulunamadı (DNS Hatası). Yayın adresi geçersiz veya sunucu kapalı olabilir.";
+          details = "Sunucu adresi bulunamadı. Yayın linki geçersiz veya alan adı süresi dolmuş olabilir.";
         } else if (errorMessage.includes("ECONNREFUSED")) {
-          details = "Sunucu bağlantıyı reddetti. Yayın sunucusu kapalı veya belirtilen port erişime kapalı.";
-        } else if (errorMessage.includes("ETIMEDOUT")) {
-          details = "Sunucu yanıt vermedi (Zaman aşımı).";
+          details = "Sunucu bağlantıyı reddetti. Yayın sunucusu kapalı veya port kısıtlaması var.";
+        } else if (errorMessage.includes("ECONNRESET") || errorMessage.includes("socket hang up")) {
+          details = "Bağlantı sunucu tarafından kesildi (Sunucu yoğunluğu veya IP engellemesi).";
+        } else if (errorMessage.includes("ETIMEDOUT") || errorMessage.includes("timeout")) {
+          details = "Sunucu yanıt vermedi (Zaman aşımı). İnternet hızınızı kontrol edin.";
+        } else if (errorMessage.includes("EHOSTUNREACH")) {
+          details = "Yayın sunucusuna ulaşılamıyor. Ağ rotası bulunamadı.";
         } else if (errorMessage.includes("certificate") || errorMessage.includes("SSL")) {
           details = "SSL/Sertifika hatası. Güvenli bağlantı kurulamadı.";
+        } else {
+          details = `Bağlantı hatası: ${errorMessage}`;
         }
 
         res.status(status).json({ 

@@ -1,7 +1,7 @@
 import { M3UChannel } from './utils/m3uParser';
 export type { M3UChannel };
-import { EPGData } from './utils/epgParser';
-export type { EPGData };
+import { EPGData, EPGProgram } from './utils/epgParser';
+export type { EPGData, EPGProgram };
 
 export interface Playlist {
   id: string;
@@ -9,14 +9,24 @@ export interface Playlist {
   url: string;
   epgUrl?: string;
   channels?: M3UChannel[];
+  channelCount?: number;
+  lastUpdated?: number;
 }
 
-export type UIMode = 'modern' | 'classic' | 'minimalist' | 'bento';
-export type LayoutMode = 'scroll' | 'fixed-focus';
+export type UIMode = 'modern' | 'classic' | 'minimalist' | 'glass' | 'bento';
+export interface BentoWidget {
+  id: string;
+  type: 'profile' | 'weather' | 'recent' | 'favorites' | 'stats' | 'match-center';
+  size: 'small' | 'medium' | 'large'; // small: 1x1, medium: 2x1 or 1x2, large: 2x2
+}
+
+export type LayoutMode = 'scroll' | 'grid' | 'bento' | 'fixed-focus';
 export type SortBy = 'default' | 'name' | 'number' | 'added';
 export type LogoStyle = 'default' | 'mooncrown' | 'mooncrown-gold' | 'mooncrown-silver' | 'mooncrown-neon' | 'mooncrown-glass' | 'mooncrown-fire' | 'minimal' | 'neon' | 'retro' | 'glitch';
-export type Top10Style = 'original' | 'filled' | 'neon' | 'theme' | 'outline-theme';
+export type Top10Style = 'original' | 'filled' | 'neon' | 'theme-original' | 'theme-filled' | 'theme-neon' | 'glass';
 export type FocusEffect = 'default' | 'glow' | 'pulse' | 'border' | 'scale';
+export type AmbilightMode = 'none' | 'simple' | 'advanced' | 'soft' | 'vibrant' | 'cinema';
+export type LoadingStyle = 'default' | 'glow' | 'minimal' | 'fire' | 'classic' | 'pulse' | 'glitch' | 'bars' | 'orbit';
 
 export type NavContext = 'browse' | 'player' | 'channel-menu' | 'settings' | 'channel-detail' | 'exit-confirm' | 'advanced-epg' | 'voice-search' | 'pin-lock' | 'quick-settings' | 'epg-timeline' | 'number-input' | 'remote-pairing' | 'actor-detail' | 'quick-switch' | 'sports-dashboard' | 'translation-settings';
 
@@ -25,6 +35,42 @@ export interface Toast {
   message: string;
   type: 'error' | 'success' | 'info';
 }
+
+export interface KeyMap {
+  up: string;
+  down: string;
+  left: string;
+  right: string;
+  enter: string;
+  back: string;
+  settings: string;
+  guide: string;
+  voice: string;
+  miniPlayer: string;
+  playPause: string;
+  volumeUp: string;
+  volumeDown: string;
+  channelUp: string;
+  channelDown: string;
+}
+
+export const DEFAULT_KEY_MAP: KeyMap = {
+  up: 'ArrowUp',
+  down: 'ArrowDown',
+  left: 'ArrowLeft',
+  right: 'ArrowRight',
+  enter: 'Enter',
+  back: 'Backspace',
+  settings: 's',
+  guide: 'g',
+  voice: 'v',
+  miniPlayer: 'm',
+  playPause: 'o',
+  volumeUp: 'VolumeUp',
+  volumeDown: 'VolumeDown',
+  channelUp: 'ChannelUp',
+  channelDown: 'ChannelDown',
+};
 
 export interface ChannelRowProps {
   title: string;
@@ -128,6 +174,30 @@ export interface LiveMatch {
   minute: number;
   league: string;
   channelId?: string; // If we can match it to a channel
+}
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  source: string;
+  time: string;
+  url?: string;
+  category?: string;
+}
+
+export interface LeagueStanding {
+  league: string;
+  standings: {
+    rank: number;
+    team: string;
+    logo?: string;
+    played: number;
+    wins: number;
+    draws: number;
+    losses: number;
+    points: number;
+    gd: number;
+  }[];
 }
 
 export interface LiveSubtitle {
