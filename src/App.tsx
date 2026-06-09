@@ -116,7 +116,8 @@ export default function App() {
     channelSurfEnabled, setChannelSurfEnabled,
     loadingStyle, setLoadingStyle,
     mixColor1, setMixColor1,
-    mixColor2, setMixColor2
+    mixColor2, setMixColor2,
+    customRssUrls
   } = useSettingsStore();
 
   const {
@@ -205,9 +206,10 @@ export default function App() {
 
   const [savedUrl, setSavedUrl] = useState<string | null>(() => {
     const saved = localStorage.getItem('m3u_url');
-    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
     if (saved) return saved;
+    const isDeleted = localStorage.getItem('m3u_deleted') === 'true';
     if (isDeleted) return null;
+    localStorage.setItem('m3u_url', DEFAULT_M3U_URL);
     return DEFAULT_M3U_URL;
   });
 
@@ -1117,7 +1119,7 @@ export default function App() {
 
     const fetchScores = async () => {
       try {
-        const response = await fetch(`${appUrl}/api/scores`);
+        const response = await fetch('/api/scores');
         if (!response.ok) throw new Error('API error');
         const data: LiveMatch[] = await response.json();
         
@@ -1160,7 +1162,10 @@ export default function App() {
 
     const fetchNews = async () => {
       try {
-        const response = await fetch(`${appUrl}/api/news`);
+        const queryParams = customRssUrls && customRssUrls.length > 0 
+          ? `?urls=${encodeURIComponent(customRssUrls.join(','))}`
+          : '';
+        const response = await fetch(`/api/news${queryParams}`);
         if (!response.ok) throw new Error('API error');
         const data: NewsItem[] = await response.json();
         setLiveNews(data);
@@ -1176,7 +1181,7 @@ export default function App() {
       fetchNews();
     }, 60000); // Update every minute
     return () => clearInterval(interval);
-  }, [showSportsDashboard, sportsTickerEnabled, newsTickerEnabled, appUrl, channels]);
+  }, [showSportsDashboard, sportsTickerEnabled, newsTickerEnabled, appUrl, channels, customRssUrls]);
 
   useEffect(() => {
     if (!isLiveTranslationEnabled || !currentChannel) {
@@ -2659,8 +2664,8 @@ export default function App() {
     return <MobileRemote roomId={remoteRoomIdFromUrl} appUrl={appUrl} />;
   }
 
-  // If mobile user lands without a code, show a pairing screen instead of the full TV app
-  if ((isMobileDevice || isRemoteMode) && !localStorage.getItem('m3u_url')) {
+  // Only show pairing screen if explicitly in remote control mode and no playlist URL is loaded
+  if (isRemoteMode && !localStorage.getItem('m3u_url')) {
     return (
       <div className="fixed inset-0 bg-[#0a0a0a] text-white flex flex-col items-center justify-center p-8 text-center">
         <div className="w-20 h-20 bg-orange-500 rounded-3xl flex items-center justify-center shadow-2xl shadow-orange-500/20 mb-8">

@@ -57,7 +57,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     mixColor1, setMixColor1,
     mixColor2, setMixColor2,
     keyMap, setKeyMap,
-    themeColor
+    themeColor,
+    buildMethod, setBuildMethod,
+    customRssUrls, setCustomRssUrls
   } = useSettingsStore();
 
   const {
@@ -170,6 +172,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [newPlaylistUrl, setNewPlaylistUrl] = useState('');
+  const [newRssUrl, setNewRssUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
 
@@ -224,27 +227,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           e.preventDefault();
           if (settingsArea === 'tabs') {
             if (sidebarFocus <= 5) {
-              if (sidebarFocus === 3) {
-                setSettingsArea('content');
-                setSettingsSection(0);
-                setSettingsFocus(100);
+              setSettingsArea('content');
+              setSettingsSection(0);
+              if (sidebarFocus === 0) {
+                // Görünüm (Appearance)
+                setExpandedSections((prev: any) => ({ ...prev, ['0-0']: true }));
+                setSettingsFocus(0); // first color item
+              } else if (sidebarFocus === 1) {
+                // Liste (Playlist)
+                setSettingsFocus(100); // Playlist url input
+              } else if (sidebarFocus === 2) {
+                // Genel (General)
+                setSettingsFocus(60); // Web PWA button
+              } else if (sidebarFocus === 3) {
+                // Kumanda (Remote)
+                setSettingsFocus(200); // Disconnect button
+              } else if (sidebarFocus === 4) {
+                // AI Gözcü (AI Guard)
+                setSettingsFocus(0); // Akıllı VOD button
               } else if (sidebarFocus === 5) {
-                setSettingsArea('content');
-                setSettingsSection(0);
-                setSettingsFocus(300);
-              } else {
-                setSettingsArea('sections');
-                setSettingsSection(0);
-                const key = `${activeSettingsTab}-0`;
-                if (!expandedSections[key]) {
-                  setExpandedSections((prev: any) => ({ ...prev, [key]: true }));
-                }
+                // Tuş Atamaları (Key Bindings)
+                setSettingsFocus(300); // First key binding
               }
             } else if (sidebarFocus === 6) {
               onClose();
             }
           } else if (settingsArea === 'sections') {
-            toggleSection(`${activeSettingsTab}-${settingsSection}`);
+            const sectionPart = `${activeSettingsTab}-${settingsSection}`;
+            if (!expandedSections[sectionPart]) {
+              toggleSection(sectionPart);
+            }
+            setSettingsArea('content');
+            if (activeSettingsTab === 0) {
+              if (settingsSection === 0) setSettingsFocus(0);
+              else if (settingsSection === 1) setSettingsFocus(20);
+              else if (settingsSection === 2) setSettingsFocus(13);
+              else if (settingsSection === 3) setSettingsFocus(30);
+              else if (settingsSection === 4) setSettingsFocus(40);
+              else if (settingsSection === 5) setSettingsFocus(50);
+              else if (settingsSection === 6) setSettingsFocus(60);
+              else setSettingsFocus(settingsSection * 10);
+            } else if (activeSettingsTab === 1) {
+              setSettingsFocus(100);
+            } else if (activeSettingsTab === 2) {
+              setSettingsFocus(60);
+            } else {
+              setSettingsFocus(0);
+            }
           } else if (settingsArea === 'content') {
             const focusedElement = document.querySelector('.settings-focused') as HTMLElement;
             if (focusedElement) {
@@ -262,7 +291,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         case 'GoBack':
           e.preventDefault();
           if (settingsArea === 'content') {
-            setSettingsArea('sections');
+            if (activeSettingsTab === 0) {
+              setSettingsArea('sections');
+            } else {
+              setSettingsArea('tabs');
+            }
           } else if (settingsArea === 'sections') {
             setSettingsArea('tabs');
           } else {
@@ -282,15 +315,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               setActiveSettingsTab(nextFocus);
             } else {
               if (sidebarFocus < 6) {
-                if (activeSettingsTab === 0 || activeSettingsTab === 1) {
-                  setSettingsArea('sections');
-                  setSettingsSection(0);
-                } else {
-                  setSettingsArea('content');
-                  if (activeSettingsTab === 2) setSettingsFocus(0);
-                  if (activeSettingsTab === 3) setSettingsFocus(200);
-                  if (activeSettingsTab === 4) setSettingsFocus(0);
-                  if (activeSettingsTab === 5) setSettingsFocus(300);
+                setSettingsArea('content');
+                setSettingsSection(0);
+                if (sidebarFocus === 0) {
+                  setExpandedSections((prev: any) => ({ ...prev, ['0-0']: true }));
+                  setSettingsFocus(0);
+                } else if (sidebarFocus === 1) {
+                  setSettingsFocus(100);
+                } else if (sidebarFocus === 2) {
+                  setSettingsFocus(60);
+                } else if (sidebarFocus === 3) {
+                  setSettingsFocus(200);
+                } else if (sidebarFocus === 4) {
+                  setSettingsFocus(0);
+                } else if (sidebarFocus === 5) {
+                  setSettingsFocus(300);
                 }
               }
             }
@@ -308,9 +347,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 else if (settingsSection === 4) setSettingsFocus(40);
                 else if (settingsSection === 5) setSettingsFocus(50);
                 else if (settingsSection === 6) setSettingsFocus(60);
-              } else if (activeSettingsTab === 1) {
-                if (settingsSection === 0) setSettingsFocus(0);
-                else if (settingsSection === 5) setSettingsFocus(20);
               }
             }
           } else if (settingsArea === 'content') {
@@ -322,6 +358,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               else if (settingsSection === 4 && settingsFocus < 41) setSettingsFocus((prev: number) => prev + 1);
               else if (settingsSection === 5 && settingsFocus < 53) setSettingsFocus((prev: number) => prev + 1);
               else if (settingsSection === 6 && settingsFocus < 66) setSettingsFocus((prev: number) => prev + 1);
+            } else if (activeSettingsTab === 1) {
+              if (settingsFocus === 100) setSettingsFocus(101);
+            } else if (activeSettingsTab === 2) {
+              if (settingsFocus === 60) setSettingsFocus(61);
+              else if (settingsFocus === 70) setSettingsFocus(71);
             } else if (activeSettingsTab === 5) {
               if (settingsFocus < 300 + Object.keys(keyMap).length - 1) setSettingsFocus((prev: number) => prev + 1);
             }
@@ -337,7 +378,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               setActiveSettingsTab(nextFocus);
             }
           } else if (settingsArea === 'sections') {
-            setSettingsArea('tabs');
+            // Do not exit to tabs via ArrowLeft. Must use Back/Backspace.
           } else if (settingsArea === 'content') {
             // Internal content navigation
             if (activeSettingsTab === 0) {
@@ -348,14 +389,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               else if (settingsSection === 4 && settingsFocus > 40) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 5 && settingsFocus > 50) setSettingsFocus((prev: number) => prev - 1);
               else if (settingsSection === 6 && settingsFocus > 60) setSettingsFocus((prev: number) => prev - 1);
-              else if (activeSettingsTab === 0 || activeSettingsTab === 1) setSettingsArea('sections');
-              else setSettingsArea('tabs');
+            } else if (activeSettingsTab === 1) {
+              if (settingsFocus === 101) setSettingsFocus(100);
+            } else if (activeSettingsTab === 2) {
+              if (settingsFocus === 61) setSettingsFocus(60);
+              else if (settingsFocus === 71) setSettingsFocus(70);
             } else if (activeSettingsTab === 5) {
               if (settingsFocus > 300) setSettingsFocus((prev: number) => prev - 1);
-              else setSettingsArea('tabs');
-            } else {
-              if (activeSettingsTab === 0 || activeSettingsTab === 1) setSettingsArea('sections');
-              else setSettingsArea('tabs');
             }
           }
           break;
@@ -384,20 +424,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }
             }
           } else if (settingsArea === 'sections') {
-            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : 1;
+            const maxSections = activeSettingsTab === 0 ? 12 : 1;
             setSettingsSection((prev: number) => (prev + 1) % maxSections);
           } else if (settingsArea === 'content') {
-            if (activeSettingsTab === 1 && settingsSection === 5) {
-              if (settingsFocus === 20 || settingsFocus === 21) setSettingsFocus(30);
-              else if (settingsFocus < 30 + (playlists.length - 1) * 2) setSettingsFocus((prev: number) => prev + 2);
-            } else if (activeSettingsTab === 0 && settingsSection === 0) {
+            if (activeSettingsTab === 0 && settingsSection === 0) {
               if (settingsFocus < 6) setSettingsFocus((prev: number) => prev + 6);
             } else if (activeSettingsTab === 0 && settingsSection === 1) {
               if (settingsFocus < 22) setSettingsFocus((prev: number) => prev + 2);
-            } else if (activeSettingsTab === 2 && settingsSection === 0) {
-              if (settingsFocus === 0) setSettingsFocus(50);
+            } else if (activeSettingsTab === 0 && settingsSection === 2) {
+              if (settingsFocus < 22) setSettingsFocus((prev: number) => prev + 2);
+            } else if (activeSettingsTab === 1) {
+              if (settingsFocus === 100 || settingsFocus === 101) {
+                if (playlists.length > 0) {
+                  setSettingsFocus(110);
+                } else {
+                  setSettingsFocus(120);
+                }
+              } else if (settingsFocus >= 110 && settingsFocus < 110 + playlists.length) {
+                const currentIdx = settingsFocus - 110;
+                if (currentIdx < playlists.length - 1) {
+                  setSettingsFocus(settingsFocus + 1);
+                } else {
+                  setSettingsFocus(120);
+                }
+              } else if (settingsFocus === 120) {
+                setSettingsFocus(100);
+              }
+            } else if (activeSettingsTab === 2) {
+              if (settingsFocus === 60 || settingsFocus === 61) {
+                setSettingsFocus(70);
+              } else if (settingsFocus === 70 || settingsFocus === 71) {
+                setSettingsFocus(75);
+              } else if (settingsFocus === 75) {
+                setSettingsFocus(0);
+              } else if (settingsFocus === 0) {
+                const installBtnEl = document.querySelector('[onMouseEnter*="setSettingsFocus(50)"]');
+                if (installBtnEl) {
+                  setSettingsFocus(50);
+                } else {
+                  setSettingsFocus(60);
+                }
+              } else if (settingsFocus === 50) {
+                setSettingsFocus(60);
+              }
             } else if (activeSettingsTab === 4) {
-              if (settingsFocus < 4) setSettingsFocus((prev: number) => prev + 1);
+              if (settingsFocus < 6) setSettingsFocus((prev: number) => prev + 1);
             } else if (activeSettingsTab === 5) {
               if (settingsFocus < 300 + Object.keys(keyMap).length - 2) setSettingsFocus((prev: number) => prev + 2);
               else if (settingsFocus < 350) setSettingsFocus(350);
@@ -419,18 +490,49 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }
             }
           } else if (settingsArea === 'sections') {
-            const maxSections = activeSettingsTab === 0 ? 12 : activeSettingsTab === 1 ? 7 : 1;
+            const maxSections = activeSettingsTab === 0 ? 12 : 1;
             setSettingsSection((prev: number) => (prev - 1 + maxSections) % maxSections);
           } else if (settingsArea === 'content') {
-            if (activeSettingsTab === 1 && settingsSection === 5) {
-              if (settingsFocus >= 32) setSettingsFocus((prev: number) => prev - 2);
-              else if (settingsFocus === 30 || settingsFocus === 31) setSettingsFocus(20);
-            } else if (activeSettingsTab === 0 && settingsSection === 0) {
+            if (activeSettingsTab === 0 && settingsSection === 0) {
               if (settingsFocus >= 6) setSettingsFocus((prev: number) => prev - 6);
             } else if (activeSettingsTab === 0 && settingsSection === 1) {
               if (settingsFocus >= 22) setSettingsFocus((prev: number) => prev - 2);
-            } else if (activeSettingsTab === 2 && settingsSection === 0) {
-              if (settingsFocus === 50) setSettingsFocus(0);
+            } else if (activeSettingsTab === 0 && settingsSection === 2) {
+              if (settingsFocus >= 15) setSettingsFocus((prev: number) => prev - 2);
+            } else if (activeSettingsTab === 1) {
+              if (settingsFocus === 120) {
+                if (playlists.length > 0) {
+                  setSettingsFocus(110 + playlists.length - 1);
+                } else {
+                  setSettingsFocus(100);
+                }
+              } else if (settingsFocus >= 110 && settingsFocus < 110 + playlists.length) {
+                const currentIdx = settingsFocus - 110;
+                if (currentIdx > 0) {
+                  setSettingsFocus(settingsFocus - 1);
+                } else {
+                  setSettingsFocus(100);
+                }
+              } else if (settingsFocus === 100 || settingsFocus === 101) {
+                setSettingsFocus(120);
+              }
+            } else if (activeSettingsTab === 2) {
+              if (settingsFocus === 50) {
+                setSettingsFocus(0);
+              } else if (settingsFocus === 0) {
+                setSettingsFocus(75);
+              } else if (settingsFocus === 75) {
+                setSettingsFocus(70);
+              } else if (settingsFocus === 70 || settingsFocus === 71) {
+                setSettingsFocus(60);
+              } else if (settingsFocus === 60 || settingsFocus === 61) {
+                const installBtnEl = document.querySelector('[onMouseEnter*="setSettingsFocus(50)"]');
+                if (installBtnEl) {
+                  setSettingsFocus(50);
+                } else {
+                  setSettingsFocus(0);
+                }
+              }
             } else if (activeSettingsTab === 4) {
               if (settingsFocus > 0) setSettingsFocus((prev: number) => prev - 1);
             } else if (activeSettingsTab === 5) {
@@ -1573,6 +1675,209 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   exit={{ opacity: 0, y: -10 }}
                   className="space-y-4 pb-10"
                 >
+                  {/* Derleme Altyapısı / Build Settings */}
+                  <section className="space-y-2">
+                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Derleme & Altyapı Ayarları</h3>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-4">
+                      <div className="flex flex-col gap-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Settings className="w-3 h-3 text-zinc-400" />
+                          HEDEF SİSTEM (BUILD TARGET)
+                        </label>
+                        <div className="flex bg-black/40 p-1 rounded-xl">
+                          <button
+                            onClick={() => {
+                              setBuildMethod('web');
+                              showToast('Derleme hedefi Web (PWA) olarak ayarlandı.', 'info');
+                            }}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(60);
+                            }}
+                            className={cn(
+                              "flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer",
+                              buildMethod === 'web' 
+                                ? "bg-white text-black font-black" 
+                                : "text-zinc-500 hover:text-white",
+                              settingsArea === 'content' && settingsFocus === 60 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                            )}
+                          >
+                            Web (PWA)
+                          </button>
+                          <button
+                            onClick={() => {
+                              setBuildMethod('android');
+                              showToast('Derleme hedefi Android (Capacitor APK) olarak ayarlandı.', 'success');
+                            }}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(61);
+                            }}
+                            className={cn(
+                              "flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5",
+                              buildMethod === 'android' 
+                                ? "bg-green-500 text-white font-black shadow-lg shadow-green-500/20" 
+                                : "text-zinc-500 hover:text-white",
+                              settingsArea === 'content' && settingsFocus === 61 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                            )}
+                          >
+                            <div className="w-1.5 h-1.5 bg-white rounded-full animate-ping" />
+                            Android (APK)
+                          </button>
+                        </div>
+                      </div>
+
+                      {buildMethod === 'android' ? (
+                        <div className="bg-green-500/5 border border-green-500/20 p-3.5 rounded-xl space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Check className="w-4 h-4 text-green-400" />
+                            <span className="text-[10px] font-black text-green-400 uppercase tracking-widest">Android Derlemesi Aktif</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 leading-relaxed font-semibold">
+                            Uygulamanın build altyapısı ve tüm paket tanımları <strong className="text-white">Android (Capacitor/Chorege)</strong> uyumluluk standartlarına yükseltildi. Capacitor native kütüphaneleri etkinleştirilerek CORS sınırları kaldırıldı.
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 text-[9px]">
+                            <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                              <span className="text-zinc-500 block uppercase tracking-wider font-bold">YAPI ALTYAPISI</span>
+                              <span className="text-white font-mono font-bold block mt-0.5">Capacitor Android</span>
+                            </div>
+                            <div className="bg-white/5 p-2 rounded-lg border border-white/5">
+                              <span className="text-zinc-500 block uppercase tracking-wider font-bold">API KÖPRÜSÜ</span>
+                              <span className="text-white font-mono font-bold block mt-0.5">CapacitorHttp v6</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-blue-500/5 border border-blue-500/20 p-3.5 rounded-xl space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Info className="w-4 h-4 text-blue-400" />
+                            <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Standart Web Sürümü</span>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 leading-relaxed font-semibold">
+                            Uygulama standart tarayıcılarda çalışacak şekilde derlenir. Tarayıcı CORS önlemleri nedeniyle bazı IPTV listelerinde proxy kullanılmasını gerektirebilir.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* Son Dakika Haber Kaynakları (RSS) */}
+                  <section className="space-y-2">
+                    <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">RSS HABER AKIŞI KAYNAKLARI</h3>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10 space-y-4">
+                      <p className="text-[10px] text-zinc-400 font-semibold leading-relaxed">
+                        Canlı skor ve son dakika barlarında gösterilecek haber içeriklerini buradan özelleştirebilirsiniz. RSS veya Atom destekli XML bağlantılarını ekleyebilirsiniz.
+                      </p>
+
+                      {/* URL Ekleme Formu */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                          <Globe className="w-3 h-3 text-zinc-400" />
+                          YENİ RSS ADRESİ EKLE
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newRssUrl}
+                            onChange={(e) => setNewRssUrl(e.target.value)}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(70);
+                            }}
+                            placeholder="https://example.com/rss.xml"
+                            className={cn(
+                              "flex-1 bg-white/5 border border-white/10 px-3.5 py-2.5 text-xs text-white rounded-xl outline-none focus:border-green-500 focus:bg-white/10 transition-all font-semibold",
+                              settingsArea === 'content' && settingsFocus === 70 && "bg-white/10 border-white ring-4 ring-white/20 settings-focused"
+                            )}
+                          />
+                          <button
+                            onClick={() => {
+                              if (!newRssUrl.trim()) return;
+                              if (!newRssUrl.startsWith('http://') && !newRssUrl.startsWith('https://')) {
+                                showToast('Lütfen geçerli bir http:// veya https:// bağlantısı girin.', 'error');
+                                  return;
+                                }
+                                if (customRssUrls.includes(newRssUrl.trim())) {
+                                  showToast('Bu RSS kaynağı zaten listenizde mevcut.', 'info');
+                                  return;
+                                }
+                                setCustomRssUrls([...customRssUrls, newRssUrl.trim()]);
+                                setNewRssUrl('');
+                                showToast('RSS Haber kaynağı başarıyla eklendi!', 'success');
+                              }}
+                              onMouseEnter={() => {
+                                setSettingsArea('content');
+                                setSettingsFocus(71);
+                              }}
+                              className={cn(
+                                "bg-green-500 hover:bg-green-600 text-white px-4 py-2 text-xs font-black uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center gap-1 shrink-0",
+                                settingsArea === 'content' && settingsFocus === 71 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                              )}
+                            >
+                              <Plus className="w-4 h-4" />
+                              EKLE
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Mevcut Kaynaklar Listesi */}
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                            <ListIcon className="w-3 h-3 text-zinc-400" />
+                            AKTİF HABER KAYNAKLARI ({customRssUrls ? customRssUrls.length : 0})
+                          </label>
+                          {!customRssUrls || customRssUrls.length === 0 ? (
+                            <div className="bg-black/20 p-4 text-center rounded-xl border border-white/5">
+                              <span className="text-[10px] font-bold text-zinc-500 block uppercase tracking-wider">Tanımlı RSS adresi yok. Varsayılanlar kullanılacak.</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 no-scrollbar">
+                              {customRssUrls.map((url, index) => (
+                                <div key={url + index} className="flex items-center justify-between bg-black/35 p-2 px-3 rounded-xl border border-white/5 group">
+                                  <span className="text-[10px] text-zinc-300 font-mono font-bold truncate flex-1 mr-3">{url}</span>
+                                  <button
+                                    onClick={() => {
+                                      const updated = customRssUrls.filter((_, i) => i !== index);
+                                      setCustomRssUrls(updated);
+                                      showToast('RSS Kaynağı başarıyla silindi.', 'info');
+                                    }}
+                                    className="p-1 hover:bg-red-500/10 text-zinc-500 hover:text-red-400 rounded-lg transition-colors cursor-pointer"
+                                    title="Kaynağı Sil"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Varsayılana Sıfırla Butonu */}
+                        <div className="flex justify-end">
+                          <button
+                            onClick={() => {
+                              setCustomRssUrls([
+                                'https://www.trtspor.com.tr/rss.xml',
+                                'https://www.ntvspor.net/rss'
+                              ]);
+                              showToast('Haber kaynakları varsayılan TRT Spor & NTV Spor olarak sıfırlandı.', 'success');
+                            }}
+                            onMouseEnter={() => {
+                              setSettingsArea('content');
+                              setSettingsFocus(75);
+                            }}
+                            className={cn(
+                              "text-[9px] font-black text-zinc-400 hover:text-white uppercase tracking-wider bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 transition-all cursor-pointer flex items-center gap-1.5",
+                              settingsArea === 'content' && settingsFocus === 75 && "ring-4 ring-white settings-focused"
+                            )}
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            VARSAYILANLARI YÜKLE
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
                   {/* Playlist Yönetimi */}
                   <section className="space-y-2">
                     <h3 className="text-zinc-400 text-[10px] font-black uppercase tracking-[0.2em] px-1">Bağlantı</h3>
@@ -1898,7 +2203,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={() => setTmdbEnabled(!tmdbEnabled)}
                         onMouseEnter={() => {
                           setSettingsArea('content');
-                          setSettingsFocus(2);
+                          setSettingsFocus(4);
                         }}
                         className={cn(
                           "w-full p-4 flex items-center justify-between transition-all border-2",
@@ -1906,7 +2211,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           uiMode === 'classic' && "rounded-none",
                           uiMode === 'minimalist' && "rounded-none border-0",
                           tmdbEnabled ? "bg-white/10 border-white text-white" : "bg-white/5 border-transparent text-zinc-500",
-                          settingsArea === 'content' && settingsFocus === 2 && "ring-4 ring-white scale-105 z-10 settings-focused"
+                          settingsArea === 'content' && settingsFocus === 4 && "ring-4 ring-white scale-105 z-10 settings-focused"
                         )}
                       >
                         <div className="flex items-center gap-3">
@@ -1938,7 +2243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onChange={(e) => setGeminiApiKey(e.target.value)}
                             onMouseEnter={() => {
                               setSettingsArea('content');
-                              setSettingsFocus(3);
+                              setSettingsFocus(5);
                             }}
                             placeholder="Gemini API Key"
                             className={cn(
@@ -1946,7 +2251,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               uiMode === 'modern' && "rounded-xl focus:bg-white/10",
                               uiMode === 'classic' && "rounded-none focus:bg-zinc-900",
                               uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
-                              settingsArea === 'content' && settingsFocus === 3 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
+                              settingsArea === 'content' && settingsFocus === 5 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
                             )}
                           />
                         </div>
@@ -1964,7 +2269,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onChange={(e) => setTmdbApiKey(e.target.value)}
                             onMouseEnter={() => {
                               setSettingsArea('content');
-                              setSettingsFocus(4);
+                              setSettingsFocus(6);
                             }}
                             placeholder="TMDB API Key"
                             className={cn(
@@ -1972,7 +2277,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               uiMode === 'modern' && "rounded-xl focus:bg-white/10",
                               uiMode === 'classic' && "rounded-none focus:bg-zinc-900",
                               uiMode === 'minimalist' && "rounded-none border-0 bg-zinc-900",
-                              settingsArea === 'content' && settingsFocus === 4 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
+                              settingsArea === 'content' && settingsFocus === 6 && "bg-white/10 border-white ring-2 ring-white/20 settings-focused"
                             )}
                           />
                         </div>

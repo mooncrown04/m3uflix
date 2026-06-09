@@ -155,20 +155,161 @@ async function startServer() {
     }
   });
   
-  // Live News Endpoint (Turkish News)
+  // Helper functions for RSS parsing and cleaning
+  function cleanHtmlTags(str: string): string {
+    if (!str) return "";
+    return str
+      .replace(/<[^>]*>/g, '') // strip HTML tags
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function formatRssDate(dateStr: string): string {
+    if (!dateStr) return 'Mevcut';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) {
+        return dateStr.split(" ").slice(0, 4).join(" ") || 'Mevcut';
+      }
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      
+      if (diffMins < 1) return 'Az önce';
+      if (diffMins < 60) return `${diffMins} dk önce`;
+      if (diffHours < 24) return `${diffHours} saat önce`;
+      return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+    } catch (e) {
+      return 'Günün haberi';
+    }
+  }
+
+  function parseRssXml(xmlText: string, defaultSource: string = "RSS"): { id: string; title: string; source: string; time: string; url?: string; category?: string }[] {
+    const items: any[] = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+    let match;
+    let counter = 0;
+
+    const isAtom = xmlText.includes("<entry") || xmlText.includes("<feed");
+
+    if (isAtom) {
+      const entryRegex = /<entry>([\s\S]*?)<\/entry>/gi;
+      while ((match = entryRegex.exec(xmlText)) !== null && counter < 15) {
+        const entryContent = match[1];
+        const titleMatch = entryContent.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const linkMatch = entryContent.match(/<link[^>]+href=["']([^"']+)["']/i) || entryContent.match(/<link[^>]*>([\s\S]*?)<\/link>/i);
+        const dateMatch = entryContent.match(/<published[^>]*>([\s\S]*?)<\/published>/i) || entryContent.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
+        
+        const title = titleMatch ? titleMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim() : "Haber";
+        const url = linkMatch ? linkMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim() : "";
+        const dateStr = dateMatch ? dateMatch[1].trim() : "";
+        
+        items.push({
+          id: `rss_${Date.now()}_${counter++}`,
+          title: cleanHtmlTags(title),
+          source: defaultSource,
+          time: formatRssDate(dateStr),
+          url: url,
+          category: "Gündem"
+        });
+      }
+    } else {
+      let sourceName = defaultSource;
+      const channelTitleMatch = xmlText.match(/<channel>[\s\S]*?<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (channelTitleMatch) {
+        sourceName = channelTitleMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim();
+        if (sourceName.length > 25) sourceName = sourceName.substring(0, 25) + "...";
+      }
+
+      while ((match = itemRegex.exec(xmlText)) !== null && counter < 15) {
+        const itemContent = match[1];
+        const titleMatch = itemContent.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const linkMatch = itemContent.match(/<link[^>]*>([\s\S]*?)<\/link>/i);
+        const dateMatch = itemContent.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i);
+        const categoryMatch = itemContent.match(/<category[^>]*>([\s\S]*?)<\/category>/i);
+        
+        const title = titleMatch ? titleMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim() : "Haber";
+        const url = linkMatch ? linkMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim() : "";
+        const dateStr = dateMatch ? dateMatch[1].trim() : "";
+        const category = categoryMatch ? categoryMatch[1].replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim() : "Spor";
+        
+        items.push({
+          id: `rss_${Date.now()}_${counter++}_${Math.random().toString(36).substring(2, 6)}`,
+          title: cleanHtmlTags(title),
+          source: cleanHtmlTags(sourceName),
+          time: formatRssDate(dateStr),
+          url: url,
+          category: cleanHtmlTags(category)
+        });
+      }
+    }
+
+    return items;
+  }
+
+  // Live News Endpoint with RSS support
   app.get("/api/news", async (req, res) => {
     try {
-      const turkishNews = [
-        { id: 'n1', title: 'Türkiye genelinde hava sıcaklıkları mevsim normallerinin üzerinde seyredecek.', source: 'TRT Haber', time: '10 dk önce', category: 'Gündem' },
-        { id: 'n2', title: 'Merkez Bankası faiz kararını açıkladı: Politika faizi sabit tutuldu.', source: 'AA', time: '25 dk önce', category: 'Ekonomi' },
-        { id: 'n3', title: 'Yeni konut projeleri için düşük faizli kredi paketi hazırlığı başladı.', source: 'Hürriyet', time: '45 dk önce', category: 'Ekonomi' },
-        { id: 'n4', title: 'Millî Eğitim Bakanlığı tatil takviminde değişikliğe gitti.', source: 'TRT Haber', time: '1 saat önce', category: 'Eğitim' },
-        { id: 'n5', title: 'Teknoloji festivali TEKNOFEST için başvurular rekor düzeye ulaştı.', source: 'Sabah', time: '2 saat önce', category: 'Teknoloji' },
-        { id: 'n6', title: 'Yerli otomobil TOGG yeni modelini uluslararası fuarda tanıttı.', source: 'AA', time: '3 saat önce', category: 'Otomobil' }
-      ];
-      res.json(turkishNews);
+      let rssUrls: string[] = [];
+      const queryUrls = req.query.urls as string;
+      
+      if (queryUrls) {
+        rssUrls = queryUrls.split(",").map(url => url.trim()).filter(Boolean);
+      } else {
+        // Default high-quality Turkish sports RSS feeds
+        rssUrls = [
+          'https://www.trtspor.com.tr/rss.xml',
+          'https://www.ntvspor.net/rss'
+        ];
+      }
+
+      const parsedFeeds = await Promise.all(rssUrls.map(async (url) => {
+        try {
+          const response = await fetch(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            },
+            timeout: 5000
+          });
+          if (!response.ok) return [];
+          const text = await response.text();
+          
+          let parsedSource = "Spor";
+          if (url.includes("ntvspor")) parsedSource = "NTV Spor";
+          else if (url.includes("trtspor")) parsedSource = "TRT Spor";
+          else if (url.includes("aspor")) parsedSource = "A Spor";
+          else if (url.includes("fotomac")) parsedSource = "Fotomaç";
+
+          return parseRssXml(text, parsedSource);
+        } catch (err) {
+          console.error(`Failed to fetch RSS from ${url}:`, err);
+          return [];
+        }
+      }));
+
+      let allNews = parsedFeeds.flat();
+
+      // Fallback/Backup news items to ensure ticker is never empty if feeds fail
+      if (allNews.length === 0) {
+        allNews = [
+          { id: 'n1', title: 'Türkiye genelinde sportif etkinlikler tüm hızıyla devam ediyor.', source: 'TRT Spor', time: '10 dk önce', category: 'Gündem' },
+          { id: 'n2', title: 'Süper Lig transfer dönemi hazırlıkları hız kazandı.', source: 'A Spor', time: '25 dk önce', category: 'Ekonomi' },
+          { id: 'n3', title: 'Yeni spor yatırımları ve tesisleri projesi duyuruldu.', source: 'Haber', time: '45 dk önce', category: 'Ekonomi' },
+          { id: 'n4', title: 'Milli voleybol takımı dünya arenalarında rekor kırıyor.', source: 'TRT Spor', time: '1 saat önce', category: 'Eğitim' },
+          { id: 'n5', title: 'Genç yeteneklerin keşfedileceği ulusal altyapı ligleri başlıyor.', source: 'Fanatik', time: '2 saat önce', category: 'Teknoloji' }
+        ];
+      }
+
+      res.json(allNews.slice(0, 40)); // Return top 40 news items maximum
     } catch (error) {
-      res.status(500).json({ error: "Failed to fetch news" });
+      console.error("Failed to compile RSS news feed:", error);
+      res.status(500).json({ error: "Failed to fetch live RSS news" });
     }
   });
 
@@ -222,6 +363,50 @@ async function startServer() {
     }
   });
 
+  // Weather Proxy Endpoint
+  app.get("/api/weather", async (req, res) => {
+    const city = req.query.city as string;
+    if (!city) {
+      return res.status(400).json({ error: "City parameter is required" });
+    }
+
+    try {
+      // 1. Geocode
+      const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+      const geoRes = await fetch(geoUrl, { timeout: 5000 });
+      const geoData: any = await geoRes.json();
+
+      if (geoData.results && geoData.results.length > 0) {
+        const { latitude, longitude } = geoData.results[0];
+        // 2. Fetch weather
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`;
+        const weatherRes = await fetch(weatherUrl, { timeout: 5000 });
+        const weatherData: any = await weatherRes.json();
+
+        return res.json({
+          temp: Math.round(weatherData.current_weather.temperature),
+          code: weatherData.current_weather.weathercode,
+          isDay: weatherData.current_weather.is_day,
+          city: city
+        });
+      }
+
+      res.status(404).json({ error: "City not found" });
+    } catch (error: any) {
+      console.error("Weather proxy error:", error.message || error);
+      // Fallback weather data so the widget never crashes or stays blank
+      const hash = city.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const tempFallback = 15 + (hash % 15); // Stable pseudo-random temperature between 15°C and 30°C
+      res.json({
+        temp: tempFallback,
+        code: 0, // Clear sky
+        isDay: 1,
+        city: city,
+        isFallback: true
+      });
+    }
+  });
+
   // CORS Proxy Endpoint
   app.get("/api/proxy", async (req, res) => {
     const targetUrl = req.query.url as string;
@@ -237,26 +422,31 @@ async function startServer() {
         'Connection': 'keep-alive',
       };
 
-      // Add Referer and Origin based on target URL
-      try {
-        const url = new URL(targetUrl);
-        headers['Referer'] = url.origin + '/';
-        headers['Origin'] = url.origin;
-      } catch (e) {
-        // ignore
+      // Add Referer and Origin based on target URL only if it's not a storage provider (to avoid SSRF/spoofing protection filters)
+      const isStorageProvider = targetUrl.includes("dropbox.com") || 
+                               targetUrl.includes("dropboxusercontent.com") ||
+                               targetUrl.includes("github") ||
+                               targetUrl.includes("google") ||
+                               targetUrl.includes("gitlab");
+
+      if (!isStorageProvider) {
+        try {
+          const url = new URL(targetUrl);
+          headers['Referer'] = url.origin + '/';
+          headers['Origin'] = url.origin;
+        } catch (e) {
+          // ignore
+        }
       }
 
       if (req.headers['range']) {
         headers['Range'] = req.headers['range'] as string;
       }
 
-      // Use a longer timeout and ignore SSL errors to prevent common IPTV stream failures
+      // Use a longer timeout and ignore SSL errors (globally handled by NODE_TLS_REJECT_UNAUTHORIZED = "0")
       const response = await fetch(targetUrl, { 
         timeout: 30000,
         headers,
-        agent: (url: URL) => {
-          return url.protocol === 'https:' ? httpsAgent : httpAgent;
-        },
         redirect: 'follow'
       });
       

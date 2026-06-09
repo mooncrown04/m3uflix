@@ -35,6 +35,8 @@ interface SettingsState {
   autoPreviewEnabled: boolean;
   channelSurfEnabled: boolean;
   loadingStyle: 'default' | 'glow' | 'minimal' | 'fire';
+  buildMethod: 'web' | 'android';
+  customRssUrls: string[];
   
   // Actions
   setUiMode: (mode: UIMode | ((prev: UIMode) => UIMode)) => void;
@@ -69,6 +71,8 @@ interface SettingsState {
   setAutoPreviewEnabled: (enabled: boolean | ((prev: boolean) => boolean)) => void;
   setChannelSurfEnabled: (enabled: boolean | ((prev: boolean) => boolean)) => void;
   setLoadingStyle: (style: 'default' | 'glow' | 'minimal' | 'fire' | 'classic' | 'pulse' | 'glitch' | 'bars' | 'orbit' | ((prev: any) => any)) => void;
+  setBuildMethod: (method: 'web' | 'android') => void;
+  setCustomRssUrls: (urls: string[] | ((prev: string[]) => string[])) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -106,6 +110,11 @@ export const useSettingsStore = create<SettingsState>()(
       autoPreviewEnabled: true,
       channelSurfEnabled: false,
       loadingStyle: 'default',
+      buildMethod: 'android',
+      customRssUrls: [
+        'https://www.trtspor.com.tr/rss.xml',
+        'https://www.ntvspor.net/rss'
+      ],
 
       setUiMode: (mode) => set((state) => ({ uiMode: typeof mode === 'function' ? (mode as any)(state.uiMode) : mode })),
       setThemeColor: (color) => set((state) => ({ themeColor: typeof color === 'function' ? (color as any)(state.themeColor) : color })),
@@ -141,6 +150,10 @@ export const useSettingsStore = create<SettingsState>()(
       setAutoPreviewEnabled: (enabled) => set((state) => ({ autoPreviewEnabled: typeof enabled === 'function' ? (enabled as any)(state.autoPreviewEnabled) : enabled })),
       setChannelSurfEnabled: (enabled) => set((state) => ({ channelSurfEnabled: typeof enabled === 'function' ? (enabled as any)(state.channelSurfEnabled) : enabled })),
       setLoadingStyle: (style) => set((state) => ({ loadingStyle: typeof style === 'function' ? (style as any)(state.loadingStyle) : style })),
+      setBuildMethod: (buildMethod) => set({ buildMethod }),
+      setCustomRssUrls: (customRssUrls) => set((state) => ({ 
+        customRssUrls: typeof customRssUrls === 'function' ? customRssUrls(state.customRssUrls) : customRssUrls 
+      })),
     }),
     {
       name: 'moon-settings-storage',

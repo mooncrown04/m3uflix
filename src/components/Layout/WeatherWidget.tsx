@@ -11,18 +11,14 @@ export const WeatherWidget: React.FC<WeatherWidgetProps> = ({ city, themeColor }
   useEffect(() => {
     const fetchWeather = async () => {
       try {
-        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`);
-        const geoData = await geoRes.json();
-        if (geoData.results && geoData.results.length > 0) {
-          const { latitude, longitude } = geoData.results[0];
-          const weatherRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`);
-          const weatherData = await weatherRes.json();
-          setWeather({
-            temp: Math.round(weatherData.current_weather.temperature),
-            code: weatherData.current_weather.weathercode,
-            isDay: weatherData.current_weather.is_day
-          });
-        }
+        const res = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
+        if (!res.ok) throw new Error('API error');
+        const data = await res.json();
+        setWeather({
+          temp: data.temp,
+          code: data.code,
+          isDay: data.isDay
+        });
       } catch (err) {
         console.error('Weather fetch failed:', err);
       }

@@ -24,6 +24,10 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
   const [standings, setStandings] = useState<LeagueStanding[]>([]);
   const [isLoadingStandings, setIsLoadingStandings] = useState(false);
 
+  // Focus navigation states for D-pad remote and hybrid mouse/touch
+  const [focusArea, setFocusArea] = useState<'viewMode' | 'leagues' | 'list'>('viewMode');
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
+
   const leagues = ['Hepsi', ...Array.from(new Set(matches.map(m => m.league)))];
 
   useEffect(() => {
@@ -52,6 +56,154 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
     : matches.filter(m => m.league === activeLeague);
 
   const currentStanding = standings.find(s => s.league === (activeLeague === 'Hepsi' ? 'Trendyol Süper Lig' : activeLeague));
+
+  // Reset focus on mode change
+  useEffect(() => {
+    if (isOpen) {
+      setFocusArea('viewMode');
+      setFocusedIndex(viewMode === 'scores' ? 0 : 1);
+    }
+  }, [viewMode, isOpen]);
+
+  // Reset focus when league template changes
+  useEffect(() => {
+    if (isOpen) {
+      setFocusArea('leagues');
+      setFocusedIndex(leagues.indexOf(activeLeague));
+    }
+  }, [activeLeague, isOpen]);
+
+  // Unified Keydown Navigation Listener (runs in capture phase to override global map, stops propagation)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      let key = e.key;
+      if (key === 'Select' || key === 'OK') key = 'Enter';
+      if (key === 'Back' || key === 'GoBack' || key === 'XF86Back') key = 'Backspace';
+
+      // Capture Escape / Backspace to close
+      if (key === 'Escape' || key === 'Backspace') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (focusArea === 'viewMode') {
+          setFocusArea('leagues');
+          setFocusedIndex(Math.max(0, leagues.indexOf(activeLeague)));
+        } else if (focusArea === 'leagues') {
+          if (viewMode === 'scores') {
+            if (filteredMatches.length > 0) {
+              setFocusArea('list');
+              setFocusedIndex(0);
+            }
+          } else {
+            if (currentStanding && currentStanding.standings.length > 0) {
+              setFocusArea('list');
+              setFocusedIndex(0);
+            }
+          }
+        } else if (focusArea === 'list') {
+          const maxCount = viewMode === 'scores' 
+            ? filteredMatches.length 
+            : (currentStanding ? currentStanding.standings.length : 0);
+          if (focusedIndex < maxCount - 1) {
+            setFocusedIndex(prev => prev + 1);
+            // Scroll matching element into view
+            setTimeout(() => {
+              const activeEl = document.querySelector('.sports-focus-active');
+              activeEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }, 10);
+          }
+        }
+      }
+
+      if (key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (focusArea === 'list') {
+          if (focusedIndex > 0) {
+            setFocusedIndex(prev => prev - 1);
+            setTimeout(() => {
+              const activeEl = document.querySelector('.sports-focus-active');
+              activeEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }, 10);
+          } else {
+            setFocusArea('leagues');
+            setFocusedIndex(Math.max(0, leagues.indexOf(activeLeague)));
+          }
+        } else if (focusArea === 'leagues') {
+          setFocusArea('viewMode');
+          setFocusedIndex(viewMode === 'scores' ? 0 : 1);
+        }
+      }
+
+      if (key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (focusArea === 'viewMode') {
+          setFocusedIndex(0);
+        } else if (focusArea === 'leagues') {
+          if (focusedIndex > 0) {
+            const nextIdx = focusedIndex - 1;
+            setFocusedIndex(nextIdx);
+            setActiveLeague(leagues[nextIdx]);
+            // Scroll headers horizontally
+            setTimeout(() => {
+              const activeHeader = document.querySelector('.sports-header-active');
+              activeHeader?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+            }, 10);
+          }
+        }
+      }
+
+      if (key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (focusArea === 'viewMode') {
+          setFocusedIndex(1);
+        } else if (focusArea === 'leagues') {
+          if (focusedIndex < leagues.length - 1) {
+            const nextIdx = focusedIndex + 1;
+            setFocusedIndex(nextIdx);
+            setActiveLeague(leagues[nextIdx]);
+            setTimeout(() => {
+              const activeHeader = document.querySelector('.sports-header-active');
+              activeHeader?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+            }, 10);
+          }
+        }
+      }
+
+      if (key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (focusArea === 'viewMode') {
+          const nextMode = focusedIndex === 0 ? 'scores' : 'standings';
+          setViewMode(nextMode);
+        } else if (focusArea === 'leagues') {
+          setActiveLeague(leagues[focusedIndex]);
+        } else if (focusArea === 'list') {
+          if (viewMode === 'scores') {
+            const match = filteredMatches[focusedIndex];
+            if (match && match.channelId && onPlayChannel) {
+              onPlayChannel(match.channelId);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [isOpen, focusArea, focusedIndex, viewMode, leagues, activeLeague, filteredMatches, currentStanding, onPlayChannel, onClose]);
 
   return (
     <AnimatePresence>
@@ -88,7 +240,7 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
                 </div>
                 <button 
                   onClick={onClose}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
                 >
                   <X className="w-6 h-6 text-zinc-400" />
                 </button>
@@ -97,19 +249,29 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
               {/* Score/Standing Toggle */}
               <div className="flex bg-white/5 p-1 rounded-xl">
                 <button
-                  onClick={() => setViewMode('scores')}
+                  onClick={() => {
+                    setViewMode('scores');
+                    setFocusArea('viewMode');
+                    setFocusedIndex(0);
+                  }}
                   className={cn(
-                    "flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition-all",
-                    viewMode === 'scores' ? "bg-white text-black rounded-lg shadow-lg" : "text-zinc-500 hover:text-white"
+                    "flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center",
+                    viewMode === 'scores' ? "bg-white text-black rounded-lg shadow-lg" : "text-zinc-500 hover:text-white",
+                    focusArea === 'viewMode' && focusedIndex === 0 && "ring-2 ring-green-400 scale-[1.02]"
                   )}
                 >
                   Canlı Skor
                 </button>
                 <button
-                  onClick={() => setViewMode('standings')}
+                  onClick={() => {
+                    setViewMode('standings');
+                    setFocusArea('viewMode');
+                    setFocusedIndex(1);
+                  }}
                   className={cn(
-                    "flex-1 py-2 text-[10px] font-black uppercase tracking-widest transition-all",
-                    viewMode === 'standings' ? "bg-white text-black rounded-lg shadow-lg" : "text-zinc-500 hover:text-white"
+                    "flex-1 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer text-center",
+                    viewMode === 'standings' ? "bg-white text-black rounded-lg shadow-lg" : "text-zinc-500 hover:text-white",
+                    focusArea === 'viewMode' && focusedIndex === 1 && "ring-2 ring-green-400 scale-[1.02]"
                   )}
                 >
                   Puan Durumu
@@ -119,15 +281,20 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
 
             {/* League Tabs */}
             <div className="p-4 border-b border-white/5 flex gap-2 overflow-x-auto no-scrollbar bg-zinc-900/30">
-              {leagues.map((league) => (
+              {leagues.map((league, idx) => (
                 <button
                   key={league}
-                  onClick={() => setActiveLeague(league)}
+                  onClick={() => {
+                    setActiveLeague(league);
+                    setFocusArea('leagues');
+                    setFocusedIndex(idx);
+                  }}
                   className={cn(
-                    "px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
+                    "px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap cursor-pointer sports-header-button",
                     activeLeague === league 
                       ? "bg-white text-black" 
-                      : "bg-white/5 text-zinc-500 hover:bg-white/10"
+                      : "bg-white/5 text-zinc-500 hover:bg-white/10",
+                    focusArea === 'leagues' && focusedIndex === idx && "ring-2 ring-green-400 scale-105 sports-header-active"
                   )}
                 >
                   {league}
@@ -144,11 +311,18 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
                     <p className="text-sm font-bold uppercase tracking-widest">Şu an canlı maç bulunmuyor</p>
                   </div>
                 ) : (
-                  filteredMatches.map((match) => (
+                  filteredMatches.map((match, idx) => (
                     <motion.div
                       layout
                       key={match.id}
-                      className="bg-white/5 border border-white/5 rounded-3xl p-5 space-y-4 hover:border-white/20 transition-all group"
+                      onPointerDown={() => {
+                        setFocusArea('list');
+                        setFocusedIndex(idx);
+                      }}
+                      className={cn(
+                        "bg-white/5 border border-white/5 rounded-3xl p-5 space-y-4 hover:border-white/20 transition-all group",
+                        focusArea === 'list' && focusedIndex === idx && "ring-2 ring-green-400 bg-white/10 border-white/20 sports-focus-active"
+                      )}
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em]">{match.league}</span>
@@ -186,7 +360,12 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
                       {match.channelId && (
                         <button
                           onClick={() => onPlayChannel?.(match.channelId!)}
-                          className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl flex items-center justify-center gap-2 transition-all group-hover:bg-white group-hover:text-black"
+                          className={cn(
+                            "w-full py-3 border rounded-2xl flex items-center justify-center gap-2 transition-all cursor-pointer",
+                            focusArea === 'list' && focusedIndex === idx
+                              ? "bg-white text-black border-white"
+                              : "bg-white/5 hover:bg-white/10 border-white/5 text-zinc-300 group-hover:bg-white group-hover:text-black"
+                          )}
                         >
                           <Star className="w-4 h-4" />
                           <span className="text-[10px] font-black uppercase tracking-widest">Maçı İzle</span>
@@ -215,8 +394,18 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                          {currentStanding.standings.map((team) => (
-                            <tr key={team.team} className="hover:bg-white/5 transition-colors group">
+                          {currentStanding.standings.map((team, idx) => (
+                            <tr 
+                              key={team.team} 
+                              onPointerDown={() => {
+                                setFocusArea('list');
+                                setFocusedIndex(idx);
+                              }}
+                              className={cn(
+                                "hover:bg-white/5 transition-colors group cursor-pointer",
+                                focusArea === 'list' && focusedIndex === idx && "bg-white/10 text-white sports-focus-active"
+                              )}
+                            >
                               <td className="py-4 px-4 text-center font-black text-zinc-500">{team.rank}</td>
                               <td className="py-4 px-2 uppercase font-black text-zinc-300 group-hover:text-white flex items-center gap-3">
                                 {team.logo && (
@@ -256,3 +445,4 @@ export const SportsDashboard: React.FC<SportsDashboardProps> = ({
     </AnimatePresence>
   );
 };
+
