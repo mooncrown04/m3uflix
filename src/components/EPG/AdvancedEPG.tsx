@@ -5,6 +5,7 @@ import { M3UChannel } from '../../utils/m3uParser';
 import { EPGData, EPGProgram } from '../../utils/epgParser';
 import { cn } from '../../lib/utils';
 import { FixedSizeList as List, areEqual } from 'react-window';
+import { normalizeRemoteKey } from '../../utils/keyUtils';
 
 interface AdvancedEPGProps {
   channels: M3UChannel[];
@@ -112,13 +113,7 @@ export const AdvancedEPG: React.FC<AdvancedEPGProps> = ({ channels, epgData, onC
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
 
-      const rawKey = e.key;
-      let key = rawKey;
-
-      if (rawKey === keyMap.up) key = 'ArrowUp';
-      else if (rawKey === keyMap.down) key = 'ArrowDown';
-      else if (rawKey === keyMap.enter || rawKey === 'OK' || rawKey === 'Select') key = 'Enter';
-      else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
+      const key = normalizeRemoteKey(e, keyMap);
 
       switch (key) {
         case 'ArrowUp':

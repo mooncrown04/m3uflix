@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import { EPGData, EPGProgram } from '../../utils/epgParser';
 import { M3UChannel } from '../../types';
 import { FixedSizeList as List, areEqual } from 'react-window';
+import { normalizeRemoteKey } from '../../utils/keyUtils';
 
 interface EPGTimelineProps {
   isOpen: boolean;
@@ -237,7 +238,9 @@ export const EPGTimeline: React.FC<EPGTimelineProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (document.activeElement?.tagName === 'INPUT') return;
 
-      switch (e.key) {
+      const key = normalizeRemoteKey(e);
+
+      switch (key) {
         case 'ArrowUp':
           e.preventDefault();
           setSelectedChannelIndex(prev => {

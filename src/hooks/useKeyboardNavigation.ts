@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, Dispatch, SetStateAction } from 'react';
 import { NavContext, M3UChannel, KeyMap } from '../types';
 import { DEFAULT_M3U_URL, MULTI_CATEGORIES } from '../constants';
+import { normalizeRemoteKey } from '../utils/keyUtils';
 
 interface KeyboardNavigationProps {
   channels: M3UChannel[];
@@ -189,26 +190,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
   }, [activeRow, groupedChannels, filterHeroButtons, primaryHeroButtons, activeCol, setActiveCol, setActiveRow, navContext]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    let rawKey = e.key;
-    if (rawKey === 'Select' || rawKey === 'OK') rawKey = 'Enter';
-
-    // Map raw key to logical key
-    let key = rawKey;
-    if (rawKey === keyMap.up) key = 'ArrowUp';
-    else if (rawKey === keyMap.down) key = 'ArrowDown';
-    else if (rawKey === keyMap.left) key = 'ArrowLeft';
-    else if (rawKey === keyMap.right) key = 'ArrowRight';
-    else if (rawKey === keyMap.enter) key = 'Enter';
-    else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
-    else if (rawKey === keyMap.settings) key = 's';
-    else if (rawKey === keyMap.guide) key = 'g';
-    else if (rawKey === keyMap.voice) key = 'v';
-    else if (rawKey === keyMap.miniPlayer) key = 'm';
-    else if (rawKey === keyMap.playPause) key = 'o';
-    else if (rawKey === keyMap.volumeUp) key = 'VolumeUp';
-    else if (rawKey === keyMap.volumeDown) key = 'VolumeDown';
-    else if (rawKey === keyMap.channelUp) key = 'ChannelUp';
-    else if (rawKey === keyMap.channelDown) key = 'ChannelDown';
+    let key = normalizeRemoteKey(e, keyMap);
     
     // Handle number keys for quick channel access
     const isNumber = /^\d$/.test(key);
@@ -326,18 +308,18 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
     }
 
     // Handle Volume and Channel keys globally
-    if (e.key === 'VolumeUp') {
+    if (key === 'VolumeUp') {
       e.preventDefault();
       updateGlobalVolume(Math.min(1, globalVolume + 0.05));
       setIsMuted(false);
       return;
     }
-    if (e.key === 'VolumeDown') {
+    if (key === 'VolumeDown') {
       e.preventDefault();
       updateGlobalVolume(Math.max(0, globalVolume - 0.05));
       return;
     }
-    if (e.key === 'ChannelUp') {
+    if (key === 'ChannelUp') {
       if (currentChannel) {
         e.preventDefault();
         const currentIndex = channels.findIndex(c => c.id === currentChannel.id);
@@ -348,7 +330,7 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
         return;
       }
     }
-    if (e.key === 'ChannelDown') {
+    if (key === 'ChannelDown') {
       if (currentChannel) {
         e.preventDefault();
         const currentIndex = channels.findIndex(c => c.id === currentChannel.id);
@@ -360,17 +342,11 @@ export function useKeyboardNavigation(props: KeyboardNavigationProps) {
       }
     }
 
-    // Normalize TV remote keys
-    if (key === 'Back' || key === 'GoBack' || key === 'XF86Back' || key === 'MediaStop') key = 'Backspace';
-    if (key === 'Up') key = 'ArrowUp';
-    if (key === 'Down') key = 'ArrowDown';
-    if (key === 'Left') key = 'ArrowLeft';
-    if (key === 'Right') key = 'ArrowRight';
+    // Normalize TV remote keys if any custom remain
     if (key === 'Tab') {
       e.preventDefault();
       key = e.shiftKey ? 'ArrowLeft' : 'ArrowRight';
     }
-    if (key === 'MediaPlayPause' || key === 'MediaPlay' || key === 'MediaPause') key = 'Enter';
 
     if (navContext === 'sports-dashboard') {
       if (key === 'Escape' || key === 'Backspace') {

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Search, Command, Tv, Folder, Palette, X, Sparkles, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { M3UChannel } from '../../types';
+import { normalizeRemoteKey } from '../../utils/keyUtils';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -39,13 +40,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const totalItems = filteredChannels.length + filteredCategories.length;
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    const rawKey = e.key;
-    let key = rawKey;
-
-    if (rawKey === keyMap.up) key = 'ArrowUp';
-    else if (rawKey === keyMap.down) key = 'ArrowDown';
-    else if (rawKey === keyMap.enter || rawKey === 'OK' || rawKey === 'Select') key = 'Enter';
-    else if (rawKey === keyMap.back || rawKey === 'Escape') key = 'Escape';
+    const key = normalizeRemoteKey(e, keyMap);
 
     if (key === 'ArrowDown') {
       e.preventDefault();
@@ -61,7 +56,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         onSelectCategory(filteredCategories[selectedIndex - filteredChannels.length]);
       }
       onClose();
-    } else if (key === 'Escape') {
+    } else if (key === 'Escape' || key === 'Backspace') {
       onClose();
     }
   }, [totalItems, selectedIndex, filteredChannels, filteredCategories, onSelectChannel, onSelectCategory, onClose, keyMap]);

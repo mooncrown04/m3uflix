@@ -18,6 +18,7 @@ import { useChannelStore } from '../../store/useChannelStore';
 import { useNavigationStore } from '../../store/useNavigationStore';
 import { useRemoteControl } from '../../hooks/useRemoteControl';
 import { useToasts } from '../../hooks/useToasts';
+import { normalizeRemoteKey } from '../../utils/keyUtils';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -79,18 +80,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setEpgUrl
   } = useChannelStore();
 
+  const [isUsingKeyboard, setIsUsingKeyboard] = useState(false);
+  const isActionFromKeyboardRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleWindowKeyDown = () => {
+      setIsUsingKeyboard(true);
+    };
+
+    const handleWindowMouseMove = () => {
+      setIsUsingKeyboard(false);
+    };
+
+    const handleWindowMouseDown = () => {
+      setIsUsingKeyboard(false);
+    };
+
+    window.addEventListener('keydown', handleWindowKeyDown, { capture: true });
+    window.addEventListener('mousemove', handleWindowMouseMove, { capture: true });
+    window.addEventListener('mousedown', handleWindowMouseDown, { capture: true });
+    window.addEventListener('touchstart', handleWindowMouseDown, { capture: true });
+
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeyDown, { capture: true });
+      window.removeEventListener('mousemove', handleWindowMouseMove, { capture: true });
+      window.removeEventListener('mousedown', handleWindowMouseDown, { capture: true });
+      window.removeEventListener('touchstart', handleWindowMouseDown, { capture: true });
+    };
+  }, [isOpen]);
+
+  const navigationStoreValues = useNavigationStore();
   const {
     setNavContext,
     setActiveRow,
     setActiveCol,
     installPrompt,
     setInstallPrompt,
-    activeSettingsTab, setActiveSettingsTab,
-    settingsArea, setSettingsArea,
-    settingsSection, setSettingsSection,
-    settingsFocus, setSettingsFocus,
-    sidebarFocus, setSidebarFocus,
-  } = useNavigationStore();
+    activeSettingsTab,
+    settingsArea,
+    settingsSection,
+    settingsFocus,
+    sidebarFocus,
+  } = navigationStoreValues;
+
+  const originalSetSettingsFocus = navigationStoreValues.setSettingsFocus;
+  const originalSetSidebarFocus = navigationStoreValues.setSidebarFocus;
+  const originalSetSettingsArea = navigationStoreValues.setSettingsArea;
+  const originalSetSettingsSection = navigationStoreValues.setSettingsSection;
+  const originalSetActiveSettingsTab = navigationStoreValues.setActiveSettingsTab;
+
+  const setSettingsFocus = useCallback((focus: any) => {
+    if (isUsingKeyboard && !isActionFromKeyboardRef.current) {
+      return;
+    }
+    originalSetSettingsFocus(focus);
+  }, [isUsingKeyboard, originalSetSettingsFocus]);
+
+  const setSidebarFocus = useCallback((focus: any) => {
+    if (isUsingKeyboard && !isActionFromKeyboardRef.current) {
+      return;
+    }
+    originalSetSidebarFocus(focus);
+  }, [isUsingKeyboard, originalSetSidebarFocus]);
+
+  const setSettingsArea = useCallback((area: any) => {
+    if (isUsingKeyboard && !isActionFromKeyboardRef.current) {
+      return;
+    }
+    originalSetSettingsArea(area);
+  }, [isUsingKeyboard, originalSetSettingsArea]);
+
+  const setSettingsSection = useCallback((section: any) => {
+    if (isUsingKeyboard && !isActionFromKeyboardRef.current) {
+      return;
+    }
+    originalSetSettingsSection(section);
+  }, [isUsingKeyboard, originalSetSettingsSection]);
+
+  const setActiveSettingsTab = useCallback((tab: any) => {
+    if (isUsingKeyboard && !isActionFromKeyboardRef.current) {
+      return;
+    }
+    originalSetActiveSettingsTab(tab);
+  }, [isUsingKeyboard, originalSetActiveSettingsTab]);
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const toggleSection = (id: string) => {
@@ -211,17 +285,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (capturingKey) return; // Prevent navigation while capturing a key
 
-      const rawKey = e.key;
-      let key = rawKey;
+      isActionFromKeyboardRef.current = true;
+      try {
+        const key = normalizeRemoteKey(e, keyMap);
 
-      if (rawKey === keyMap.up) key = 'ArrowUp';
-      else if (rawKey === keyMap.down) key = 'ArrowDown';
-      else if (rawKey === keyMap.left) key = 'ArrowLeft';
-      else if (rawKey === keyMap.right) key = 'ArrowRight';
-      else if (rawKey === keyMap.enter || rawKey === 'OK' || rawKey === 'Select') key = 'Enter';
-      else if (rawKey === keyMap.back || rawKey === 'Escape' || rawKey === 'Backspace') key = 'Backspace';
-
-      switch (key) {
+        switch (key) {
         case 'Enter':
         case 'OK':
           e.preventDefault();
@@ -541,6 +609,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
           }
           break;
+        }
+      } finally {
+        isActionFromKeyboardRef.current = false;
       }
     };
 
