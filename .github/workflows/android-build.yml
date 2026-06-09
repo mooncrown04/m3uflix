@@ -24,14 +24,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          # Cache'i manuel yönetmek veya temizlemek için bu satırı 
-          # sorun yaşarsanız kaldırabilirsiniz.
-          cache: 'npm'
+          # Cache'i sildik çünkü bozuk native binding dosyalarını saklayabiliyor
+          cache: '' 
 
       - name: Install Dependencies
-        # Hata aldığınız 'native binding' sorununu önlemek için 
-        # --force ekleyerek temiz bir kurulum yapıyoruz.
-        run: npm ci || npm install --force
+        run: |
+          # Önceki tüm kalıntıları temizle
+          rm -rf node_modules
+          rm -f package-lock.json
+          # Temiz bir kurulum yap ve native modülleri ortam için derle
+          npm install
 
       - name: Build Web Application
         run: npm run build
@@ -59,7 +61,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          # Gradle'in de temiz bir build almasını sağlamak için clean ekledik
+          # Önceki build kalıntılarını temizle ve yeni APK oluştur
           ./gradlew clean assembleDebug
 
       - name: Upload Android APK
