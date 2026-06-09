@@ -1,75 +1,61 @@
-name: Android APK Build
+name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Source Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
-          # Cache'i kapattık, native hata almamak için her seferinde temiz kurulum şart
-          cache: ''
+          node-version: 20
 
       - name: Install Dependencies
-        run: |
-          # Önceki tüm yapılandırmaları ve kilit dosyalarını temizle
-          rm -rf node_modules
-          rm -f package-lock.json
-          
-          # Linux ortamı için paketleri zorunlu olarak yeniden kur
-          npm install --cpu=x64 --os=linux
-          
-          # Ek güvenlik: Native modülleri ortam için tekrar derle
-          npm rebuild @tailwindcss/oxide
+        # Bağımlılık çakışmalarını aşmak için --legacy-peer-deps eklendi
+        run: npm install --legacy-peer-deps
 
-      - name: Build Web Application
+      - name: Build Web Project
         run: npm run build
 
-      - name: Set up JDK 17
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Initialize and Sync Capacitor Android
+      - name: Initialize Capacitor
+        # Hatayı çözmek için Capacitor paketlerine --legacy-peer-deps eklendi
         run: |
-          if [ ! -d "android" ]; then
-            echo "Android folder not found, adding platform..."
-            npx cap add android
-          else
-            echo "Android folder exists, syncing assets..."
-            npx cap sync android
+          npm install @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+          npx cap init M3UFLIX com.mooncrown.m3uflix --web-dir dist || true
+          npx cap add android || true
+          npx cap copy android
+
+      # KOTLIN ÇAKIŞMASINI ÇÖZEN ADIM
+      - name: Force Fix Kotlin Duplicates
+        run: |
+          if [ -d "android" ]; then
+            sed -i '1i\configurations.all { resolutionStrategy { force "org.jetbrains.kotlin:kotlin-stdlib:1.8.22"; exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk8"; exclude group: "org.jetbrains.kotlin", module: "kotlin-stdlib-jdk7" } }' android/app/build.gradle
           fi
 
-      - name: Build Android APK (Debug)
+      # DERLEME VE APK OLUŞTURMA
+      - name: Build APK (Gradle)
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean assembleDebug
+          # Jetifier ve AndroidX desteğiyle derleme
+          ./gradlew assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true
 
-      - name: Upload Android APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Moon-IPTV-Debug-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
+          name: m3uflix-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
